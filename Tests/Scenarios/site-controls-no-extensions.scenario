@@ -1,0 +1,22 @@
+# No extension installed and the toolbar hidden (Niche's default): hovering the sidebar's header
+# shows Copy Link and the Site Control Center's sliders in the URL field, and a press on the
+# sliders opens the Site Control Center (Share, Boost, Capture, settings), as in Arc. Until
+# 0.1.33 the sliders showed only with an extension installed, so there was no way in (#226).
+# Then View > Show Toolbar: the toolbar carries the sliders without extensions too.
+# promise: #226
+budget rss=600 stalls50=6
+niche://debug?windowSize=1280x800
+niche://open?url=${PAGE}?n=sitecontrols
+wait 3
+niche://debug?urlFieldHover=1
+expect-log url field: copyURL siteControls$
+niche://debug?urlFieldPress=siteControls
+wait 1
+expect-log url field press siteControls: pressed true, site control center shown
+niche://debug?urlFieldHover=0
+niche://action/toggleToolbar
+wait 1
+niche://debug?urlFieldHover=1
+expect-log url field: none
+niche://action/toggleToolbar
+wait 1

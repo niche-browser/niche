@@ -1,0 +1,251 @@
+# Releasing Niche
+
+Goal: a build that installs like any other Mac app. Download the DMG, drag Niche to
+Applications, open it. No right-click, no warnings. That needs three things on top of
+the plain build: a Developer ID signature with the hardened runtime, Apple's
+notarization ticket stapled to the app and the DMG, and a packaged download.
+Everything is scripted; the only manual part is obtaining the certificate once.
+
+## One-time setup
+
+1. **Apple Developer Program** membership for the account that will sign.
+2. **Developer ID Application certificate.** In Xcode → Settings → Accounts → Manage
+   Certificates, add "Developer ID Application". Export it from Keychain Access as a
+   `.p12` with a password. Note the identity string, for example
+   `Developer ID Application: Niche (ABCDE12345)`:
+   `security find-identity -v -p codesigning`.
+3. **Notarization credentials.** Create an app-specific password at appleid.apple.com.
+   Locally you can store it once: `xcrun notarytool store-credentials niche --apple-id
+   you@example.com --team-id ABCDE12345` and then set `NOTARY_KEYCHAIN_PROFILE=niche`.
+4. **GitHub secrets** on `niche-browser/niche`. `scripts/setup-release-secrets.sh DeveloperID.p12`
+   sets all of the required ones from this Mac (the update key comes from the login keychain);
+   by hand they are under Settings → Secrets and variables → Actions:
+
+   | Secret | Value |
+   |---|---|
+   | `MACOS_CERTIFICATE_P12` | `base64 -i DeveloperID.p12 \| pbcopy` |
+   | `MACOS_CERTIFICATE_PASSWORD` | the `.p12` password |
+   | `MACOS_SIGN_IDENTITY` | the identity string from step 2 |
+   | `APPLE_ID` | the Apple ID email |
+   | `APPLE_TEAM_ID` | the 10-character team id |
+   | `APPLE_APP_PASSWORD` | the app-specific password |
+   | `SPARKLE_PRIVATE_KEY` | `vendor/sparkle/bin/generate_keys --account niche -x key.txt`, the private half of `SUPublicEDKey` |
+   | `MACOS_PROVISIONING_PROFILE` | optional, for passkeys (see [Passkeys](#passkeys)) |
+   | `NICHE_GOOGLE_API_KEY` | optional, for Safe Browsing (see [Safe Browsing](#safe-browsing)) |
+
+Until these exist the Release workflow still runs: it publishes an ad-hoc build as a
+regular release (pre-releases are invisible to `releases/latest`) with the install
+steps in `.github/release-notes-unsigned.md`.
+
+## Installing unsigned builds
+
+Gatekeeper only checks files carrying the quarantine flag, which browsers set and curl
+does not. So the friction-free path for an ad-hoc build is `scripts/install.sh`, run as
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/niche-browser/niche/main/scripts/install.sh | bash
+```
+
+It downloads `releases/latest/download/Niche.zip`, replaces the app in `/Applications`
+(or `~/Applications`), quitting a running Niche first, and opens it. Rerunning it updates.
+
+The DMG path needs one manual approval: open Niche, click Done on the "could not verify"
+dialog, then System Settings → Privacy & Security → Open Anyway. Right-click → Open no
+longer bypasses Gatekeeper since macOS 15. The README and release notes
+carry both paths; keep them in step.
+
+## Cutting a release
+
+Run the manual checks in [release-checklist.md](release-checklist.md) for every area the
+release touched first.
+
+```sh
+# Tag and push. The Release workflow builds, signs, notarizes, packages and publishes.
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Artifacts land on the GitHub release: `Niche.dmg`, `Niche.zip`, `SHA256SUMS.txt`. The names
+carry no version so `releases/latest/download/Niche.dmg` always resolves; `scripts/install.sh`
+relies on that.
+
+## Locally
+
+```sh
+NICHE_VERSION=0.1.0 \
+NICHE_SIGN_IDENTITY="Developer ID Application: Niche (ABCDE12345)" \
+NOTARY_KEYCHAIN_PROFILE=niche \
+scripts/release.sh
+```
+
+`scripts/release.sh` runs `build.sh` (sign, innermost first, with the CEF entitlements),
+notarizes and staples the app, runs `package.sh` (zip, DMG with an Applications link,
+checksums), then notarizes and staples the DMG and checks it with `spctl`.
+Without `NICHE_SIGN_IDENTITY` it produces an ad-hoc build and skips notarization.
+
+## The DMG window
+
+Opening `Niche.dmg` shows a drag-to-install window modelled on Dia's installer (decoded from
+its `.DS_Store`): 800×400 pt, no toolbar or sidebar, 212 pt icons with Niche at (190, 180)
+and Applications at (610, 180), and a background with the install line and a chevron
+between them. `scripts/package.sh` builds it with [dmgbuild](https://github.com/dmgbuild/dmgbuild),
+which writes the Finder layout directly, so it needs no Finder scripting and runs on CI.
+It installs a pinned dmgbuild into `build/dmgbuild-venv` on first use.
+
+- `resources/dmg/settings.py`: window, icon size and positions, volume icon.
+- `resources/dmg/background.png`: 1600×800 px at 144 dpi. Regenerate it with
+  `swift scripts/make-dmg-background.swift` after changing the brand colours or the layout.
+
+## What the signing covers
+
+Order matters because each signature seals what is inside it:
+
+1. every `.dylib` in `Chromium Embedded Framework.framework/Libraries`
+2. the framework itself
+3. Sparkle's `Autoupdate` and `Updater.app`, then `Sparkle.framework` (its XPC services are
+   removed: they are only for sandboxed apps)
+4. the five helper apps, each with `resources/NicheHelper.entitlements`
+5. `Niche.app` with `resources/Niche.entitlements`
+
+The entitlements are the hardened-runtime exceptions Chromium needs (JIT, unsigned
+executable memory, library validation off, dyld environment variables), plus camera,
+microphone and location so sites can ask for them.
+
+The helpers run in Chromium's own macOS sandbox (seatbelt): `NicheHelper` enters it through
+`CefScopedSandboxContext` (which loads the framework's `Libraries/libcef_sandbox.dylib`)
+before loading CEF, and `CefSettings.no_sandbox` is off. Renderer, GPU, network, storage
+and audio processes are sandboxed, video capture is not (Chrome's choice too).
+
+## Passkeys
+
+Security keys and phones (the QR code in Chrome's "Passkeys & Security Keys" dialog)
+work in every build. Passkeys kept on the Mac need entitlements macOS only honours
+with a provisioning profile, the way Chrome, Arc and Dia ship:
+
+| Entitlement | Turns on |
+|---|---|
+| `keychain-access-groups` = `<team>.com.niche.browser.webauthn` | Chromium's Touch ID passkeys, stored in Niche's keychain group. `scripts/cef-patches/webauthn-keychain-access-group.patch` derives the group from the app's `application-identifier` (Chromium's branding has no team ID). |
+| `com.apple.developer.web-browser.public-key-credential` | iCloud Keychain passkeys (Passwords app), through Chromium's own iCloud Keychain code. Managed: Apple must approve it. |
+
+One-time setup, as the Account Holder:
+
+1. Request the entitlement for `com.niche.browser` at
+   https://developer.apple.com/contact/request/macos-browsers-passkeys/ (Account Holder
+   only). Apple reviews it and adds it as a managed capability, which then shows under
+   the App ID's Additional Capabilities. The Touch ID group needs no approval.
+2. Create a **Developer ID** provisioning profile for the explicit App ID
+   `com.niche.browser` and download it. Once the entitlement is approved, regenerate it and
+   check that it is included: `security cms -D -i Niche.provisionprofile | grep -A1 public-key`.
+3. Locally: `NICHE_PROVISIONING_PROFILE=Niche.provisionprofile` next to `NICHE_SIGN_IDENTITY`.
+   In CI: the `MACOS_PROVISIONING_PROFILE` secret, `base64 -i Niche.provisionprofile | pbcopy`.
+
+`build.sh` embeds the profile as `Contents/embedded.provisionprofile` and adds to
+`Niche.entitlements` only what the profile grants (application and team identifier,
+the keychain group, iCloud Keychain once approved), because macOS refuses to launch an
+app that claims an entitlement its profile lacks. Ad-hoc builds never get them.
+
+## Safe Browsing
+
+Chromium's phishing and malware lists come from Google's Safe Browsing API, which
+needs an API key. Without one the lists never download and dangerous pages load
+without a warning.
+
+1. In the Google Cloud console, create a project, enable the **Safe Browsing API** and
+   create an API key. Restrict it to that API: it ships inside the app, so anyone can
+   read it.
+2. Locally: `NICHE_GOOGLE_API_KEY=<key>` next to `NICHE_SIGN_IDENTITY`. In CI: the
+   `NICHE_GOOGLE_API_KEY` secret. Never commit it.
+
+`build.sh` writes it to Info.plist as `NicheGoogleAPIKey`, and NicheCEF sets
+`GOOGLE_API_KEY` from it before Chromium starts.
+
+The key lives in the Google Cloud project `niche-browser`, restricted to the Safe Browsing
+API. Every install shares its quota: 10,000 list updates and 10,000 lookups a day. A
+running Niche fetches list updates 1–5 minutes after launch and then once a day
+(`scripts/cef-patches/safe-browsing-update-interval.patch`; Chrome uses Google's ~30
+minutes), plus a full-hash lookup when a URL matches a list: about 1–3 updates per
+install per day. An alert policy in the project emails at 7,000 a day; ask for more on
+the API's Quotas page in the Cloud console (the Cloud Quotas API can't). Once the quota
+allows it, shorten the interval in the patch. A client over quota backs off (up to 24
+hours) and its lists go stale until an update succeeds.
+
+The Safe Browsing API is for non-commercial use. Google's commercial service, Web Risk,
+is not a drop-in: it has its own endpoints and request format, so Chromium would need
+a patch to its update and full-hash protocol.
+
+## Updates
+
+Niche updates itself the way Arc does, with [Sparkle 2](https://sparkle-project.org)
+(`scripts/fetch-sparkle.sh` puts a pinned, checksummed release in `vendor/sparkle`). Every
+8 hours it reads `releases/latest/download/appcast.xml`, downloads a newer `Niche.zip` in
+the background, installs it when Niche quits, or restarts into it by itself once the user
+is away. Niche menu ▸ Check for Updates… and Settings ▸ Advanced ▸ "Automatically update Niche"
+are the controls. Details and Arc's original are in `docs/arc-reverse-engineering.md`
+("Software updates").
+
+- **Signing key.** Updates are accepted only when `Niche.zip` carries an EdDSA signature
+  matching `SUPublicEDKey` in `resources/Info.plist`. The private key is in the login
+  keychain of the Mac that made it (`vendor/sparkle/bin/generate_keys --account niche`,
+  made 8 Nov 2026) and in the `SPARKLE_PRIVATE_KEY` secret. Back it up
+  (`generate_keys --account niche -x <file>`): without it, installed copies can never be
+  updated again.
+- **Appcast.** `scripts/release.sh` ends with `scripts/appcast.sh`, which signs the final
+  `Niche.zip` and writes `build/dist/appcast.xml`; the workflow uploads it with the other
+  assets. `NICHE_RELEASE_NOTES=<file.html>` adds release notes to the update window.
+- **Version numbers.** Sparkle compares `CFBundleVersion`, the build number `build.sh`
+  takes from the clock, so every release is newer than the last.
+- **Dev builds** have no feed (`build.sh` drops `SUFeedURL` unless `NICHE_RELEASE=1`), so they
+  never replace themselves with a release. To test, run a copy with
+  `NICHE_UPDATE_FEED=http://127.0.0.1:8889/appcast.xml` (and `NICHE_UPDATE_IDLE_SECONDS=0` for
+  the automatic restart) against a local appcast made with `NICHE_UPDATE_URL=… scripts/appcast.sh`.
+- Copies from before the updater (0.1.0, 0.1.1) update once by hand: rerun the install line.
+
+## The Chromium engine (CEF)
+
+Niche ships its own CEF build, not Spotify's prebuilt one: Spotify builds leave out
+H.264/AAC, so MP4 and HLS video (X, Instagram, Reddit, news sites) never plays. Codecs
+are a compile-time switch and FFmpeg is linked into the framework, so there is no way
+around building it.
+
+    scripts/build-cef.sh      # ~80 GB free, several hours; resumes where it stopped
+    scripts/publish-cef.sh    # uploads the archive as pre-release cef-<version>-codecsN
+
+`build-cef.sh` checks out the same CEF commit `fetch-cef.sh` pins, applies
+`scripts/cef-patches/*.patch` on top of CEF's own patches, and builds an official
+release with `proprietary_codecs=true ffmpeg_branding=Chrome`. `fetch-cef.sh` (and CI,
+keyed on its hash) downloads the published archive into `vendor/cef`, replacing a copy
+from a different source. To change the build without a CEF version bump, bump the
+`codecsN` suffix of `CEF_RELEASE` and publish again. Needs Xcode's Metal toolchain
+(`xcodebuild -downloadComponent MetalToolchain`).
+
+**Patch rounds and Intel.** Once `build-cef.sh` has built a version, a new or changed
+patch goes through `rebuild-cef.sh`, which builds from that checkout for both CPUs
+(minutes each) and never reruns CEF's patcher (rerunning it compiles Web Push out). The
+Intel (`macosx64`) build is cross-compiled on the same Mac from the same sources, in its
+own `out/Release_GN_x64` (~12 GB; the first one compiles everything):
+
+    scripts/rebuild-cef.sh [arm64] [x64]           # both when no CPU is given
+    scripts/publish-cef.sh                         # arm64 asset
+    CEF_ARCH=macosx64 scripts/publish-cef.sh       # Intel asset, same release
+
+**Staying current.** Chromium only ships security fixes for its newest version. The
+"CEF updates" workflow (`.github/workflows/cef-updates.yml`, daily, free Linux runner)
+runs `scripts/check-cef-update.sh`: when Spotify's index lists a newer stable CEF for
+macOS arm64, it opens one "Chromium engine update available" issue, assigned to the repo
+owner, with the exact command. The build itself runs on the Mac, because GitHub's free
+macOS runners are too small (3 cores, 14 GB disk, 6 hour jobs) and larger ones are billed:
+
+    scripts/update-cef.sh <cef_version>   # build + publish arm64 and x64, pin, rebuild Niche
+
+A same-major update reuses the checkout: `build-cef.sh` moves it to the new Chromium tag
+itself, and ninja recompiles nearly everything (about 2½ hours on the M2 Max). A new Chromium
+major needs a fresh checkout as well. Then test `build/Niche.app`, commit `scripts/fetch-cef.sh`, close the
+issue and tag a release.
+
+## Later
+
+- **Homebrew.** A cask (`brew install --cask niche`) pointing at the DMG and
+  `SHA256SUMS.txt`.
+- **Intel.** CEF is published for `macosx64` too (above). Still missing: an x86_64
+  `swift build` in `scripts/build.sh`, a separate Intel DMG from the release workflow
+  and its own Sparkle feed.

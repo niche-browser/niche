@@ -1,0 +1,491 @@
+diff --git a/cef/BUILD.gn b/cef/BUILD.gn
+index dd0a558c0..a54f79de4 100644
+--- a/cef/BUILD.gn
++++ b/cef/BUILD.gn
+@@ -973,6 +973,7 @@ source_set("libcef_static") {
+     "//components/network_session_configurator/common",
+     "//components/pdf/browser",
+     "//components/pdf/renderer",
++    "//components/performance_manager",
+     "//components/plugins/renderer",
+     "//components/pref_registry",
+     "//components/printing/browser",
+diff --git a/cef/libcef/browser/devtools/devtools_controller.cc b/cef/libcef/browser/devtools/devtools_controller.cc
+index c60f22d1a..f0d609890 100644
+--- a/cef/libcef/browser/devtools/devtools_controller.cc
++++ b/cef/libcef/browser/devtools/devtools_controller.cc
+@@ -5,10 +5,435 @@
+ #include "cef/libcef/browser/devtools/devtools_controller.h"
+ 
+ #include "base/json/json_reader.h"
++#include "base/feature_list.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/json/json_writer.h"
++#include "base/memory/ref_counted.h"
++#include "base/scoped_observation.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/supports_user_data.h"
++#include "base/task/sequenced_task_runner.h"
+ #include "cef/libcef/browser/devtools/devtools_util.h"
+ #include "cef/libcef/browser/thread_util.h"
++#include "chrome/browser/picture_in_picture/auto_picture_in_picture_tab_helper.h"
++#include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_observer.h"
++#include "components/crx_file/id_util.h"
++#include "components/performance_manager/freezing/freezing_policy.h"
++#include "components/performance_manager/public/freezing/freezing.h"
++#include "components/performance_manager/public/performance_manager.h"
++#include "content/browser/media/session/media_session_impl.h"
+ #include "content/public/browser/devtools_agent_host.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_process_host.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/common/content_features.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/browser/install_approval.h"
++#include "extensions/browser/webstore_installer.h"
++#include "extensions/common/extension.h"
++#include "extensions/common/mojom/manifest.mojom-shared.h"
++
++namespace {
++
++// Niche: a page's freezing vote, held while the client asks for it, like Arc's
++// freeze token. Chromium's freezing policy freezes the page only while no
++// CannotFreezeReason applies (audible, capturing, Web Locks, WebRTC,
++// notification permission, ...).
++const char kNicheFreezingVoteKey[] = "cra-freezing-vote";
++
++struct NicheFreezingVote : public base::SupportsUserData::Data {
++  explicit NicheFreezingVote(content::WebContents* contents) : vote(contents) {}
++  performance_manager::freezing::FreezingVote vote;
++};
++
++base::ListValue ReasonList(
++    const performance_manager::freezing::CannotFreezeReasonSet& reasons) {
++  base::ListValue list;
++  for (auto reason : reasons) {
++    list.Append(
++        performance_manager::freezing::CannotFreezeReasonToString(reason));
++  }
++  return list;
++}
++
++// Niche: the page's media session as Chromium routes it (the frame whose
++// navigator.mediaSession handlers answer), like Arc's media actions. Unlike a
++// wrapper around setActionHandler in the page, this sees every handler however
++// early the page registered it.
++struct NicheMediaSessionActionName {
++  media_session::mojom::MediaSessionAction action;
++  const char* name;
++};
++constexpr NicheMediaSessionActionName kNicheMediaSessionActions[] = {
++    {media_session::mojom::MediaSessionAction::kPlay, "play"},
++    {media_session::mojom::MediaSessionAction::kPause, "pause"},
++    {media_session::mojom::MediaSessionAction::kPreviousTrack, "previoustrack"},
++    {media_session::mojom::MediaSessionAction::kNextTrack, "nexttrack"},
++    {media_session::mojom::MediaSessionAction::kSeekBackward, "seekbackward"},
++    {media_session::mojom::MediaSessionAction::kSeekForward, "seekforward"},
++    {media_session::mojom::MediaSessionAction::kSkipAd, "skipad"},
++    {media_session::mojom::MediaSessionAction::kStop, "stop"},
++    {media_session::mojom::MediaSessionAction::kToggleMicrophone,
++     "togglemicrophone"},
++    {media_session::mojom::MediaSessionAction::kToggleCamera, "togglecamera"},
++    {media_session::mojom::MediaSessionAction::kHangUp, "hangup"},
++    {media_session::mojom::MediaSessionAction::kPreviousSlide,
++     "previousslide"},
++    {media_session::mojom::MediaSessionAction::kNextSlide, "nextslide"},
++};
++
++// {"id":N,"method":"Cra.mediaSession"}: {"actions":[names],
++// "pictureInPicture":bool}, the actions the page has handlers for and whether
++// this page has the Picture in Picture window.
++// {"id":N,"method":"Cra.mediaSession","params":{"action":name}}: runs the
++// page's handler for it, as Chrome's media keys and global media controls do;
++// "handled" is false when the page has none.
++void HandleNicheMediaSession(content::WebContents* contents,
++                           const base::DictValue* params,
++                           base::DictValue* result,
++                           std::string* error) {
++  auto* session = static_cast<content::MediaSessionImpl*>(
++      content::MediaSession::GetIfExists(contents));
++  auto* pip = PictureInPictureWindowManager::GetInstance();
++  const bool has_pip = pip->GetWebContents() == contents;
++  result->Set("pictureInPicture", has_pip);
++  const std::string* name = params ? params->FindString("action") : nullptr;
++  if (!name) {
++    base::ListValue actions;
++    for (const auto& entry : kNicheMediaSessionActions) {
++      if (session && session->ShouldRouteAction(entry.action)) {
++        actions.Append(entry.name);
++      }
++    }
++    result->Set("actions", std::move(actions));
++    return;
++  }
++  const NicheMediaSessionActionName* found = nullptr;
++  for (const auto& entry : kNicheMediaSessionActions) {
++    if (*name == entry.name) {
++      found = &entry;
++    }
++  }
++  if (!found) {
++    *error = "unknown media session action";
++    return;
++  }
++  const bool routed = session && session->ShouldRouteAction(found->action);
++  if (routed) {
++    session->DidReceiveAction(found->action);
++  }
++  result->Set("handled", routed);
++}
++
++// Niche: Chrome's automatic Picture in Picture (AutoPictureInPictureTabHelper),
++// which a tab strip drives in Chrome and the client drives here.
++// {"id":N,"method":"Cra.autoPictureInPicture","params":{"tab":"hidden"}}: the
++// tab went out of sight. A page that registered an enterpictureinpicture media
++// session handler and uses the camera or microphone (a Google Meet call) has it
++// run, with the reason "contentoccluded" and the browser's authorization to
++// open its Picture in Picture window; {"asked":bool}. Chrome's per-site
++// automatic picture-in-picture permission applies, and nothing replaces a
++// Picture in Picture window that is already open ({"pictureInPicture":true}
++// when this page has it).
++// {"id":N,"method":"Cra.autoPictureInPicture","params":{"tab":"shown"}}: the
++// tab is in front again, which closes the window automatic Picture in Picture
++// opened, as Chrome does.
++void HandleNicheAutoPictureInPicture(content::WebContents* contents,
++                                   const base::DictValue* params,
++                                   base::DictValue* result,
++                                   std::string* error) {
++  auto* helper = AutoPictureInPictureTabHelper::FromWebContents(contents);
++  const std::string* tab = params ? params->FindString("tab") : nullptr;
++  if (!helper) {
++    *error = "no automatic Picture in Picture for this page";
++    return;
++  }
++  if (tab && *tab == "shown") {
++    helper->OnTabBecameActive();
++    return;
++  }
++  if (!tab || *tab != "hidden") {
++    *error = "tab must be hidden or shown";
++    return;
++  }
++  result->Set("pictureInPicture",
++              PictureInPictureWindowManager::GetInstance()->GetWebContents() ==
++                  contents);
++  result->Set("asked", helper->NicheOnTabHidden());
++}
++
++// {"id":N,"method":"Cra.setFreezingVote","params":{"vote":true|false}}: sets
++// or drops the vote. {"id":N,"method":"Cra.getFreezingState"}: whether the
++// page has Niche's vote, is frozen, and why the policy won't freeze it.
++// {"id":N,"method":"Cra.discard"}: discards the page in place, like Chrome's
++// TabLifecycleUnit with WebContentsDiscard on: its renderer goes, the
++// WebContents keeps its back/forward list and each entry's page state (scroll
++// position, form contents), and showing it loads the page again.
++// {"id":N,"method":"Cra.load"}: loads a discarded page now, as Chrome does
++// when its tab is selected, even while the window is covered.
++// Returns true for these; any other message returns false.
++bool HandleNicheMethod(content::WebContents* contents,
++                     std::string_view message,
++                     int* message_id,
++                     base::DictValue* result,
++                     std::string* error);
++
++// A reply to a Niche.* method, in the protocol's shape. "id" comes first:
++// CEF's ProtocolParser only reads a result that starts with {"id":, and
++// JSONWriter would sort "error" ahead of it, so error replies never arrived.
++std::string NicheReplyJson(int message_id,
++                         base::DictValue result,
++                         const std::string& error) {
++  std::string body;
++  if (error.empty()) {
++    base::JSONWriter::Write(result, &body);
++  } else {
++    base::DictValue error_dict;
++    error_dict.Set("code", -32000);
++    error_dict.Set("message", error);
++    base::JSONWriter::Write(error_dict, &body);
++  }
++  return "{\"id\":" + base::NumberToString(message_id) +
++         (error.empty() ? ",\"result\":" : ",\"error\":") + body + "}";
++}
++
++// The page that downloads the store's CRX, as WebstoreInstallWithPrompt has
++// one: never shown, so the download stays out of every window's UI. It lives
++// until the install is over, or until its profile goes away: a quit while an
++// install still ran (or never ended) destroyed the profile with the page open,
++// and Chromium stops on that ("BrowserContext is getting destroyed without
++// first closing all WebContents", GitHub #227). WebstoreInstaller holds the
++// page through a WeakPtr; an install cut off this way never replies, and the
++// client asks for it again on the next launch.
++struct NicheWebStoreInstallPage
++    : public base::RefCountedThreadSafe<NicheWebStoreInstallPage>,
++      public ProfileObserver {
++  explicit NicheWebStoreInstallPage(Profile* profile)
++      : contents(content::WebContents::Create(
++            content::WebContents::CreateParams(profile))) {
++    profile_observation_.Observe(profile);
++  }
++  std::unique_ptr<content::WebContents> contents;
++
++  // ProfileObserver: first thing in ~ProfileImpl, before its user data (the
++  // list of the profile's WebContents) is checked and cleared.
++  void OnProfileWillBeDestroyed(Profile* profile) override {
++    profile_observation_.Reset();
++    contents.reset();
++  }
++
++ private:
++  friend class base::RefCountedThreadSafe<NicheWebStoreInstallPage>;
++  ~NicheWebStoreInstallPage() override = default;
++
++  base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
++};
++
++// Niche (GitHub #203): {"id":N,"method":"Cra.installFromWebStore","params":
++// {"id":extension id,"manifest":{...}}} installs a Chrome Web Store item in
++// this page's profile the way the store's "Add to Chrome" does
++// (webstorePrivate.completeInstall): WebstoreInstaller fetches the signed CRX
++// from the store's update service and CrxInstaller checks it carries the
++// store's signature. It lands as INTERNAL and from the Web Store, updates and
++// is verified like any store install, which an unpacked copy (Arc's, Dia's,
++// Chrome's, loaded with --load-extension) never is. `manifest` is the copy
++// the person picked; the store's version may not ask for more permissions
++// (a loose check). No prompt: the client asks only for extensions the person
++// chose to bring over. Replies {"installed":true} once the extension is
++// installed, else an error; the download can take a while.
++// Returns false for any other message.
++bool StartNicheWebStoreInstall(
++    content::WebContents* contents,
++    std::string_view message,
++    base::OnceCallback<void(std::string json)> send) {
++  if (message.find("\"Cra.installFromWebStore\"") == std::string_view::npos) {
++    return false;
++  }
++  std::optional<base::DictValue> dict =
++      base::JSONReader::ReadDict(message, base::JSON_PARSE_RFC);
++  if (!dict) {
++    return false;
++  }
++  const std::string* method = dict->FindString("method");
++  std::optional<int> message_id = dict->FindInt("id");
++  if (!method || !message_id || *method != "Cra.installFromWebStore") {
++    return false;
++  }
++  auto fail = [&](const std::string& error) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(std::move(send),
++                                  NicheReplyJson(*message_id, base::DictValue(),
++                                               error)));
++    return true;
++  };
++  const base::DictValue* params = dict->FindDict("params");
++  const std::string* id = params ? params->FindString("id") : nullptr;
++  const base::DictValue* manifest =
++      params ? params->FindDict("manifest") : nullptr;
++  if (!id || !crx_file::id_util::IdIsValid(*id) || !manifest) {
++    return fail("needs a valid extension id and its manifest");
++  }
++  Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
++  if (!profile || profile->IsOffTheRecord()) {
++    return fail("not in an off-the-record profile");
++  }
++  const extensions::Extension* installed =
++      extensions::ExtensionRegistry::Get(profile)->GetInstalledExtension(*id);
++  if (installed &&
++      installed->location() == extensions::mojom::ManifestLocation::kInternal &&
++      installed->from_webstore()) {
++    base::DictValue result;
++    result.Set("installed", true);
++    result.Set("already", true);
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(std::move(send),
++                                  NicheReplyJson(*message_id, std::move(result),
++                                               std::string())));
++    return true;
++  }
++  std::unique_ptr<extensions::InstallApproval> approval =
++      extensions::InstallApproval::CreateWithNoInstallPrompt(
++          profile, *id, manifest->Clone(), /*strict_manifest_check=*/false);
++  approval->skip_post_install_ui = true;
++  approval->use_app_installed_bubble = false;
++  auto page = base::MakeRefCounted<NicheWebStoreInstallPage>(profile);
++  // One of the two callbacks runs; both hold the page and the reply.
++  auto split = base::SplitOnceCallback(std::move(send));
++  auto installer = base::MakeRefCounted<extensions::WebstoreInstaller>(
++      profile,
++      base::BindOnce(
++          [](scoped_refptr<NicheWebStoreInstallPage>, int message_id,
++             base::OnceCallback<void(std::string)> send, const std::string&) {
++            base::DictValue result;
++            result.Set("installed", true);
++            std::move(send).Run(NicheReplyJson(message_id, std::move(result),
++                                             std::string()));
++          },
++          page, *message_id, std::move(split.first)),
++      base::BindOnce(
++          [](scoped_refptr<NicheWebStoreInstallPage>, int message_id,
++             base::OnceCallback<void(std::string)> send, const std::string& id,
++             const std::string& error,
++             extensions::WebstoreInstaller::FailureReason) {
++            LOG(WARNING) << "Niche: Web Store install of " << id
++                         << " failed: " << error;
++            std::move(send).Run(NicheReplyJson(
++                message_id, base::DictValue(),
++                error.empty() ? std::string("install failed") : error));
++          },
++          page, *message_id, std::move(split.second)),
++      page->contents.get(), *id, std::move(approval),
++      extensions::WebstoreInstaller::INSTALL_SOURCE_OTHER);
++  installer->Start();
++  return true;
++}
++
++bool HandleNicheMethod(content::WebContents* contents,
++                     std::string_view message,
++                     int* message_id,
++                     base::DictValue* result,
++                     std::string* error) {
++  if (message.find("\"Niche.") == std::string_view::npos) {
++    return false;
++  }
++  std::optional<base::DictValue> dict =
++      base::JSONReader::ReadDict(message, base::JSON_PARSE_RFC);
++  if (!dict) {
++    return false;
++  }
++  const std::string* method = dict->FindString("method");
++  std::optional<int> id = dict->FindInt("id");
++  if (!method || !id ||
++      (*method != "Cra.setFreezingVote" && *method != "Cra.getFreezingState" &&
++       *method != "Cra.discard" && *method != "Cra.load" &&
++       *method != "Cra.mediaSession" && *method != "Cra.autoPictureInPicture")) {
++    return false;
++  }
++  *message_id = *id;
++  if (*method == "Cra.autoPictureInPicture") {
++    HandleNicheAutoPictureInPicture(contents, dict->FindDict("params"), result,
++                                  error);
++    return true;
++  }
++  if (*method == "Cra.mediaSession") {
++    HandleNicheMediaSession(contents, dict->FindDict("params"), result, error);
++    return true;
++  }
++  if (*method == "Cra.load") {
++    // Does nothing unless the page was discarded and hasn't loaded since.
++    contents->GetController().LoadIfNecessary();
++    return true;
++  }
++  if (*method == "Cra.discard") {
++    if (!base::FeatureList::IsEnabled(features::kWebContentsDiscard)) {
++      *error = "discarding needs the WebContentsDiscard feature";
++      return true;
++    }
++    if (!contents->WasDiscarded()) {
++      // First try to end the renderer, if it holds only this page
++      // (AttemptFastKillForDiscard).
++      content::RenderFrameHost* main_frame = contents->GetPrimaryMainFrame();
++      result->Set("processEnded",
++                  main_frame && main_frame->GetProcess()->FastShutdownIfPossible(
++                                    1u, /*skip_unload_handlers=*/false,
++                                    /*ignore_workers=*/false,
++                                    /*ignore_keep_alive=*/false,
++                                    /*ignore_pending_reuse=*/false,
++                                    /*use_outermost_main_frame_check=*/true));
++      contents->Discard(base::DoNothing());
++    }
++    // False when a navigation was about to commit: Chromium keeps the page.
++    result->Set("discarded", contents->WasDiscarded());
++    return true;
++  }
++  if (*method == "Cra.getFreezingState") {
++    result->Set("vote", !!contents->GetUserData(kNicheFreezingVoteKey));
++    const performance_manager::PageNode* page =
++        performance_manager::PerformanceManager::
++            GetPrimaryPageNodeForWebContents(contents)
++                .get();
++    if (page && performance_manager::PerformanceManager::GetGraph()
++                    ->GetRegisteredObjectAs<
++                        performance_manager::FreezingPolicy>()) {
++      result->Set("frozen", page->GetLifecycleState() ==
++                                performance_manager::mojom::LifecycleState::kFrozen);
++      auto details =
++          performance_manager::freezing::GetCanFreezeDetailsForPageNode(page);
++      result->Set("reasons", ReasonList(details.cannot_freeze_reasons));
++      result->Set("connectedReasons",
++                  ReasonList(details.cannot_freeze_reasons_connected_pages));
++    }
++    return true;
++  }
++  const base::DictValue* params = dict->FindDict("params");
++  const bool vote = params && params->FindBool("vote").value_or(false);
++  if (!vote) {
++    contents->RemoveUserData(kNicheFreezingVoteKey);
++    return true;
++  }
++  if (contents->GetUserData(kNicheFreezingVoteKey)) {
++    return true;
++  }
++  // FreezingVote CHECKs both: a page Chrome's tab helpers never saw has no
++  // page node.
++  auto* graph = performance_manager::PerformanceManager::GetGraph();
++  if (!performance_manager::PerformanceManager::
++          GetPrimaryPageNodeForWebContents(contents) ||
++      !graph ||
++      !graph->GetRegisteredObjectAs<
++          performance_manager::FreezingPolicy>()) {
++    *error = "freezing is not available for this page";
++    return true;
++  }
++  contents->SetUserData(kNicheFreezingVoteKey,
++                        std::make_unique<NicheFreezingVote>(contents));
++  return true;
++}
++
++}  // namespace
+ 
+ CefDevToolsController::CefDevToolsController(
+     content::WebContents* inspected_contents)
+@@ -30,6 +455,38 @@ CefDevToolsController::~CefDevToolsController() {
+ bool CefDevToolsController::SendDevToolsMessage(
+     const std::string_view& message) {
+   CEF_REQUIRE_UIT();
++  if (StartNicheWebStoreInstall(
++          inspected_contents_, message,
++          base::BindOnce(
++              [](base::WeakPtr<CefDevToolsController> self, std::string json) {
++                if (self) {
++                  self->DispatchProtocolMessage(
++                      nullptr, base::as_bytes(base::span(json)));
++                }
++              },
++              weak_ptr_factory_.GetWeakPtr()))) {
++    return true;
++  }
++  int niche_message_id = 0;
++  base::DictValue niche_result;
++  std::string niche_error;
++  if (HandleNicheMethod(inspected_contents_, message, &niche_message_id,
++                      &niche_result, &niche_error)) {
++    // Answered like a protocol method, after the caller has returned.
++    std::string json =
++        NicheReplyJson(niche_message_id, std::move(niche_result), niche_error);
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](base::WeakPtr<CefDevToolsController> self, std::string json) {
++              if (self) {
++                self->DispatchProtocolMessage(
++                    nullptr, base::as_bytes(base::span(json)));
++              }
++            },
++            weak_ptr_factory_.GetWeakPtr(), std::move(json)));
++    return true;
++  }
+   if (!EnsureAgentHost()) {
+     return false;
+   }

@@ -1,0 +1,106 @@
+// Test double for the bridge only. The test runner compiles the production
+// BrowserManager.swift unchanged, without loading Chromium or a browser profile.
+import AppKit
+
+public protocol NicheBrowserDelegate: AnyObject {
+    func browserDidClose(_ browser: NicheBrowser)
+    func browser(_ browser: NicheBrowser, didChangeURL url: String)
+    func browser(_ browser: NicheBrowser, didChangeTitle title: String)
+    func browser(_ browser: NicheBrowser, didChangeLoading loading: Bool, canGoBack: Bool, canGoForward: Bool)
+}
+
+public final class NicheDownloadInfo {}
+
+@objc public enum NicheLinkWindow: Int { case new, incognito, little }
+
+/// `open`: the app subclasses it (WebKitBrowser, faked in AppServices.swift).
+@MainActor
+open class NicheBrowser {
+    public weak var delegate: NicheBrowserDelegate?
+    public let containerView: NSView
+    public var hostWindow: NSWindow?
+    public var currentURL: String
+    public var currentTitle = ""
+    public var isCreated = true
+    public var isClosed = false
+    public var isLoading = false
+    public var isInPictureInPicture = false
+    public var isPictureInPicturePlaying = false
+    public var isCapturingMedia = false
+    public var isAudible = false
+    public var hasDevTools = false
+    public var closedByPage = false
+    public let isIncognito: Bool
+    public let profilePath: String?
+    public var userInfo: Any?
+    public private(set) var closeRequested = false
+    public var onClose: (() -> Void)?
+    public var replies: [(method: String, completion: (String?, String?) -> Void)] = []
+
+    public init(frame: NSRect, url: String?, delegate: NicheBrowserDelegate?, incognito: Bool, profilePath: String?) {
+        containerView = NSView(frame: frame)
+        currentURL = url ?? ""
+        self.delegate = delegate
+        isIncognito = incognito
+        self.profilePath = profilePath
+    }
+
+    public func close() { closeRequested = true; onClose?() }
+    public func finishClose() { isClosed = true; delegate?.browserDidClose(self) }
+    /// "show" / "close" / "apply <action>", in the order Niche asked.
+    public var devToolsRequests: [String] = []
+    public func showDevTools() { hasDevTools = true; devToolsRequests.append("show") }
+    /// The frontend work asked of the next show (a panel, "inspect"); CEF clears it once done.
+    public var devToolsAction: String?
+    public func applyDevToolsAction() { devToolsRequests.append("apply \(devToolsAction ?? "")"); devToolsAction = nil }
+    public func closeDevTools() { hasDevTools = false; devToolsRequests.append("close") }
+    public func setAudioMuted(_ muted: Bool) {}
+    public private(set) var backgroundProbes = 0
+    public func probeBackgroundColor() { backgroundProbes += 1 }
+    public func setFocused(_ focused: Bool) {}
+    public private(set) var pictureInPictureRequests = 0
+    public private(set) var automaticPictureInPictureRequests = 0
+    public func requestPictureInPicture(automatic: Bool) {
+        pictureInPictureRequests += 1
+        if automatic { automaticPictureInPictureRequests += 1 }
+    }
+    public func exitPictureInPicture() { isInPictureInPicture = false }
+    public private(set) var pictureInPictureCloses = 0
+    public func closePictureInPicture() { pictureInPictureCloses += 1; isInPictureInPicture = false }
+    public func togglePictureInPicturePlayback() {}
+    public func skipPictureInPicture(by seconds: Double) {}
+    public private(set) var lastParams = ""
+    public func sendDevToolsMethod(_ method: String, params: String, completion: @escaping (String?, String?) -> Void) {
+        lastParams = params
+        replies.append((method, completion))
+    }
+    /// Scripts run in the page's own world (a Boost's JavaScript), in order.
+    public private(set) var scripts: [String] = []
+    public func executeJavaScript(_ script: String) { scripts.append(script) }
+    public private(set) var lastIsolatedParams = ""
+    /// Recorded as "<world>:Runtime.evaluate".
+    public func evaluate(inIsolatedWorld world: String, params: String, completion: @escaping (String?, String?) -> Void) {
+        lastIsolatedParams = params
+        replies.append(("\(world):Runtime.evaluate", completion))
+    }
+    public func reply(to method: String, with result: String?) {
+        guard let index = replies.firstIndex(where: { $0.method == method }) else { fatalError("No pending \(method)") }
+        replies.remove(at: index).completion(result, nil)
+    }
+    /// Answers with a protocol error, as CEF does for a method it doesn't have.
+    public func fail(_ method: String, with error: String) {
+        guard let index = replies.firstIndex(where: { $0.method == method }) else { fatalError("No pending \(method)") }
+        replies.remove(at: index).completion(nil, error)
+    }
+    public func setLoading(_ loading: Bool) {
+        isLoading = loading
+        delegate?.browser(self, didChangeLoading: loading, canGoBack: false, canGoForward: false)
+    }
+    /// Addresses Niche asked to load, in order.
+    public private(set) var loads: [String] = []
+    public func loadURL(_ url: String) { loads.append(url) }
+    public func navigate(to url: String) {
+        currentURL = url
+        delegate?.browser(self, didChangeURL: url)
+    }
+}

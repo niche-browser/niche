@@ -1,0 +1,27 @@
+# Settings ▸ Advanced ▸ "Keep Niche in the menu bar" (GitHub #231): ⌘Q closes the incognito window and
+# every page and puts the browser window away, and Niche keeps running. New Window brings the window
+# back with its tab, whose page loads again; the incognito window stays closed. The scenario's own
+# quit at the end (niche://debug?quit=1, the menu bar item's Quit) still quits.
+# promise: #231
+budget rss=700 stalls50=10
+seed settings.json {"hasSeenImportPrompt": true, "toolbarDefaultMigrated": true, "showToolbar": false, "keepInMenuBar": true}
+niche://open?url=${PAGE}?n=kept
+expect-log loaded 127\.0\.0\.1 \(HTTP 200\)
+niche://action/newIncognitoWindow
+wait 2
+niche://debug?browserWindows=before
+expect-log browser windows before: count=2
+niche://debug?quit=menu
+wait 2
+expect-log menu bar: quit keeps Niche in the menu bar
+niche://debug?browserWindows=away
+expect-log browser windows away: count=0
+expect-log Niche browser windows away: kind=normal .*open=\S*n=kept page=0
+reject-log Niche browser windows away: kind=incognito
+niche://action/newWindow
+wait 3
+expect-log menu bar: browser windows back
+niche://debug?browserWindows=back
+expect-log browser windows back: count=1
+expect-log Niche browser windows back: kind=normal .*open=\S*n=kept page=1
+reject-log Niche browser windows back: kind=incognito

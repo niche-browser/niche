@@ -1,0 +1,33 @@
+# Arc parity sweep (docs/arc-parity.md, Arc 1.172.1): Window ▸ Stay On Top floats the window and
+# turns off again; Collapse All Folders / Expand All Folders close and open every folder in the
+# space; View ▸ Collapse Pinned Tabs collapses the section and Tabs ▸ Reveal Tab in Sidebar (⌃Space)
+# opens it again for the pinned tab that is open.
+budget rss=700 stalls50=10
+niche://open?url=${PAGE}?n=one
+expect-log loaded 127\.0\.0\.1 \(HTTP 200\)
+niche://action/stayOnTop
+niche://debug?browserWindows=top
+expect-log Niche browser windows top: kind=normal .* onTop=1
+niche://action/stayOnTop
+niche://debug?browserWindows=down
+expect-log Niche browser windows down: kind=normal .* onTop=0
+niche://action/pinTab
+niche://action/newFolder
+niche://action/newFolder
+wait 1
+niche://action/collapseAllFolders
+niche://debug?browserWindows=closed
+expect-log Niche browser windows closed: .* openFolders=0/2
+niche://action/expandAllFolders
+niche://debug?browserWindows=opened
+expect-log Niche browser windows opened: .* openFolders=2/2
+niche://action/collapsePinned
+niche://debug?browserWindows=collapsed
+expect-log Niche browser windows collapsed: .* pinnedCollapsed=1
+niche://action/revealTab
+niche://debug?browserWindows=revealed
+expect-log Niche browser windows revealed: .* pinnedCollapsed=0
+niche://action/resetSpaceTabs
+niche://action/showArchive
+niche://action/openExtensions
+wait 1

@@ -1,0 +1,18 @@
+# A watch page focuses its player while loading in a fresh background tab.
+# Wait for that load before selecting it for the first time.
+niche://open?url=${PAGE}
+expect-log loaded 127.0.0.1
+niche://open?url=file://${FIXTURES}/Pages/player-focus.html&background=1
+expect-log loaded file:
+niche://action/nextTab
+niche://debug?cdp=Runtime.evaluate&params={"expression":"document.title.concat(':',scrollY)"}
+expect-log Niche cdp Runtime.evaluate .*"value":"Watch fixture:0"
+
+# A later switch back to the comments must keep the reader's place.
+niche://debug?pageJS=window.scrollTo(0,400)
+niche://action/nextTab
+niche://debug?cdp=Runtime.evaluate&params={"expression":"document.title"}
+expect-log Niche cdp Runtime.evaluate .*"value":"Fixture 0"
+niche://action/nextTab
+niche://debug?cdp=Runtime.evaluate&params={"expression":"document.title.concat(':',scrollY)"}
+expect-log Niche cdp Runtime.evaluate .*"value":"Watch fixture:400"

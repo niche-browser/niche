@@ -1,0 +1,57 @@
+import AppKit
+
+/// Component snapshots (scripts/scenario.sh `snapshot`): a view of the running window, found by its
+/// class, drawn into a PNG from its layer tree at 2x. Behind-window blur and page content are
+/// not part of a layer tree, so the picture holds Niche's own drawing only: geometry, ink, fills.
+@MainActor
+enum ViewSnapshot {
+    /// "PaneToolbarView" or "PaneToolbarView,1": the first (or nth) view of that class on screen
+    /// in the window, left to right and top to bottom (the pager keeps other spaces' columns
+    /// laid out beside the visible one).
+    static func find(_ spec: String, in window: NSWindow?) -> NSView? {
+        let parts = spec.split(separator: ",").map(String.init)
+        guard let name = parts.first, let root = window?.contentView?.superview ?? window?.contentView else { return nil }
+        var found: [NSView] = []
+        func walk(_ v: NSView) {
+            if String(describing: type(of: v)) == name, !v.isHiddenOrHasHiddenAncestor, !v.visibleRect.isEmpty,
+               v.convert(v.bounds, to: nil).intersects(root.bounds) { found.append(v) }
+            v.subviews.forEach(walk)
+        }
+        walk(root)
+        found.sort {
+            let a = $0.convert($0.bounds, to: nil), b = $1.convert($1.bounds, to: nil)
+            return (a.minX, -a.maxY) < (b.minX, -b.maxY)
+        }
+        let index = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
+        return index < found.count ? found[index] : nil
+    }
+
+    /// The view `find` picks, drawn to a PNG at `path`.
+    static func write(_ spec: String, in window: NSWindow?, to path: String) {
+        guard let view = find(spec, in: window), let png = render(view) else {
+            NicheLog.note("snapshot: no visible \(spec)")
+            return
+        }
+        do { try png.write(to: URL(fileURLWithPath: path)) } catch { NicheLog.note("snapshot: \(error.localizedDescription)") }
+    }
+
+    private static func render(_ view: NSView) -> Data? {
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        guard let layer = view.layer else { return nil }
+        let scale: CGFloat = 2
+        let w = Int(view.bounds.width * scale), h = Int(view.bounds.height * scale)
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        // The context's origin is at the bottom left; a flipped view's layer draws from the top.
+        if layer.isGeometryFlipped || view.isFlipped {
+            ctx.translateBy(x: 0, y: view.bounds.height)
+            ctx.scaleBy(x: 1, y: -1)
+        }
+        layer.render(in: ctx)
+        guard let image = ctx.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    }
+}

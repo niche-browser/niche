@@ -1,0 +1,3118 @@
+// Objective-C++ bridge between Swift and CEF. See include/NicheCEF.h.
+#import "NicheCEF.h"
+
+#include "include/views/cef_browser_view.h"
+#include "include/views/cef_browser_view_delegate.h"
+#include "include/views/cef_window.h"
+#include "include/views/cef_window_delegate.h"
+#include <crt_externs.h>
+#include <atomic>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "include/cef_app.h"
+#include "include/cef_application_mac.h"
+#include "include/cef_browser.h"
+#include "include/cef_client.h"
+#include "include/cef_command_ids.h"
+#include "include/cef_id_mappers.h"
+#include "include/cef_command_line.h"
+#include "include/cef_context_menu_handler.h"
+#include "include/cef_display_handler.h"
+#include "include/cef_download_handler.h"
+#include "include/cef_find_handler.h"
+#include "include/cef_focus_handler.h"
+#include "include/cef_keyboard_handler.h"
+#include "include/cef_life_span_handler.h"
+#include "include/cef_load_handler.h"
+#include "include/cef_navigation_entry.h"
+#include "include/cef_parser.h"
+#include "include/cef_permission_handler.h"
+#include "include/cef_request_context.h"
+#include "include/cef_request_handler.h"
+#include "include/cef_resource_request_handler.h"
+#include "include/cef_urlrequest.h"
+#include "include/cef_version.h"
+#include "NicheContentBlocker.h"
+#include "include/wrapper/cef_helpers.h"
+#include "include/wrapper/cef_library_loader.h"
+
+// MARK: - Globals
+
+static CefScopedLibraryLoader* g_libraryLoader = nullptr;
+static CefRefPtr<CefRequestContext> g_incognitoContext;
+/// Arc's Profiles: one request context per profile folder (spaces that share a profile share it).
+static std::map<std::string, CefRefPtr<CefRequestContext>> g_profileContexts;
+/// Profiles that finished loading, and browsers waiting for theirs: a Chrome-style
+/// browser view can't be made in a profile still loading from disk (CEF returns null).
+static NSMutableSet<NSString*>* g_readyProfiles = nil;
+static NSMutableDictionary<NSString*, NSMutableArray<NicheBrowser*>*>* g_waitingForProfile = nil;
+static std::atomic<bool> g_contextInitialized{false};
+static std::atomic<int> g_liveBrowsers{0};
+static bool g_quitting = false;
+static bool g_useChromeStyle = false;
+static bool g_useMockKeychain = false;
+/// Resolved by Swift from the chosen profile, including environment-free dev launches.
+// Extensions/ folders for --load-extension and the profiles each loads in (+setExtensionPaths:profiles:).
+static NSArray<NSString*>* g_extensionPaths = nil;
+static NSString* g_extensionProfiles = nil;
+static BOOL g_chromeHosting = NO;
+static NSMutableArray<NicheBrowser*>* g_pendingCreation = nil;
+
+/// Settings for every page Niche makes. Chrome style draws its own status bubble flush at the
+/// page's bottom left, under Niche's own (StatusBubbleView): one link showed in two bubbles.
+static void NichePageSettings(CefBrowserSettings& settings) {
+    settings.chrome_status_bubble = STATE_DISABLED;
+}
+static void (^g_relaunchHandler)(NSArray<NSString*>*) = nil;
+static BOOL g_alreadyRunning = NO;
+static NSHashTable<NicheBrowser*>* g_allBrowsers = nil;
+/// Closed tabs whose page stays alive until its downloads end (see -[NicheBrowser close]).
+static NSMutableSet<NicheBrowser*>* g_parkedBrowsers = nil;
+static void (^g_strayPageHandler)(NSString*, NSString*) = nil;
+static BOOL (^g_appLinkHandler)(NicheBrowser*, NSString*, BOOL) = nil;
+// Downloads whose save panel was cancelled (#190): cancelled on their next update, never shown.
+static std::set<uint32_t> g_cancelledDownloads;
+static void (^g_downloadDestinationHandler)(NSString*, NSString*, void (^)(NSString*)) = nil;
+static void (^g_processEventHandler)(NSString*, NSString*, NSString*) = nil;
+
+static NSString* NSStringFromCef(const CefString& s) {
+    std::string utf8 = s.ToString();
+    NSString* r = [[NSString alloc] initWithBytes:utf8.data() length:utf8.size() encoding:NSUTF8StringEncoding];
+    return r ?: @"";
+}
+
+static CefString CefStringFromNS(NSString* s) {
+    return CefString(std::string(s.UTF8String ?: ""));
+}
+
+// The two "open link" items on a page's context menu, from NicheCore's LinkMenu (GitHub #183).
+static NSArray<NSString*>* g_linkMenuTitles = @[@"Open Link in New Tab", @"Open Link in Background Tab"];
+static NSArray<NSNumber*>* g_linkMenuBackground = @[@NO, @YES];
+
+/// Page.addScriptToEvaluateOnNewDocument params every page browser gets once it exists
+/// (the page's world, then Niche's isolated world).
+static NSArray<NSString*>* g_documentStartParams = nil;
+
+/// Removes separators a removed item left at either end or next to another one. Hidden items
+/// don't count: Chrome's model keeps some it doesn't show.
+static void NicheTidySeparators(CefRefPtr<CefMenuModel> model) {
+    bool separatorAfter = true;  // walking back from the end, which counts as one
+    for (size_t i = model->GetCount(); i-- > 0;) {
+        if (model->GetTypeAt(i) != MENUITEMTYPE_SEPARATOR) {
+            if (model->IsVisibleAt(i)) separatorAfter = false;
+        } else if (separatorAfter) {
+            model->RemoveAt(i);
+        } else {
+            separatorAfter = true;
+        }
+    }
+    for (size_t i = 0; i < model->GetCount();) {
+        if (model->GetTypeAt(i) == MENUITEMTYPE_SEPARATOR) model->RemoveAt(i);
+        else if (model->IsVisibleAt(i)) break;
+        else i++;
+    }
+}
+
+enum NicheMenuCommand {
+    kMenuOpenLinkFirst = MENU_ID_USER_FIRST + 1,
+    kMenuOpenLinkSecond,
+    kMenuOpenLinkLittleWindow,
+    kMenuCaptureImage,
+    kMenuCopyLink,
+    kMenuInspectElement,
+    kMenuOpenImageInNewTab,
+    kMenuCopyImageURL,
+    kMenuPictureInPicture,
+};
+
+// MARK: - Downloads
+
+@implementation NicheDownloadInfo
+@end
+
+@implementation NicheSSLStatus
+@end
+
+// MARK: - NicheBrowser private interface
+
+class NicheClient;
+
+// Live NicheClient instances. The bridge is built without RTTI, so a popup's client
+// (which can also be a DevToolsClient) is checked against this set before casting.
+#include <set>
+static std::set<const void*>& NicheClientRegistry() { static std::set<const void*> s; return s; }
+static NicheClient* AsNicheClient(CefClient* c) {
+    return c && NicheClientRegistry().count(static_cast<const void*>(c)) ? reinterpret_cast<NicheClient*>(c) : nullptr;
+}
+
+@interface NicheBrowser ()
+@property (nonatomic, strong) NSView* containerView;
+@property (nonatomic, copy) NSString* currentURL;
+@property (nonatomic, copy) NSString* currentTitle;
+@property (nonatomic) BOOL isLoading;
+@property (nonatomic) BOOL hasCommittedLoad;
+@property (nonatomic, copy) NSString* navigatingURL;
+@property (nonatomic) NSInteger navigationStarts;
+@property (nonatomic) BOOL canGoBack;
+@property (nonatomic) BOOL canGoForward;
+@property (nonatomic) BOOL isCreated;
+@property (nonatomic) BOOL isClosed;
+@property (nonatomic) BOOL closeRequested;
+@property (nonatomic) BOOL closedByPage;
+@property (nonatomic) BOOL isInPictureInPicture;
+@property (nonatomic) BOOL isPictureInPicturePlaying;
+@property (nonatomic) BOOL isCapturingMedia;
+/// Media access CEF's own permission flow granted (OnMediaAccessChange), and the camera or
+/// microphone Chrome's tab recording indicator counts ("Cra.capture"); isCapturingMedia is either.
+@property (nonatomic) BOOL cefMediaAccess;
+@property (nonatomic) BOOL chromeCapture;
+- (void)updateCapture;
+@property (nonatomic) BOOL isAudible;
+- (void)audibleChanged:(BOOL)audible;
+- (void)requestPictureInPictureInFrame:(CefRefPtr<CefFrame>)frame automatic:(BOOL)automatic x:(int)x y:(int)y;
+- (void)adoptBrowser:(CefRefPtr<CefBrowser>)browser;
+- (void)devToolsBrowserCreated:(CefRefPtr<CefBrowser>)browser;
+- (void)devToolsBrowserClosed;
+- (void)runDevToolsAction;
+- (void)browserClosed;
+- (void)downloadUpdated:(NicheDownloadInfo*)download;
+- (CefRefPtr<CefBrowser>)cefBrowser;
+- (CefRefPtr<CefClient>)cefClient;
+- (void)createNow;
+- (CefRefPtr<CefRequestContext>)requestContext;
+- (void)hostWindowCreated:(NSWindow*)window;
+- (void)hostPopupBrowserView:(CefRefPtr<CefBrowserView>)view;
+@property (nonatomic, strong, nullable) NSWindow* hostWindow;
+/// The page's background as last reported by kBackgroundProbe (ARGB, 0 until then).
+@property (nonatomic) cef_color_t pageBackgroundColor;
+/// What the view shows under the page: its reported background, else the canvas.
+@property (nonatomic, readonly) cef_color_t pageFill;
+@end
+
+// MARK: - CEF app
+
+// Browsers Chromium creates through its own UI rather than through Niche: an
+// extension's chrome.tabs.create / chrome.windows.create, or the welcome page an
+// extension opens once it is installed. CEF gives them GetDefaultClient(); without
+// one they appear in a stock Chrome window with a tab strip. Niche takes the URL as
+// one of its own tabs and closes Chrome's browser, whose window stays unseen (HideStrayWindow).
+//
+// Popup-type windows (windows.create({type: "popup"}): 1Password's detached window,
+// sign-in and approval windows) stay what the extension asked for, like Arc's
+// BrowserType.popup: the extension keeps its window id, can resize or close it and
+// checks windows.getCurrent().type. Chrome gives tabbed windows a full-size content
+// view under a transparent title bar (BrowserNativeWidgetMac::PopulateCreateWindowParams)
+// and popups a plain titled window, which is how they are told apart here.
+static NSHashTable<NSWindow*>* g_extensionWindows = nil;
+
+// NativeWidgetMacNSWindow's switch for acting as a non-activating panel (Widget::SetActivationIndependence).
+@protocol NicheActivationIndependentWindow
+- (void)setActivationIndependence:(BOOL)independence;
+@end
+
+// Chromium makes a Picture in Picture window (a video's, or Document PiP's) an ordinary window that
+// joins every desktop Space, so it went missing over another app's full-screen Space (GitHub #206).
+// Only a non-activating panel joins that Space (#186); Arc's PiP is one (an NSPanel, AXSystemDialog).
+// This is Chromium's own recipe for such windows (Glic's floating panel, the screen-share picker):
+// activation independence, which makes NativeWidgetMacNSWindow answer _isNonactivatingPanel, and
+// SetCanAppearInExistingFullscreenSpaces' collection behaviour.
+static void FloatOverFullScreenSpaces(NSWindow* window) {
+    if (!window) return;
+    if ([window respondsToSelector:@selector(setActivationIndependence:)]) {
+        [(id<NicheActivationIndependentWindow>)window setActivationIndependence:YES];
+        // It also turns canHide off; Chrome's PiP has always hidden with the app (⌘H), so it still does.
+        window.canHide = YES;
+    }
+    // Chromium also makes every top-level window `.managed` (Document PiP is one), and a managed
+    // window stays off another app's full-screen Space whatever else it says.
+    NSWindowCollectionBehavior behavior = window.collectionBehavior;
+    behavior &= ~(NSWindowCollectionBehaviorPrimary | NSWindowCollectionBehaviorFullScreenPrimary
+                  | NSWindowCollectionBehaviorManaged);
+    behavior |= NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
+    window.collectionBehavior = behavior;
+    // Shown while a full-screen Space is in front (Document PiP, or a video's from a tab left for it),
+    // the window only moves onto that Space once it is ordered again.
+    if (window.isVisible) [window orderFrontRegardless];
+}
+
+// Document Picture in Picture's window comes from Chrome after the browser exists; it is
+// usually there by the next turn of the run loop.
+static void FloatDocumentPictureInPicture(CefRefPtr<CefBrowser> browser, int attempt) {
+    NSView* view = (__bridge NSView*)browser->GetHost()->GetWindowHandle();
+    if (NSWindow* window = view.window) {
+        FloatOverFullScreenSpaces(window);
+        return;
+    }
+    if (attempt >= 40) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        FloatDocumentPictureInPicture(browser, attempt + 1);
+    });
+}
+
+// Chrome shows a new tabbed window at the end of Navigate(), after this first navigation
+// has started, so ordering it out here is not enough: shown, it pulled a full-screen Niche
+// onto the desktop and back (GitHub #38). It is made unseeable instead: transparent, no
+// clicks, and a full-screen auxiliary that opens in the current space without switching.
+static void HideStrayWindow(NSWindow* window) {
+    if (!window) return;
+    window.alphaValue = 0;
+    window.ignoresMouseEvents = YES;
+    window.animationBehavior = NSWindowAnimationBehaviorNone;
+    NSWindowCollectionBehavior behavior = window.collectionBehavior;
+    behavior &= ~(NSWindowCollectionBehaviorFullScreenPrimary | NSWindowCollectionBehaviorFullScreenAllowsTiling
+                  | NSWindowCollectionBehaviorManaged);
+    behavior |= NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorMoveToActiveSpace
+                | NSWindowCollectionBehaviorTransient | NSWindowCollectionBehaviorIgnoresCycle;
+    window.collectionBehavior = behavior;
+    [window orderOut:nil];
+}
+
+class StrayBrowserClient : public CefClient, public CefLifeSpanHandler, public CefRequestHandler {
+public:
+    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override { windows_.erase(browser->GetIdentifier()); }
+
+    void CloseWindows() {
+        for (auto& entry : windows_) entry.second->GetHost()->CloseBrowser(true);
+    }
+
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                        bool user_gesture, bool is_redirect) override {
+        if (!g_strayPageHandler || !frame->IsMain() || windows_.count(browser->GetIdentifier())) return false;
+        // Chrome's window exists by the first navigation (not yet in OnAfterCreated).
+        NSWindow* window = ((__bridge NSView*)browser->GetHost()->GetWindowHandle()).window;
+        if (window && !(window.styleMask & NSWindowStyleMaskFullSizeContentView)) {
+            windows_[browser->GetIdentifier()] = browser;
+            if (!g_extensionWindows) g_extensionWindows = [NSHashTable weakObjectsHashTable];
+            [g_extensionWindows addObject:window];
+            return false;
+        }
+        HideStrayWindow(window);
+        NSString* url = NSStringFromCef(request->GetURL());
+        if (url.length == 0 || [url isEqualToString:@"about:blank"]) return false;
+        // Chrome's own empty tab (the window it opens to show "extension added" after a
+        // Web Store install): nobody asked for it, so it is closed, not turned into a tab.
+        if ([url hasPrefix:@"chrome://newtab"] || [url hasPrefix:@"chrome://new-tab-page"]) {
+            browser->GetHost()->CloseBrowser(true);
+            return true;
+        }
+        // The profile whose extension asked: its pages belong in a space on that profile (#107).
+        CefRefPtr<CefRequestContext> context = browser->GetHost()->GetRequestContext();
+        NSString* cache = context ? NSStringFromCef(context->GetCachePath()) : @"";
+        // The global context's path is the root folder: that is Default.
+        NSString* profile = !cache.length ? nil : [cache.lastPathComponent hasPrefix:@"Profile "] ? cache.lastPathComponent : @"Default";
+        void (^handler)(NSString*, NSString*) = g_strayPageHandler;
+        dispatch_async(dispatch_get_main_queue(), ^{ handler(url, profile); });
+        browser->GetHost()->CloseBrowser(true);
+        return true;
+    }
+
+private:
+    std::map<int, CefRefPtr<CefBrowser>> windows_;
+    IMPLEMENT_REFCOUNTING(StrayBrowserClient);
+};
+static CefRefPtr<StrayBrowserClient> g_strayClient;
+
+// MARK: - Browser-level DevTools pipe
+
+// With --remote-debugging-pipe Chromium reads protocol messages from fd 3 and
+// writes replies to fd 4, NUL-terminated. CEF runs the browser in this process,
+// so Niche holds the other ends: a trusted client with no port open to anyone else.
+static int g_cdpWriteFD = -1;
+static dispatch_source_t g_cdpReadSource;
+static NSMutableData* g_cdpBuffer;
+static NSMutableDictionary<NSNumber*, void (^)(NSString*, NSString*)>* g_cdpPending;
+static int g_cdpNextID;
+static void (^g_cdpEventHandler)(NSString*, NSString*, NSString*);
+
+static NSString* NicheJSONString(id object) {
+    return [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:object ?: @{} options:0 error:nil]
+                                 encoding:NSUTF8StringEncoding];
+}
+
+static void NicheCDPPipeDeliver(NSData* chunk) {
+    NSDictionary* msg = [NSJSONSerialization JSONObjectWithData:chunk options:0 error:nil];
+    NSNumber* key = [msg[@"id"] isKindOfClass:NSNumber.class] ? msg[@"id"] : nil;
+    if (!key) {
+        if (g_cdpEventHandler && [msg[@"method"] isKindOfClass:NSString.class])
+            g_cdpEventHandler(msg[@"method"], NicheJSONString(msg[@"params"]), msg[@"sessionId"]);
+        return;
+    }
+    void (^done)(NSString*, NSString*) = g_cdpPending[key];
+    [g_cdpPending removeObjectForKey:key];
+    if (!done) return;
+    NSString* json = NicheJSONString(msg[@"error"] ?: msg[@"result"]);
+    msg[@"error"] ? done(nil, json) : done(json, nil);
+}
+
+/// Creates the pipe pair on fds 3/4. NO (and no pipe) when either fd is already in use.
+static bool NicheCDPPipeSetUp() {
+    if (g_cdpWriteFD >= 0) return true;
+    if (fcntl(3, F_GETFD) != -1 || fcntl(4, F_GETFD) != -1) return false;
+    int toChrome[2], fromChrome[2];
+    if (pipe(toChrome) != 0) return false;
+    if (pipe(fromChrome) != 0) { close(toChrome[0]); close(toChrome[1]); return false; }
+    // Park every end above 10 first: pipe() itself may have handed out 3 or 4.
+    int ourWrite = fcntl(toChrome[1], F_DUPFD_CLOEXEC, 10), ourRead = fcntl(fromChrome[0], F_DUPFD_CLOEXEC, 10);
+    int chromeRead = fcntl(toChrome[0], F_DUPFD, 10), chromeWrite = fcntl(fromChrome[1], F_DUPFD, 10);
+    for (int fd : {toChrome[0], toChrome[1], fromChrome[0], fromChrome[1]}) close(fd);
+    dup2(chromeRead, 3);
+    dup2(chromeWrite, 4);
+    close(chromeRead);
+    close(chromeWrite);
+    g_cdpWriteFD = ourWrite;
+    g_cdpBuffer = [NSMutableData data];
+    g_cdpPending = [NSMutableDictionary dictionary];
+    g_cdpReadSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, ourRead, 0, dispatch_get_main_queue());
+    dispatch_source_set_event_handler(g_cdpReadSource, ^{
+        char buf[65536];
+        ssize_t n = read(ourRead, buf, sizeof buf);
+        if (n <= 0) { dispatch_source_cancel(g_cdpReadSource); return; }
+        [g_cdpBuffer appendBytes:buf length:(NSUInteger)n];
+        for (;;) {
+            NSRange nul = [g_cdpBuffer rangeOfData:[NSData dataWithBytes:"" length:1] options:0
+                                             range:NSMakeRange(0, g_cdpBuffer.length)];
+            if (nul.location == NSNotFound) break;
+            NicheCDPPipeDeliver([g_cdpBuffer subdataWithRange:NSMakeRange(0, nul.location)]);
+            [g_cdpBuffer replaceBytesInRange:NSMakeRange(0, nul.location + 1) withBytes:NULL length:0];
+        }
+    });
+    dispatch_resume(g_cdpReadSource);
+    return true;
+}
+
+// Chrome keeps running while a --remote-debugging-pipe client is attached, so
+// CefQuitMessageLoop alone never returns from the run loop (Cmd-Q hung). Hanging
+// up the pipe lets Chrome shut down; it exits cleanly ("exit_type": "Normal").
+static void NicheQuitMessageLoop() {
+    if (g_cdpWriteFD >= 0) {
+        close(g_cdpWriteFD);
+        g_cdpWriteFD = -1;
+    }
+    CefQuitMessageLoop();
+}
+
+// AuthServerAllowlist as an MDM sets it for Chrome or Edge (e.g. "*.example.com").
+// NICHE_AUTH_SERVER_ALLOWLIST overrides it for machines without such a profile.
+static NSString* ManagedAuthServerAllowlist() {
+    NSString* env = NSProcessInfo.processInfo.environment[@"NICHE_AUTH_SERVER_ALLOWLIST"];
+    if (env.length) return env;
+    for (NSString* domain in @[@"com.google.Chrome", @"com.microsoft.Edge"]) {
+        for (NSString* key in @[@"AuthServerAllowlist", @"AuthServerWhitelist"]) {
+            id value = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key,
+                                                                   (__bridge CFStringRef)domain));
+            if ([value isKindOfClass:NSString.class] && [value length]) return value;
+        }
+    }
+    return nil;
+}
+
+/// Before any page loads: with mDNS off, the default policy would hand pages
+/// the real local IP. Pages get the public address STUN reports and nothing else.
+static void ApplyWebRTCPolicy(CefRefPtr<CefRequestContext> context) {
+    CefRefPtr<CefValue> policy = CefValue::Create();
+    policy->SetString("default_public_interface_only");
+    CefString error;
+    if (!context->SetPreference("webrtc.ip_handling_policy", policy, error)) {
+        NSLog(@"NicheCEF: webrtc.ip_handling_policy: %s", error.ToString().c_str());
+    }
+}
+
+/// Niche shows downloads itself, the way Arc does (ADK hands Arc the download and Arc's own UI
+/// shows it; Chrome's toolbar UI never appears). Chrome's download bubble ("Recent download
+/// history") still pops up when a download finishes: with no toolbar to anchor to it is an
+/// invisible window over the page that swallows the next click. This is Chrome's "Show
+/// downloads when they're done" setting.
+static void HideDownloadBubble(CefRefPtr<CefRequestContext> context) {
+    CefRefPtr<CefValue> off = CefValue::Create();
+    off->SetBool(false);
+    CefString error;
+    if (!context->SetPreference("download_bubble.partial_view_enabled", off, error)) {
+        NSLog(@"NicheCEF: download_bubble.partial_view_enabled: %s", error.ToString().c_str());
+    }
+}
+
+static bool g_httpsOnly = false;
+/// Arc's View ▸ Appearance for websites: 0 follows the Mac, 1 light, 2 dark.
+static NSInteger g_websiteAppearance = 0;
+static bool g_incognitoReady = false;
+
+/// Chrome's "Always use secure connections" (Settings ▸ Privacy in Niche).
+static void ApplyHttpsOnly(CefRefPtr<CefRequestContext> context) {
+    if (!context) return;
+    CefRefPtr<CefValue> value = CefValue::Create();
+    value->SetBool(g_httpsOnly);
+    CefString error;
+    if (!context->SetPreference("https_only_mode_enabled", value, error)) {
+        NSLog(@"NicheCEF: https_only_mode_enabled: %s", error.ToString().c_str());
+    }
+}
+
+/// Chrome's colour mode for the profile, which is what its pages' prefers-color-scheme follows.
+static void ApplyWebsiteAppearance(CefRefPtr<CefRequestContext> context) {
+    if (!context) return;
+    cef_color_variant_t mode = g_websiteAppearance == 1 ? CEF_COLOR_VARIANT_LIGHT
+        : g_websiteAppearance == 2 ? CEF_COLOR_VARIANT_DARK : CEF_COLOR_VARIANT_SYSTEM;
+    if (context->GetChromeColorSchemeMode() != mode) context->SetChromeColorScheme(mode, 0);
+}
+
+static void ApplyProfilePreferences(CefRefPtr<CefRequestContext> context) {
+    ApplyWebsiteAppearance(context);
+    ApplyWebRTCPolicy(context);
+    HideDownloadBubble(context);
+    ApplyHttpsOnly(context);
+}
+
+static const char kNotificationBlocksCleared[] = "niche.notification_blocks_cleared";
+
+/// Up to 0.1.27 Niche answered every notification request with a quiet deny, and Chromium kept
+/// each one as the site's notification block (Messenger, Facebook, YouTube...), so those sites
+/// could never ask again. Once per profile, those blocks go back to Ask. Blocks made after this
+/// come from the prompt and stay.
+static void ClearSilentNotificationBlocks(CefRefPtr<CefRequestContext> context) {
+    CefRefPtr<CefValue> done = context->GetPreference(kNotificationBlocksCleared);
+    if (!done || done->GetType() != VTYPE_BOOL || done->GetBool()) return;
+    CefRefPtr<CefValue> exceptions = context->GetPreference("profile.content_settings.exceptions.notifications");
+    if (exceptions && exceptions->GetType() == VTYPE_DICTIONARY) {
+        CefRefPtr<CefDictionaryValue> sites = exceptions->GetDictionary();
+        CefDictionaryValue::KeyList patterns;
+        sites->GetKeys(patterns);
+        for (const CefString& pattern : patterns) {
+            CefRefPtr<CefDictionaryValue> entry = sites->GetDictionary(pattern);
+            if (!entry || entry->GetInt("setting") != CEF_CONTENT_SETTING_VALUE_BLOCK) continue;
+            // "https://www.messenger.com:443,*": the requesting origin, any top-level site.
+            std::string origin = pattern.ToString().substr(0, pattern.ToString().find(','));
+            context->SetContentSetting(origin, origin, CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS,
+                                       CEF_CONTENT_SETTING_VALUE_DEFAULT);
+            NSLog(@"NicheCEF: notification block cleared for %s", origin.c_str());
+        }
+    }
+    CefRefPtr<CefValue> yes = CefValue::Create();
+    yes->SetBool(true);
+    CefString error;
+    if (!context->SetPreference(kNotificationBlocksCleared, yes, error)) {
+        NSLog(@"NicheCEF: %s: %s", kNotificationBlocksCleared, error.ToString().c_str());
+    }
+}
+
+// Niche's extension list (ExtensionStore) reads extensions.settings. On disk it lags ~10 s
+// behind an install (Chromium's pref writer batches), so a "Load unpacked" extension was
+// missing from the Site Control Center (GitHub #43); the live pref and its changes are not.
+static void (^g_extensionSettingsHandler)(void) = nil;
+static bool g_extensionSettingsChangePending = false;
+
+class ExtensionSettingsObserver : public CefPreferenceObserver {
+public:
+    void OnPreferenceChanged(const CefString& name) override {
+        // An install changes the pref several times in a row: one reload for all of them.
+        if (!g_extensionSettingsHandler || g_extensionSettingsChangePending || g_quitting) return;
+        g_extensionSettingsChangePending = true;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            g_extensionSettingsChangePending = false;
+            if (g_extensionSettingsHandler) g_extensionSettingsHandler();
+        });
+    }
+private:
+    IMPLEMENT_REFCOUNTING(ExtensionSettingsObserver);
+};
+static std::vector<CefRefPtr<CefRegistration>> g_extensionSettingsObservers;
+
+static void ObserveExtensionSettings(CefRefPtr<CefRequestContext> context) {
+    static CefRefPtr<ExtensionSettingsObserver> observer = new ExtensionSettingsObserver();
+    if (CefRefPtr<CefRegistration> r = context->AddPreferenceObserver("extensions.settings", observer)) {
+        g_extensionSettingsObservers.push_back(r);
+    }
+}
+
+// Secure DNS lives in Local State, the global preference manager, not in a profile (#110).
+// Picking a provider changes mode and templates one after the other: one call for both.
+static void (^g_secureDNSHandler)(void) = nil;
+static bool g_secureDNSChangePending = false;
+static std::vector<CefRefPtr<CefRegistration>> g_secureDNSObservers;
+
+static void NotifySecureDNS() {
+    if (!g_secureDNSHandler || g_secureDNSChangePending || g_quitting) return;
+    g_secureDNSChangePending = true;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        g_secureDNSChangePending = false;
+        if (g_secureDNSHandler && !g_quitting) g_secureDNSHandler();
+    });
+}
+
+class SecureDNSObserver : public CefPreferenceObserver {
+public:
+    void OnPreferenceChanged(const CefString& name) override { NotifySecureDNS(); }
+private:
+    IMPLEMENT_REFCOUNTING(SecureDNSObserver);
+};
+
+static void ObserveSecureDNS() {
+    CefRefPtr<CefPreferenceManager> local = CefPreferenceManager::GetGlobalPreferenceManager();
+    if (!local) return;
+    CefRefPtr<SecureDNSObserver> observer = new SecureDNSObserver();
+    for (const char* name : {"dns_over_https.mode", "dns_over_https.templates"}) {
+        if (CefRefPtr<CefRegistration> r = local->AddPreferenceObserver(name, observer)) g_secureDNSObservers.push_back(r);
+    }
+}
+
+static NSString* SecureDNSPreference(const char* name) {
+    if (!g_contextInitialized || g_quitting) return nil;
+    CefRefPtr<CefPreferenceManager> local = CefPreferenceManager::GetGlobalPreferenceManager();
+    CefRefPtr<CefValue> value = local ? local->GetPreference(name) : nullptr;
+    if (!value || value->GetType() != VTYPE_STRING) return nil;
+    return NSStringFromCef(value->GetString());
+}
+
+/// Profiles other than the global Default one get the same preferences once they load,
+/// then create the browsers that waited for them.
+class ProfileContextHandler : public CefRequestContextHandler {
+public:
+    explicit ProfileContextHandler(NSString* path = nil) : path_([path copy]) {}
+    void OnRequestContextInitialized(CefRefPtr<CefRequestContext> context) override {
+        ApplyProfilePreferences(context);
+        if (!path_) { g_incognitoReady = true; return; }
+        ClearSilentNotificationBlocks(context);
+        ObserveExtensionSettings(context);
+        if (!g_readyProfiles) g_readyProfiles = [NSMutableSet set];
+        [g_readyProfiles addObject:path_];
+        NSArray<NicheBrowser*>* waiting = [g_waitingForProfile[path_] copy];
+        [g_waitingForProfile removeObjectForKey:path_];
+        for (NicheBrowser* b in waiting) [b createNow];
+    }
+private:
+    NSString* path_;
+    IMPLEMENT_REFCOUNTING(ProfileContextHandler);
+};
+
+/// Incognito windows share one off-the-record profile (an empty cache path keeps
+/// cookies, storage and cache in memory) until the last of them closes.
+static CefRefPtr<CefRequestContext> IncognitoContext() {
+    if (!g_incognitoContext) g_incognitoContext = CefRequestContext::CreateContext(CefRequestContextSettings(), new ProfileContextHandler());
+    return g_incognitoContext;
+}
+
+/// A space's own profile: cookies, logins, storage and cache in a folder next to
+/// Default (it must sit under root_cache_path). nil is the global Default profile
+/// (--profile-directory=Default keeps it there).
+static CefRefPtr<CefRequestContext> ProfileContext(NSString* path) {
+    if (!path.length) return nullptr;
+    std::string key = path.UTF8String;
+    auto it = g_profileContexts.find(key);
+    if (it != g_profileContexts.end()) return it->second;
+    CefRequestContextSettings settings;
+    CefString(&settings.cache_path) = CefStringFromNS(path);
+    settings.persist_session_cookies = true;
+    CefRefPtr<CefRequestContext> context = CefRequestContext::CreateContext(settings, new ProfileContextHandler(path));
+    g_profileContexts[key] = context;
+    return context;
+}
+
+/// Loads the profile if needed. NO means `browser` waits and is created once it has loaded.
+static BOOL ProfileReady(NSString* path, NicheBrowser* browser) {
+    if (!path.length) return YES;
+    ProfileContext(path);
+    if ([g_readyProfiles containsObject:path]) return YES;
+    if (!g_waitingForProfile) g_waitingForProfile = [NSMutableDictionary dictionary];
+    if (!g_waitingForProfile[path]) g_waitingForProfile[path] = [NSMutableArray array];
+    if (![g_waitingForProfile[path] containsObject:browser]) [g_waitingForProfile[path] addObject:browser];
+    return NO;
+}
+
+class NicheApp : public CefApp, public CefBrowserProcessHandler {
+public:
+    CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+
+    void OnRegisterCustomPreferences(cef_preferences_type_t type, CefRawPtr<CefPreferenceRegistrar> registrar) override {
+        if (type != CEF_PREFERENCES_TYPE_REQUEST_CONTEXT) return;
+        CefRefPtr<CefValue> no = CefValue::Create();
+        no->SetBool(false);
+        registrar->AddPreference(kNotificationBlocksCleared, no);
+    }
+
+    CefRefPtr<CefClient> GetDefaultClient() override {
+        if (!g_strayClient) g_strayClient = new StrayBrowserClient();
+        return g_strayClient;
+    }
+
+    void OnBeforeCommandLineProcessing(const CefString& process_type,
+                                       CefRefPtr<CefCommandLine> command_line) override {
+        if (!process_type.empty()) return;
+        // Cookies and passwords are encrypted with the secret in the "Niche Safe Store"
+        // Keychain item (SafeStorage.swift). Only unsigned dev builds on a profile that
+        // never used it keep the mock keychain, whose secret is a public constant: the
+        // Keychain would ask for the login password after every rebuild.
+        if (g_useMockKeychain) command_line->AppendSwitch("use-mock-keychain");
+        // Chrome-style windows are ours; Chrome must not restore or reopen them.
+        command_line->AppendSwitch("no-startup-window");
+        command_line->AppendSwitch("disable-session-crashed-bubble");
+        command_line->AppendSwitch("hide-crash-restore-bubble");
+        command_line->AppendSwitch("no-first-run");
+        // The global request context, which Default spaces, fetches and extension settings use
+        // (ProfileContext(nil)), is the profile Chrome starts with. Without a profile directory
+        // that is Local State's profile.last_used, which a focused page in another space's
+        // profile sets, so after a relaunch Default pages loaded in that profile (#81).
+        command_line->AppendSwitchWithValue("profile-directory", "Default");
+        // Unpacked Chrome extensions (Chrome-style browsers only): one folder per extension.
+        if (process_type.empty()) {
+            // The app lists them from the same data root as AppPaths/ExtensionStore. The
+            // command line installs them in every profile; Niche's CEF build skips a profile
+            // --cra-load-extension-profiles leaves out (extension-profiles.patch, #131).
+            if (g_extensionPaths.count) {
+                command_line->AppendSwitchWithValue("load-extension", CefStringFromNS([g_extensionPaths componentsJoinedByString:@","]));
+                if (g_extensionProfiles) command_line->AppendSwitchWithValue("cra-load-extension-profiles", CefStringFromNS(g_extensionProfiles));
+            }
+        }
+        command_line->AppendSwitchWithValue("autoplay-policy", "document-user-activation-required");
+        // WebRTC hides this Mac's local IP behind a random .local name announced over
+        // mDNS, and macOS asks for Local Network access the first time any page (an
+        // ad script will do) opens a peer connection. Niche offers no local address at
+        // all instead (webrtc.ip_handling_policy, set in OnContextInitialized), so
+        // there is nothing to announce and the mDNS responder can stay off.
+        // The WebUI omnibox popups go too. Every page carries Chrome's toolbar, hidden
+        // (NicheChromeViewDelegate), and since Chromium 156 its omnibox pre-warms a WebUI popup: a hidden widget with its own compositor plus a
+        // chrome://omnibox-popup document, about 45 MB a tab (GPU surfaces and one shared WebUI
+        // renderer). Niche never shows Chrome's omnibox; the views popup it falls back to is built
+        // only when the omnibox opens.
+        std::string disabled = command_line->GetSwitchValue("disable-features");
+        command_line->AppendSwitchWithValue("disable-features",
+            (disabled.empty() ? "" : disabled + ",") + "WebRtcHideLocalIpsWithMdns,"
+            + "WebUIOmniboxPopup,WebUIOmniboxAimPopup");
+        // --load-extension loads after the restored tabs start loading. The first extension
+        // with webRequest or declarativeNetRequest makes Chromium reset the profile's URL
+        // loader factories (WebRequestAPI::UpdateMayHaveProxies), which strands a navigation
+        // already in flight: the tab stayed blank and "loading" for good. Proxying from the
+        // start leaves nothing to reset (it also covers such an extension installed later).
+        std::string enabled = command_line->GetSwitchValue("enable-features");
+        command_line->AppendSwitchWithValue("enable-features",
+            (enabled.empty() ? "" : enabled + ",") + "ForceWebRequestProxyForTest,"
+            // Tab sleeping discards a page in place (Cra.discard), as Arc's Chromium does: the tab
+            // keeps its back/forward list and scroll position, and loads again when shown (#153).
+            + "WebContentsDiscard,"
+            // Chrome keeps its video PiP's origin strip (favicon, host, a dark top scrim) on screen
+            // until the person clicks or types in that window, unless the page is file:// or has
+            // high media engagement (VideoOverlayWindowViews::UpdateControlsVisibility). Niche's
+            // overlay takes every click, so on YouTube the strip never left (#246). Treated as
+            // trusted, the window hides it from the start; Niche's own top bar shows the host on hover,
+            // as Arc's does. The feature does nothing else (Chromium 156).
+            + "VideoPipForceTrustedForMediaPlaybackForTesting,"
+            // A hidden page's frame unlocks, so Chromium can evict it past its saved-frame cap or
+            // after 5 minutes, as Chrome does for background tabs (Niche's are never detached from
+            // their window, which is how Chrome gets there). Niche's page windows then let go of
+            // it (MainWindowController.releaseHiddenFrames, #195).
+            + "HideDelegatedFrameHostMac");
+        // Kerberos/NTLM single sign-on (ADFS /adfs/ls/wia and the like). Chromium only sends
+        // the OS ticket to allowlisted hosts, and IT sets that list as a Chrome or Edge policy,
+        // which CEF never reads. Without it those logins fail with ERR_INVALID_AUTH_CREDENTIALS.
+        if (NSString* allowlist = ManagedAuthServerAllowlist()) {
+            command_line->AppendSwitchWithValue("auth-server-allowlist", CefStringFromNS(allowlist));
+        }
+        // Browser-level DevTools protocol over a private pipe (fd 3/4, no port): the trusted
+        // client Chrome requires for Extensions.triggerAction (toolbar extension buttons).
+        if (NicheCDPPipeSetUp()) {
+            command_line->AppendSwitch("remote-debugging-pipe");
+            command_line->AppendSwitch("enable-unsafe-extension-debugging");
+        }
+    }
+
+    // Chromium copies --remote-debugging-pipe to renderers, where it turns on
+    // navigator.webdriver ("automation controlled"). Google sign-in then refuses
+    // with "This browser or app may not be secure". The copy happens after this
+    // hook, so removing the switch here does nothing; switch the feature off.
+    void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command_line) override {
+        if (command_line->GetSwitchValue("type") == "renderer") {
+            command_line->AppendSwitchWithValue("disable-blink-features", "AutomationControlled");
+        }
+    }
+
+    // Another Niche process started (LaunchServices, `open -n`). Chromium's
+    // process singleton hands its command line to us. Without this CEF opens
+    // a stock Chrome-style window.
+    bool OnAlreadyRunningAppRelaunch(CefRefPtr<CefCommandLine> command_line,
+                                     const CefString& current_directory) override {
+        CEF_REQUIRE_UI_THREAD();
+        std::vector<CefString> args;
+        command_line->GetArguments(args);
+        NSMutableArray<NSString*>* urls = [NSMutableArray array];
+        for (const auto& a : args) {
+            NSString* str = NSStringFromCef(a);
+            if ([str hasPrefix:@"http://"] || [str hasPrefix:@"https://"] || [str hasPrefix:@"niche://"] || [str hasPrefix:@"file://"]) {
+                [urls addObject:str];
+            }
+        }
+        if (g_relaunchHandler) g_relaunchHandler(urls);
+        return true;
+    }
+
+    void OnContextInitialized() override {
+        CEF_REQUIRE_UI_THREAD();
+        ApplyProfilePreferences(CefRequestContext::GetGlobalContext());
+        ClearSilentNotificationBlocks(CefRequestContext::GetGlobalContext());
+        ObserveExtensionSettings(CefRequestContext::GetGlobalContext());
+        ObserveSecureDNS();
+        g_contextInitialized = true;
+        NotifySecureDNS();
+        NSArray<NicheBrowser*>* pending = [g_pendingCreation copy];
+        [g_pendingCreation removeAllObjects];
+        for (NicheBrowser* b in pending) {
+            [b createNow];
+        }
+    }
+
+private:
+    IMPLEMENT_REFCOUNTING(NicheApp);
+};
+
+// MARK: - Favicon download
+
+/// The icon URL a browser last got a favicon from, shared with its downloads.
+class FaviconState : public virtual CefBaseRefCounted {
+public:
+    std::string downloaded;
+    IMPLEMENT_REFCOUNTING(FaviconState);
+};
+
+class FaviconCallback : public CefDownloadImageCallback {
+public:
+    FaviconCallback(NicheBrowser* owner, CefRefPtr<FaviconState> state, std::string url)
+        : owner_(owner), state_(state), url_(std::move(url)) {}
+
+    void OnDownloadImageFinished(const CefString& image_url, int http_status_code,
+                                 CefRefPtr<CefImage> image) override {
+        NicheBrowser* owner = owner_;
+        if (!owner || !image || image->IsEmpty()) return;
+        int w = 0, h = 0;
+        CefRefPtr<CefBinaryValue> png = image->GetAsPNG(2.0f, true, w, h);
+        if (!png || png->GetSize() == 0) png = image->GetAsPNG(1.0f, true, w, h);
+        if (!png || png->GetSize() == 0) return;
+        size_t n = png->GetSize();
+        std::vector<uint8_t> bytes(n);
+        png->GetData(bytes.data(), n, 0);
+        NSData* data = [NSData dataWithBytes:bytes.data() length:n];
+        NSImage* img = [[NSImage alloc] initWithData:data];
+        if (!img) return;
+        state_->downloaded = url_;
+        [owner.delegate browser:owner didLoadFavicon:img forURL:NSStringFromCef(image_url)];
+    }
+
+private:
+    __weak NicheBrowser* owner_;
+    CefRefPtr<FaviconState> state_;
+    std::string url_;
+    IMPLEMENT_REFCOUNTING(FaviconCallback);
+};
+
+// MARK: - Browser fetch
+
+typedef void (^NicheFetchCompletion)(NSInteger, NSString*, NSString*, NSString*);
+
+/// Collects a CefURLRequest's body. Requests made on the UI thread call back on it.
+class FetchClient : public CefURLRequestClient {
+public:
+    explicit FetchClient(NicheFetchCompletion completion) : completion_([completion copy]) {}
+
+    void OnDownloadData(CefRefPtr<CefURLRequest> request, const void* data, size_t length) override {
+        body_.append(static_cast<const char*>(data), length);
+    }
+    void OnRequestComplete(CefRefPtr<CefURLRequest> request) override {
+        CefRefPtr<CefResponse> response = request->GetResponse();
+        bool ok = request->GetRequestStatus() == UR_SUCCESS && response;
+        NSInteger status = ok ? response->GetStatus() : 0;
+        NSString* finalURL = response ? NSStringFromCef(response->GetURL()) : @"";
+        if (!finalURL.length) finalURL = NSStringFromCef(request->GetRequest()->GetURL());
+        NSString* mime = response ? NSStringFromCef(response->GetMimeType()) : @"";
+        NSString* body = [[NSString alloc] initWithBytes:body_.data() length:body_.size() encoding:NSUTF8StringEncoding] ?: @"";
+        NicheFetchCompletion done = completion_;
+        completion_ = nil;
+        CefRefPtr<CefURLRequest> finished = request;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            InFlight().erase(finished);
+            if (done) done(status, finalURL, mime, body);
+        });
+    }
+    /// Requests stay referenced until they complete.
+    static std::set<CefRefPtr<CefURLRequest>>& InFlight() { static std::set<CefRefPtr<CefURLRequest>> s; return s; }
+    void OnUploadProgress(CefRefPtr<CefURLRequest> request, int64_t current, int64_t total) override {}
+    void OnDownloadProgress(CefRefPtr<CefURLRequest> request, int64_t current, int64_t total) override {}
+    bool GetAuthCredentials(bool isProxy, const CefString& host, int port, const CefString& realm, const CefString& scheme,
+                            CefRefPtr<CefAuthCallback> callback) override { return false; }
+
+private:
+    NicheFetchCompletion completion_;
+    std::string body_;
+    IMPLEMENT_REFCOUNTING(FetchClient);
+};
+
+// MARK: - DevTools client
+
+// Diagnostic log for the DevTools life cycle: `defaults write com.niche.browser devToolsLog -bool YES`,
+// then read $TMPDIR/niche-devtools.log.
+static void NicheDevToolsLog(NSString* fmt, ...) NS_FORMAT_FUNCTION(1, 2);
+static void NicheDevToolsLog(NSString* fmt, ...) {
+    static BOOL enabled = [[NSUserDefaults standardUserDefaults] boolForKey:@"devToolsLog"];
+    if (!enabled) return;
+    va_list ap;
+    va_start(ap, fmt);
+    NSString* s = [[NSString alloc] initWithFormat:fmt arguments:ap];
+    va_end(ap);
+    NSString* path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"niche-devtools.log"];
+    NSString* line = [NSString stringWithFormat:@"%.3f %@\n", [NSDate date].timeIntervalSince1970, s];
+    FILE* f = fopen(path.fileSystemRepresentation, "a");
+    if (f) { fputs(line.UTF8String, f); fclose(f); }
+}
+
+// Chrome's DevTools the way Arc (plain Chromium) shows it: the frontend runs with
+// can_dock=true, draws the dock/page split and the device toolbar itself, and tells
+// the embedder where the page goes (InspectorFrontendHost.setInspectedPageBounds).
+// CEF opens Chrome-style DevTools as an undockable popup, so the popup is reloaded
+// once with can_dock=true and the frontend's embedder calls are mirrored to the
+// shell as console messages; the shell then lays the page window over the
+// placeholder exactly like Chrome's BrowserView does.
+static const char kNicheDevToolsHooks[] =
+    "(function(){var h=window.InspectorFrontendHost;if(!h||h.__niche)return;h.__niche=1;"
+    "function find(root,sel){var r=root.querySelector(sel);if(r)return r;var all=root.querySelectorAll('*');"
+    "for(var i=0;i<all.length;i++){if(all[i].shadowRoot){var f=find(all[i].shadowRoot,sel);if(f)return f;}}return null;}"
+    "function make(){var b=document.createElement('button');b.id='niche-close';b.title='Close DevTools';b.setAttribute('aria-label','Close DevTools');"
+    "b.style.cssText='all:unset;box-sizing:border-box;cursor:pointer;width:26px;height:26px;margin:0 2px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:var(--icon-default,#9aa0a6)';"
+    "b.innerHTML='<svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\"><path d=\"M2 2l10 10M12 2L2 12\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" fill=\"none\"/></svg>';"
+    "b.onmouseenter=function(){b.style.background='var(--sys-color-state-hover-on-subtle,rgba(128,128,128,.25))';};"
+    "b.onmouseleave=function(){b.style.background='';};b.onclick=function(){console.log('__niche_devtools_close');};return b;}"
+    "var timer=null;"
+    "function installClose(){if(timer)return;var n=0;timer=setInterval(function(){"
+    "if(find(document,'#niche-close')){clearInterval(timer);timer=null;return;}"
+    "var bar=find(document,'.tabbed-pane-right-toolbar');"
+    "if(bar&&bar.parentNode){var b=make();b.style.alignSelf='center';b.style.margin='0 4px 0 2px';b.style.order='9999';bar.parentNode.appendChild(b);clearInterval(timer);timer=null;return;}"
+    "if(++n>60){clearInterval(timer);timer=null;var f=make();f.style.position='fixed';f.style.top='1px';f.style.right='4px';f.style.zIndex='2147483647';document.body.appendChild(f);}},150);}"
+    "function removeClose(){if(timer){clearInterval(timer);timer=null;}var b=find(document,'#niche-close');if(b)b.remove();}"
+    "h.closeWindow=function(){console.log('__niche_devtools_close');};"
+    // Chrome asks the frontend for a panel or the element picker once it reports loadCompleted
+    // (DevToolsWindow::DoAction); -runDevToolsAction queues on __nicheRun until then.
+    "var lc=h.loadCompleted;h.loadCompleted=function(){var r=lc&&lc.apply(h,arguments);h.__nicheLoaded=1;"
+    "var q=h.__nicheRun||[];h.__nicheRun=[];q.forEach(function(f){f();});return r;};"
+    // The panel on show, so Console and Network can tell a switch from a close (GitHub #138):
+    // the main tab bar is the one with Elements; its selected tab is #tab-<panel>.
+    "(function(){var now=null,n=0,w=setInterval(function(){var e=find(document,'#tab-elements'),tabs=e&&e.parentNode;"
+    "if(tabs){clearInterval(w);var report=function(){var t=tabs.querySelector('.tabbed-pane-header-tab.selected');"
+    "var p=t&&t.id.indexOf('tab-')==0?t.id.slice(4):null;if(p&&p!==now){now=p;console.log('__niche_devtools_panel:'+p);}};"
+    "report();new MutationObserver(report).observe(tabs,{attributes:true,subtree:true,attributeFilter:['class']});return;}"
+    "if(++n>200)clearInterval(w);},150);})();"
+    "if(!/[?&]can_dock=/.test(location.search)){installClose();return;}"
+    "var sent=false;"
+    "h.setInspectedPageBounds=function(b){sent=true;try{console.log('__niche_devtools_bounds:'+JSON.stringify({x:b.x,y:b.y,width:b.width,height:b.height}));}catch(e){}};"
+    // Chrome never hears about docking: the shell owns the layout. The frontend only
+    // needs its acknowledgement (DockController waits for it before relayout). Docked, the
+    // frontend shows its own close button; undocked, the window's title bar has one.
+    "h.setIsDocked=function(d,cb){console.log('__niche_devtools_docked:'+(d?1:0));removeClose();"
+    "if(cb)setTimeout(function(){cb();},0);};"
+    // Docked frontends re-send the placeholder on resize; an undocked one stays silent.
+    "window.dispatchEvent(new Event('resize'));"
+    "requestAnimationFrame(function(){requestAnimationFrame(function(){setTimeout(function(){if(!sent)console.log('__niche_devtools_docked:0');},80);});});"
+    "})();";
+
+class DevToolsClient : public CefClient, public CefLifeSpanHandler, public CefLoadHandler, public CefDisplayHandler,
+                       public CefRequestHandler {
+public:
+    DevToolsClient(NSRect frame, NicheBrowser* owner, NSView* host) : frame_(frame), owner_(owner), host_(host) {}
+    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                        bool user_gesture, bool is_redirect) override {
+        if (frame->IsMain()) NicheDevToolsLog(@"OnBeforeBrowse %s", request->GetURL().ToString().c_str());
+        return false;
+    }
+    // The frontend's own helper pages (device_mode_emulation_frame.html when undocked)
+    // would become stray CEF windows; Chrome never shows them either.
+    bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
+                       const CefString& target_url, const CefString& target_frame_name,
+                       WindowOpenDisposition target_disposition, bool user_gesture,
+                       const CefPopupFeatures& popupFeatures, CefWindowInfo& windowInfo,
+                       CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
+                       CefRefPtr<CefDictionaryValue>& extra_info, bool* no_javascript_access) override {
+        std::string url = target_url.ToString();
+        NicheDevToolsLog(@"DevTools popup %s", url.c_str());
+        if (url.rfind("devtools://", 0) == 0 || url.empty() || url == "about:blank") return true;
+        if (NicheBrowser* o = owner_) [o.delegate browser:o requestsNewTabWithURL:[NSString stringWithUTF8String:url.c_str()] inBackground:NO];
+        return true;
+    }
+    void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType transition_type) override {
+        if (!frame->IsMain()) return;
+        NicheDevToolsLog(@"OnLoadStart %s", frame->GetURL().ToString().c_str());
+        // Chrome picks the frontend URL (OnBeforeBrowse never sees it), so the earliest
+        // point to swap in can_dock=true is the first load's start: the frontend app then
+        // loads once instead of twice (GitHub #42).
+        if (host_) MakeDockable(browser, frame);
+    }
+    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override {
+        if (!frame->IsMain()) return;
+        NicheDevToolsLog(@"OnLoadEnd %s", frame->GetURL().ToString().c_str());
+        if (host_) Prepare(browser, frame);
+        else if (NicheBrowser* o = owner_; o && IsFrontend(frame->GetURL().ToString())) [o runDevToolsAction];
+    }
+
+    static bool IsFrontend(const std::string& url) {
+        // Only the main frontend; helper pages it opens (device_mode_emulation_frame.html
+        // when undocked) must not report dock state or page bounds.
+        return url.rfind("devtools://", 0) == 0
+            && (url.find("/devtools_app.html") != std::string::npos || url.find("/inspector.html") != std::string::npos);
+    }
+
+    // A Chrome-style frontend opens undockable; load it again with can_dock=true (once).
+    bool MakeDockable(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) {
+        std::string url = frame->GetURL().ToString();
+        if (reloaded_ || !IsFrontend(url) || !browser->GetHost()->HasView() || url.find("can_dock=") != std::string::npos) return false;
+        reloaded_ = true;
+        std::string docked = url + (url.find('?') == std::string::npos ? "?" : "&") + "can_dock=true";
+        NicheDevToolsLog(@"reloading as dockable: %s", docked.c_str());
+        frame->LoadURL(docked);
+        return true;
+    }
+
+    // Docked mode: make a Chrome-style frontend dockable, then hook it.
+    // Alloy frontends (can_dock=false, no close button) only get the close button.
+    void Prepare(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) {
+        std::string url = frame->GetURL().ToString();
+        if (!IsFrontend(url) || MakeDockable(browser, frame)) return;
+        // The undockable load that MakeDockable replaced still reports its end.
+        if (reloaded_ && url.find("can_dock=") == std::string::npos) return;
+        frame->ExecuteJavaScript(kNicheDevToolsHooks, frame->GetURL(), 0);
+        if (NicheBrowser* o = owner_) [o runDevToolsAction];
+    }
+
+    bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level, const CefString& message,
+                          const CefString& source, int line) override {
+        static const std::string kClose = "__niche_devtools_close";
+        static const std::string kBounds = "__niche_devtools_bounds:";
+        static const std::string kDocked = "__niche_devtools_docked:";
+        static const std::string kPanel = "__niche_devtools_panel:";
+        std::string m = message.ToString();
+        if (m == kClose) {
+            if (NicheBrowser* o = owner_) [o closeDevTools];
+            return true;
+        }
+        if (m.rfind(kBounds, 0) == 0) {
+            NSData* data = [[NSString stringWithUTF8String:m.c_str() + kBounds.size()] dataUsingEncoding:NSUTF8StringEncoding];
+            id d = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            if ([d isKindOfClass:[NSDictionary class]]) {
+                NSRect r = NSMakeRect([d[@"x"] doubleValue], [d[@"y"] doubleValue], [d[@"width"] doubleValue], [d[@"height"] doubleValue]);
+                NicheDevToolsLog(@"bounds %@", NSStringFromRect(r));
+                if (NicheBrowser* o = owner_) [o.delegate browser:o devToolsPageBounds:r];
+            }
+            return true;
+        }
+        if (m.rfind(kPanel, 0) == 0) {
+            NSString* panel = [NSString stringWithUTF8String:m.c_str() + kPanel.size()];
+            NicheDevToolsLog(@"panel %@", panel);
+            NicheBrowser* o = owner_;
+            if (o && panel.length && [o.delegate respondsToSelector:@selector(browser:devToolsShowsPanel:)])
+                [o.delegate browser:o devToolsShowsPanel:panel];
+            return true;
+        }
+        if (m.rfind("__niche_dbg:", 0) == 0) { NicheDevToolsLog(@"%s", m.c_str()); return true; }
+        if (m.rfind(kDocked, 0) == 0) {
+            BOOL docked = m.size() > kDocked.size() && m[kDocked.size()] == '1';
+            NicheDevToolsLog(@"docked=%d", docked);
+            if (NicheBrowser* o = owner_) [o.delegate browser:o devToolsDocked:docked];
+            return true;
+        }
+        return false;
+    }
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        g_liveBrowsers++;
+        if (NicheBrowser* o = owner_) [o devToolsBrowserCreated:browser];
+        NSView* view = (__bridge NSView*)browser->GetHost()->GetWindowHandle();
+        if (host_) {
+            if (browser->GetHost()->HasView()) {
+                // Chrome-style (Views) DevTools: NicheDevToolsWindowDelegate reports the
+                // window once it exists. The frontend may already be loaded by now.
+                CefRefPtr<CefFrame> main = browser->GetMainFrame();
+                NicheDevToolsLog(@"OnAfterCreated (Views) url=%s loading=%d", main ? main->GetURL().ToString().c_str() : "",
+                               browser->IsLoading());
+                if (main && !browser->IsLoading()) Prepare(browser, main);
+                return;
+            }
+            // Alloy: CEF owns a hidden window; the shell attaches it as a child window
+            // over the dock area. (A child *browser* for DevTools trips a CHECK in CEF
+            // 154, and re-parenting the view is unsafe because CEF closes `view.window`
+            // when DevTools closes.)
+            if (NicheBrowser* o = owner_) [o.delegate browser:o didCreateDevToolsView:view];
+            return;
+        }
+        // CEF sizes its own DevTools window with a default; put it where we want it.
+        NSWindow* w = view.window;
+        if (w && frame_.size.width > 0) {
+            [w setFrame:frame_ display:YES];
+            [w makeKeyAndOrderFront:nil];
+        }
+    }
+    bool DoClose(CefRefPtr<CefBrowser> browser) override { return false; }
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+        g_liveBrowsers--;
+        NicheDevToolsLog(@"OnBeforeClose");
+        if (NicheBrowser* o = owner_) { [o devToolsBrowserClosed]; [o.delegate browserDidCloseDevTools:o]; }
+        if (g_quitting && g_liveBrowsers <= 0) NicheQuitMessageLoop();
+    }
+private:
+    NSRect frame_;
+    __weak NicheBrowser* owner_;
+    NSView* host_;
+    bool reloaded_ = false;
+    IMPLEMENT_REFCOUNTING(DevToolsClient);
+};
+
+/// The page area before a page reports its own background: Arc fills it black while websites
+/// are dark and white while they are light (measured on Arc 1.171, also for a tab it restores
+/// unloaded). Pages follow the app's appearance; Niche sets no colour scheme of its own.
+static BOOL PagesAreDark() {
+    if (g_websiteAppearance) return g_websiteAppearance == 2;
+    return [[NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]]
+        isEqualToString:NSAppearanceNameDarkAqua];
+}
+static cef_color_t NicheCanvasColor() {
+    return PagesAreDark() ? CefColorSetARGB(255, 0, 0, 0) : CefColorSetARGB(255, 255, 255, 255);
+}
+
+// "rgb(r, g, b)" / "rgba(r, g, b, a)" from getComputedStyle as "#RRGGBB"; "" when
+// unparsable or mostly transparent.
+static NSString* HexFromCSSColor(const std::string& css) {
+    int r = 0, g = 0, b = 0; float a = 1;
+    if (sscanf(css.c_str(), "rgba(%d, %d, %d, %f)", &r, &g, &b, &a) == 4 || sscanf(css.c_str(), "rgb(%d, %d, %d)", &r, &g, &b) == 3) {
+        if (a > 0.5f) return [NSString stringWithFormat:@"#%02X%02X%02X", r, g, b];
+    }
+    return @"";
+}
+
+// What the page paints behind its content: the root's background, else the body's
+// (CSS propagates it to the canvas), else the canvas colour of the page's color
+// scheme ('' before the document has a root).
+#define NICHE_PAGE_BACKGROUND_FN \
+    "function(){var r=document.documentElement;if(!r)return '';" \
+    "var bg=function(e){var c=e?getComputedStyle(e).backgroundColor:'';return c&&c!=='transparent'&&c!=='rgba(0, 0, 0, 0)'?c:'';};" \
+    "var c=bg(r)||bg(document.body);" \
+    "if(!c){var d=document.createElement('div');d.style.color='Canvas';r.appendChild(d);c=getComputedStyle(d).color;d.remove();}" \
+    "return c;}"
+
+// Runs a page script through Niche Helper's renderer handler (Sources/NicheHelper/main.cc), never
+// through the page's console: Niche writes nothing to a site's DevTools and adds no globals.
+// `script` is a function expression that takes `send(string)`, whose strings come back as
+// "Niche.page" messages (NicheClient::HandlePageMessage). A named script runs once per document:
+// later runs call the function it returned instead, if it returned one.
+static void RunPageScript(CefRefPtr<CefFrame> frame, const std::string& name, const CefString& script) {
+    if (!frame || !frame->IsValid()) return;
+    CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create("Niche.run");
+    message->GetArgumentList()->SetString(0, name);
+    message->GetArgumentList()->SetString(1, script);
+    frame->SendProcessMessage(PID_RENDERER, message);
+}
+
+// Answers "bg:<css colour>"; installed once per document, re-run on load, after late
+// stylesheets and when the OS appearance flips.
+static const char kBackgroundProbe[] =
+    "(function(send){var color=" NICHE_PAGE_BACKGROUND_FN ";"
+    "var probe=function(){try{var c=color();if(c)send('bg:'+c);}catch(e){}};"
+    "matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(){setTimeout(probe,50);});"
+    "setTimeout(probe,1500);probe();return probe;})";
+
+// While a page is parsed, the same colour on every frame (only changes are sent). CEF draws a
+// new renderer's first page transparent (chromiumembedded/cef#3891), so the view's canvas showed
+// through a page with no background of its own until its load ended: black text on black while
+// a slow image loaded. Frames wait for render-blocking stylesheets, so the first answer already
+// has the page's styles; the probe above takes over once the document is parsed.
+static const char kLoadingBackgroundProbe[] =
+    "(function(send){var color=" NICHE_PAGE_BACKGROUND_FN ",last='',n=0;"
+    "function tick(){try{var c=color();if(c&&c!==last){last=c;send('bg:'+c);}}catch(e){}"
+    "if(document.readyState==='loading'&&++n<600)requestAnimationFrame(tick);}"
+    "requestAnimationFrame(tick);})";
+
+// MARK: - Content blocking and app links
+
+// Cancels third-party requests to listed ad and tracker domains (NicheContentBlocker.h).
+// Runs on the IO thread; stateless, the list and the switch are global atomics.
+//
+// Also lets links with a scheme Chromium can't load (macappstore:, mailto:, zoommtg:,
+// slack:, …) reach the app registered for it. CEF only asks a resource request handler,
+// so without this every such link failed with ERR_UNKNOWN_URL_SCHEME. Allowing it hands
+// the link to Chrome's ExternalProtocolHandler, which blocks dangerous schemes and asks
+// "Open <app>?" with "Always allow" like Chrome and Arc.
+class NicheContentBlockingHandler : public CefResourceRequestHandler {
+public:
+    ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                     CefRefPtr<CefRequest> request, CefRefPtr<CefCallback> callback) override {
+        if (!niche_blocker::Enabled().load(std::memory_order_relaxed)) return RV_CONTINUE;
+        if (!browser || request->GetResourceType() == RT_MAIN_FRAME) return RV_CONTINUE;
+        CefRefPtr<CefFrame> top = browser->GetMainFrame();  // the tab's top-level page
+        if (!top) return RV_CONTINUE;
+        std::string pageHost = niche_blocker::WebHost(top->GetURL().ToString());
+        std::string requestHost = niche_blocker::WebHost(request->GetURL().ToString());
+        return niche_blocker::ShouldBlock(requestHost, pageHost) ? RV_CANCEL : RV_CONTINUE;
+    }
+
+    void OnProtocolExecution(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                             bool& allow_os_execution) override {
+        // niche:// is Niche's own scripting scheme; a page must not drive it.
+        std::string url = request->GetURL().ToString();
+        allow_os_execution = url.compare(0, 4, "niche:") != 0;
+    }
+
+private:
+    IMPLEMENT_REFCOUNTING(NicheContentBlockingHandler);
+};
+
+// MARK: - Browser client
+
+// Chrome's permission request types as NicheCEF's `kinds` bits (NicheCEF.h), so the sheet can say
+// what a page asks for. A type CEF adds later, not in this table, comes through as 16.
+static const struct { uint32_t cef; NSUInteger kind; } kPermissionKinds[] = {
+    {CEF_PERMISSION_TYPE_CAMERA_STREAM | CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, 1},
+    {CEF_PERMISSION_TYPE_MIC_STREAM, 2},
+    {CEF_PERMISSION_TYPE_GEOLOCATION, 4},
+    {CEF_PERMISSION_TYPE_NOTIFICATIONS, 8},
+    {CEF_PERMISSION_TYPE_CLIPBOARD, 1 << 5},
+    {CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, 1 << 6},
+    {CEF_PERMISSION_TYPE_LOCAL_NETWORK_ACCESS_DEPRECATED | CEF_PERMISSION_TYPE_LOCAL_NETWORK, 1 << 7},
+    {CEF_PERMISSION_TYPE_LOOPBACK_NETWORK, 1 << 8},
+    {CEF_PERMISSION_TYPE_STORAGE_ACCESS, 1 << 9},
+    {CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS, 1 << 10},
+    {CEF_PERMISSION_TYPE_LOCAL_FONTS, 1 << 11},
+    {CEF_PERMISSION_TYPE_IDLE_DETECTION, 1 << 12},
+    {CEF_PERMISSION_TYPE_MIDI_SYSEX, 1 << 13},
+    {CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, 1 << 14},
+    {CEF_PERMISSION_TYPE_KEYBOARD_LOCK, 1 << 15},
+    {CEF_PERMISSION_TYPE_POINTER_LOCK, 1 << 16},
+    {CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER, 1 << 17},
+    {CEF_PERMISSION_TYPE_REGISTER_PROTOCOL_HANDLER, 1 << 18},
+    {CEF_PERMISSION_TYPE_AR_SESSION, 1 << 19},
+    {CEF_PERMISSION_TYPE_VR_SESSION, 1 << 20},
+    {CEF_PERMISSION_TYPE_HAND_TRACKING, 1 << 21},
+    {CEF_PERMISSION_TYPE_SENSORS, 1 << 22},
+    {CEF_PERMISSION_TYPE_DISK_QUOTA, 1 << 23},
+    {CEF_PERMISSION_TYPE_IDENTITY_PROVIDER, 1 << 24},
+    {CEF_PERMISSION_TYPE_CAPTURED_SURFACE_CONTROL, 1 << 25},
+    {CEF_PERMISSION_TYPE_WEB_APP_INSTALLATION, 1 << 26},
+    {CEF_PERMISSION_TYPE_FILE_SYSTEM_ACCESS, 1 << 27},
+    {CEF_PERMISSION_TYPE_AMBIENT_LOGIN, 1 << 28},
+};
+
+static NSUInteger NichePermissionKinds(uint32_t requested) {
+    NSUInteger kinds = 0;
+    for (const auto& k : kPermissionKinds) {
+        if (requested & k.cef) kinds |= k.kind;
+        requested &= ~k.cef;
+    }
+    return requested ? kinds | 16 : kinds;
+}
+
+class NicheClient : public CefClient,
+                  public CefLifeSpanHandler,
+                  public CefLoadHandler,
+                  public CefDisplayHandler,
+                  public CefRequestHandler,
+                  public CefContextMenuHandler,
+                  public CefKeyboardHandler,
+                  public CefDownloadHandler,
+                  public CefFocusHandler,
+                  public CefPermissionHandler,
+                  public CefFindHandler,
+                  public CefJSDialogHandler {
+public:
+    NicheBrowser* owner() { return owner_; }
+    /// Niche closed this page (-[NicheBrowser close]). Kept here rather than read from the owner:
+    /// the NicheBrowser can be gone before Chromium asks.
+    void SetCloseRequested() { close_requested_ = true; }
+    explicit NicheClient(NicheBrowser* owner) : owner_(owner), ownerless_(owner == nil) { NicheClientRegistry().insert(static_cast<const void*>(static_cast<CefClient*>(this))); }
+    ~NicheClient() override { NicheClientRegistry().erase(static_cast<const void*>(static_cast<CefClient*>(this))); }
+
+    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+    CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+    CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+    CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
+    CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+    CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+    CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+
+    // JS dialogs ----------------------------------------------------------
+
+    // Niche closes pages with CloseBrowser(true), which skips beforeunload. With DevTools docked
+    // Chromium still asked "Leave site?" (a shop with something in its cart): DevTools close
+    // first and the page's beforeunload ran anyway. The tab was already gone, so its page window
+    // stayed over the next tab, and after Cancel it never closed. A page Niche closes leaves.
+    // Everything else (reloads, navigations, other dialogs) keeps Chrome's own prompts.
+    bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser, const CefString& message_text, bool is_reload,
+                              CefRefPtr<CefJSDialogCallback> callback) override {
+        if (!close_requested_) return false;
+        callback->Continue(true, CefString());
+        return true;
+    }
+
+    // Life span -----------------------------------------------------------
+
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        CEF_REQUIRE_UI_THREAD();
+        g_liveBrowsers++;
+        if (NicheBrowser* o = owner_) [o adoptBrowser:browser];
+        if (ownerless_) FloatDocumentPictureInPicture(browser, 0);
+    }
+
+    bool DoClose(CefRefPtr<CefBrowser> browser) override { return false; }
+
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+        CEF_REQUIRE_UI_THREAD();
+        g_liveBrowsers--;
+        if (NicheBrowser* o = owner_) [o browserClosed];
+        if (g_quitting && g_liveBrowsers <= 0) NicheQuitMessageLoop();
+    }
+
+    void OnBeforeDevToolsPopup(CefRefPtr<CefBrowser> browser, CefWindowInfo& windowInfo, CefRefPtr<CefClient>& client,
+                               CefBrowserSettings& settings, CefRefPtr<CefDictionaryValue>& extra_info,
+                               bool* use_default_window) override {
+        NicheBrowser* o = owner_;
+        if (!o) return;
+        client = new DevToolsClient(NSZeroRect, o, o.containerView);
+        *use_default_window = false;
+    }
+
+    bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
+                       const CefString& target_url, const CefString& target_frame_name,
+                       WindowOpenDisposition target_disposition, bool user_gesture,
+                       const CefPopupFeatures& popupFeatures, CefWindowInfo& windowInfo,
+                       CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
+                       CefRefPtr<CefDictionaryValue>& extra_info, bool* no_javascript_access) override {
+        CEF_REQUIRE_UI_THREAD();
+        NicheBrowser* o = owner_;
+        if (!o || !o.delegate) return true;
+        // Document Picture in Picture (documentPictureInPicture.requestWindow: Google Meet's call
+        // window): CEF always makes Chrome's own Picture in Picture window for it. It is not a
+        // tab, so it gets a client with no NicheBrowser rather than a new tab to host it, which
+        // showed up in the sidebar, was selected and took the window off the tab the user picked
+        // (GitHub #198). The page that opened it keeps it, and Chrome closes it with that page.
+        if (target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE) {
+            client = new NicheClient(nil);
+            NichePageSettings(settings);
+            return false;
+        }
+        // Another app's address (spotify:) opens no tab: Niche asks "Open <app>?" over this page.
+        if (g_appLinkHandler && g_appLinkHandler(o, NSStringFromCef(target_url), user_gesture)) return true;
+        // A target=_blank link the user clicked (Shift-clicked: a new window) may open in a
+        // Peek; window.open with features (a sign-in popup) is CEF_WOD_NEW_POPUP and stays one.
+        if (user_gesture && (target_disposition == CEF_WOD_NEW_FOREGROUND_TAB || target_disposition == CEF_WOD_NEW_WINDOW)
+            && [o.delegate respondsToSelector:@selector(browser:opensPeekForURL:shiftClick:newTab:)]
+            && [o.delegate browser:o opensPeekForURL:NSStringFromCef(target_url)
+                        shiftClick:target_disposition == CEF_WOD_NEW_WINDOW
+                           newTab:target_disposition == CEF_WOD_NEW_FOREGROUND_TAB]) return true;
+        BOOL background = (target_disposition == CEF_WOD_NEW_BACKGROUND_TAB);
+        NicheBrowser* host = [o.delegate browser:o popupHostForURL:NSStringFromCef(target_url) inBackground:background];
+        if (!host) return true;  // blocked
+        client = [host cefClient];
+        NichePageSettings(settings);
+        if (g_chromeHosting) return false;  // Views path: NicheChromeViewDelegate hosts the popup view
+        NSView* view = host.containerView;
+        NSRect b = view.bounds;
+        windowInfo.SetAsChild((__bridge void*)view, CefRect(0, 0, (int)b.size.width, (int)b.size.height));
+        if (g_useChromeStyle) windowInfo.runtime_style = CEF_RUNTIME_STYLE_CHROME;
+        return false;  // allow, CEF creates it into our view with the opener kept
+    }
+
+    // Load ----------------------------------------------------------------
+
+    void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack,
+                              bool canGoForward) override {
+        NicheBrowser* o = owner_;
+        if (!o) return;
+        if (isLoading && !o.isLoading) o.hasCommittedLoad = NO;
+        o.isLoading = isLoading;
+        o.canGoBack = canGoBack;
+        o.canGoForward = canGoForward;
+        [o.delegate browser:o didChangeLoading:isLoading canGoBack:canGoBack canGoForward:canGoForward];
+    }
+
+    void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType transition_type) override {
+        // The last page's colour must not show under the next one while it loads: the canvas
+        // does until this one reports its own.
+        NicheBrowser* o = owner_;
+        if (!o || !frame->IsMain()) return;
+        o.pageBackgroundColor = 0;
+        if (CefRefPtr<CefBrowserView> view = CefBrowserView::GetForBrowser(browser)) view->SetBackgroundColor(o.pageFill);
+        if ([o.delegate respondsToSelector:@selector(browser:didReportBackgroundColor:)])
+            [o.delegate browser:o didReportBackgroundColor:@""];
+        RunPageScript(frame, "", kLoadingBackgroundProbe);
+        SetCommittedLoad(o, YES);
+    }
+
+    void SetCommittedLoad(NicheBrowser* o, BOOL committed) {
+        if (o.hasCommittedLoad == committed) return;
+        o.hasCommittedLoad = committed;
+        if ([o.delegate respondsToSelector:@selector(browser:didChangeCommittedLoad:)])
+            [o.delegate browser:o didChangeCommittedLoad:committed];
+    }
+
+    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override {
+        // Every frame reports Picture in Picture changes (the events don't bubble, hence capture).
+        // Every frame reports Picture in Picture changes (the events don't bubble, hence capture).
+        RunPageScript(frame, "pip",
+            "(function(send){"
+            "var cur=null;function playing(v){send('pip:play'+(v.paused||v.ended?0:1));}"
+            "function watch(v){cur=v;playing(v);v.addEventListener('play',function(){if(cur===v)playing(v);});"
+            "v.addEventListener('pause',function(){if(cur===v)playing(v);});v.addEventListener('ended',function(){if(cur===v)playing(v);});}"
+            "document.addEventListener('enterpictureinpicture',function(e){send('pip:1');watch(e.target);},true);"
+            "document.addEventListener('leavepictureinpicture',function(){cur=null;send('pip:0');},true);"
+            "if(document.pictureInPictureElement){send('pip:1');watch(document.pictureInPictureElement);}})");
+        if (!frame->IsMain()) return;
+        NicheBrowser* o = owner_;
+        if (!o) return;
+        [o.delegate browser:o didFinishLoadingURL:NSStringFromCef(frame->GetURL()) title:o.currentTitle
+                 statusCode:httpStatusCode];
+        // Ask the page for its theme colour; the answer comes back as "theme:<css colour>".
+        RunPageScript(frame, "",
+            "(function(send){function probe(){try{var c='';var ms=document.querySelectorAll('meta[name=\"theme-color\"]');"
+            "for(var i=0;i<ms.length;i++){if(!ms[i].getAttribute('media')){c=ms[i].getAttribute('content')||'';if(c)break;}}"
+            "if(!c&&document.body){var b=getComputedStyle(document.body).backgroundColor;if(b&&b!=='rgba(0, 0, 0, 0)'&&b!=='transparent'){c=b;}}"
+            "if(!c){var h=getComputedStyle(document.documentElement).backgroundColor;if(h&&h!=='rgba(0, 0, 0, 0)'&&h!=='transparent'){c=h;}}"
+            "if(!c){c='rgb(255, 255, 255)';}"
+            "var d=document.createElement('div');d.style.color=c;document.body.appendChild(d);"
+            "var rgb=getComputedStyle(d).color;d.remove();send('theme:'+rgb);}catch(e){}}"
+            "probe();setTimeout(probe,1500);})");
+        RunPageScript(frame, "bg", kBackgroundProbe);
+    }
+
+    // What the page scripts above send(): "pip:…", "bg:<css colour>" or "theme:<css colour>".
+    void HandlePageMessage(CefRefPtr<CefBrowser> browser, const std::string& m) {
+        if (m.compare(0, 4, "pip:") == 0) {
+            NicheBrowser* o = owner_;
+            if (!o) return;
+            std::string v = m.substr(4);
+            if (v == "1" || v == "0") {
+                BOOL active = (v == "1");
+                if (o.isInPictureInPicture != active) {
+                    o.isInPictureInPicture = active;
+                    if (!active) o.isPictureInPicturePlaying = NO;
+                    if ([o.delegate respondsToSelector:@selector(browser:didChangePictureInPicture:)])
+                        [o.delegate browser:o didChangePictureInPicture:active];
+                }
+            } else if (v == "play1" || v == "play0") {
+                BOOL playing = (v == "play1");
+                o.isPictureInPicturePlaying = playing;
+                if ([o.delegate respondsToSelector:@selector(browser:didChangePictureInPicturePlayback:)])
+                    [o.delegate browser:o didChangePictureInPicturePlayback:playing];
+            } else if (v.compare(0, 3, "err") == 0) {
+                NSLog(@"NicheCEF: Picture in Picture %s", v.c_str());
+            }
+            return;
+        }
+        const std::string bgPrefix = "bg:";
+        if (m.compare(0, bgPrefix.size(), bgPrefix) == 0) {
+            NicheBrowser* o = owner_;
+            NSString* hex = HexFromCSSColor(m.substr(bgPrefix.size()));
+            if (o && hex.length) {
+                // Under the page (NicheChromeViewDelegate::OnThemeChanged).
+                o.pageBackgroundColor = 0xFF000000 | (cef_color_t)strtoul(hex.UTF8String + 1, nullptr, 16);
+                if (CefRefPtr<CefBrowserView> view = CefBrowserView::GetForBrowser(browser))
+                    view->SetBackgroundColor(o.pageBackgroundColor);
+            }
+            if (o && hex.length && [o.delegate respondsToSelector:@selector(browser:didReportBackgroundColor:)])
+                [o.delegate browser:o didReportBackgroundColor:hex];
+            return;
+        }
+        const std::string prefix = "theme:";
+        if (m.compare(0, prefix.size(), prefix) != 0) return;
+        NicheBrowser* o = owner_;
+        if (!o) return;
+        std::string rgb = m.substr(prefix.size());  // "rgb(r, g, b)", "rgba(…)" or "none"
+        NSString* hex = rgb == "none" ? @"none" : HexFromCSSColor(rgb);
+        [o.delegate browser:o didReportThemeColor:hex];
+    }
+
+    void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode errorCode,
+                     const CefString& errorText, const CefString& failedUrl) override {
+        if (!frame->IsMain()) return;
+        // A tab left blank is often a navigation that failed or was cut off; Help ▸ Export
+        // Diagnostics sends this log, so the line names the site only.
+        LOG(WARNING) << "Niche: loading " << LogHost(browser, failedUrl) << " failed: " << errorText.ToString() << " ("
+                     << (int)errorCode << ")";
+        if ((int)errorCode == -3 /* ERR_ABORTED */) return;
+        ReportProcessEvent(browser, @"loadError", [NSString stringWithFormat:@"%d", (int)errorCode], failedUrl);
+        NicheBrowser* o = owner_;
+        if (o && [o.delegate respondsToSelector:@selector(browser:didFailLoadingURL:errorCode:)])
+            [o.delegate browser:o didFailLoadingURL:NSStringFromCef(failedUrl) errorCode:(NSInteger)errorCode];
+        // Chrome-style pages get Chrome's own error page: Reload retries the site and it
+        // reloads by itself when the network returns. Ours, a data: URL loaded on top,
+        // made Reload reload the error and added a history entry.
+        if (browser->GetHost()->GetRuntimeStyle() == CEF_RUNTIME_STYLE_CHROME) return;
+        // Chrome fails a navigation that hits an auth challenge with this error, commits a
+        // blank page and asks for the password over it. Our page would replace both.
+        if ((int)errorCode == -338 /* ERR_INVALID_AUTH_CREDENTIALS */) return;
+        std::string url = failedUrl.ToString();
+        std::string err = errorText.ToString();
+        std::string html =
+            "<!doctype html><html><head><meta charset=utf-8><title>Can’t reach this page</title>"
+            "<style>html{background:#f5f5f7;color:#1d1d1f;font:15px -apple-system,system-ui}"
+            "@media(prefers-color-scheme:dark){html{background:#1c1c1e;color:#f5f5f7}}"
+            "body{display:flex;min-height:90vh;align-items:center;justify-content:center;margin:0}"
+            "main{max-width:420px;padding:32px}h1{font-size:22px;margin:0 0 8px}p{opacity:.7;margin:0 0 6px}"
+            "code{font:13px ui-monospace,Menlo;opacity:.6;word-break:break-all}</style></head><body><main>"
+            "<h1>Niche can’t reach this page</h1><p>" + err + " (" + std::to_string((int)errorCode) + ")</p>"
+            "<code>" + url + "</code></main></body></html>";
+        CefString encoded = CefBase64Encode(html.data(), html.size());
+        frame->LoadURL("data:text/html;base64," + encoded.ToString());
+    }
+
+    // Display -------------------------------------------------------------
+
+    void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& url) override {
+        if (!frame->IsMain()) return;
+        NicheBrowser* o = owner_;
+        if (!o) return;
+        o.currentURL = NSStringFromCef(url);
+        [o.delegate browser:o didChangeURL:o.currentURL];
+    }
+
+    void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
+        NicheBrowser* o = owner_;
+        if (!o) return;
+        o.currentTitle = NSStringFromCef(title);
+        [o.delegate browser:o didChangeTitle:o.currentTitle];
+    }
+
+    // Arc's recording indicator ("This tab is using your camera or microphone").
+    void OnMediaAccessChange(CefRefPtr<CefBrowser> browser, bool has_video_access, bool has_audio_access) override {
+        NicheBrowser* o = owner_;
+        if (!o) return;
+        o.cefMediaAccess = has_video_access || has_audio_access;
+        [o updateCapture];
+    }
+
+    // Chromium's audible state, which CEF has no callback for: the engine sends it as a
+    // "Cra.audible" message (scripts/cef-patches/audible-state.patch). "Cra.activate": an
+    // extension asked for this tab to be in front (scripts/cef-patches/extension-tab-activate.patch),
+    // or with true the page did (scripts/cef-patches/page-activate.patch).
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                  CefProcessId source_process, CefRefPtr<CefProcessMessage> message) override {
+        if (source_process == PID_RENDERER && message->GetName() == "Niche.page") {
+            HandlePageMessage(browser, message->GetArgumentList()->GetString(0).ToString());
+            return true;
+        }
+        if (source_process != PID_BROWSER) return false;
+        NicheBrowser* o = owner_;
+        if (message->GetName() == "Cra.audible") {
+            if (o) [o audibleChanged:message->GetArgumentList()->GetBool(0)];
+            return true;
+        }
+        // Camera and microphone use as Chrome's tab recording indicator counts it, which a
+        // Chrome-style page's media never reaches OnMediaAccessChange with (Arc's
+        // didChangeCameraState / didChangeMicrophoneState; scripts/cef-patches/
+        // media-capture-and-session.patch).
+        if (message->GetName() == "Cra.capture") {
+            CefRefPtr<CefListValue> args = message->GetArgumentList();
+            if (o) {
+                o.chromeCapture = (args->GetSize() > 0 && args->GetBool(0)) || (args->GetSize() > 1 && args->GetBool(1));
+                [o updateCapture];
+            }
+            return true;
+        }
+        if (message->GetName() == "Cra.activate") {
+            CefRefPtr<CefListValue> args = message->GetArgumentList();
+            BOOL byPage = args->GetSize() > 0 && args->GetBool(0);
+            if (o && [o.delegate respondsToSelector:@selector(browserRequestsActivation:byPage:)])
+                [o.delegate browserRequestsActivation:o byPage:byPage];
+            return true;
+        }
+        return false;
+    }
+
+    void OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString>& icon_urls) override {
+        NicheBrowser* o = owner_;
+        if (!o || icon_urls.empty()) return;
+        // Prefer PNG/ICO-looking URLs over SVG, which CEF can't decode.
+        CefString chosen = icon_urls.front();
+        for (const auto& u : icon_urls) {
+            std::string s = u.ToString();
+            if (s.find(".svg") == std::string::npos) { chosen = u; break; }
+        }
+        std::string chosenStr = chosen.ToString();
+        // Skip only an icon that arrived: Chromium drops a download without calling back when the
+        // page replaces its frame while loading (YouTube does), and the next change retries it.
+        if (chosenStr == favicon_->downloaded) return;
+        browser->GetHost()->DownloadImage(chosen, true, 64, false, new FaviconCallback(o, favicon_, chosenStr));
+    }
+
+    void OnFullscreenModeChange(CefRefPtr<CefBrowser> browser, bool fullscreen) override {
+        if (NicheBrowser* o = owner_) [o.delegate browser:o didChangeFullscreen:fullscreen];
+    }
+
+    void OnStatusMessage(CefRefPtr<CefBrowser> browser, const CefString& value) override {
+        if (NicheBrowser* o = owner_) [o.delegate browser:o didChangeStatusMessage:NSStringFromCef(value)];
+    }
+
+    // Find ------------------------------------------------------------------
+
+    void OnFindResult(CefRefPtr<CefBrowser> browser, int identifier, int count, const CefRect& selectionRect,
+                      int activeMatchOrdinal, bool finalUpdate) override {
+        NicheBrowser* o = owner_;
+        if (o && [o.delegate respondsToSelector:@selector(browser:didFindMatches:activeMatch:)])
+            [o.delegate browser:o didFindMatches:count activeMatch:activeMatchOrdinal];
+    }
+
+    void OnLoadingProgressChange(CefRefPtr<CefBrowser> browser, double progress) override {
+        if (NicheBrowser* o = owner_) [o.delegate browser:o didChangeProgress:progress];
+    }
+
+    // Request -------------------------------------------------------------
+
+    // Content blocking and app links (IO thread). Top-level navigations and downloads always
+    // load; navigations always get the handler so app links work with blocking off.
+    CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
+        CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool is_navigation,
+        bool is_download, const CefString& request_initiator, bool& disable_default_handling) override {
+        if (is_download) return nullptr;
+        if (!is_navigation && !niche_blocker::Enabled().load(std::memory_order_relaxed)) return nullptr;
+        return blocker_;
+    }
+
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                        bool user_gesture, bool is_redirect) override {
+        NicheBrowser* o = owner_;
+        if (!o || !frame->IsMain()) return false;
+        if (OpensPeek(o, request, user_gesture, is_redirect)) return true;
+        // A page Niche shows in another engine (ProtectedMediaSites, WebKit for DRM services):
+        // cancelled before the request goes out, so a sign-in's one-time code isn't spent here.
+        if ([o.delegate respondsToSelector:@selector(browser:handsOffNavigationToURL:method:)]
+            && [o.delegate browser:o handsOffNavigationToURL:NSStringFromCef(request->GetURL())
+                            method:NSStringFromCef(request->GetMethod())]) return true;
+        // A new page, also one started while the last is still loading: the loading bar waits
+        // for its answer again.
+        o.navigatingURL = NSStringFromCef(request->GetURL());
+        if (!is_redirect) {
+            o.navigationStarts += 1;
+            SetCommittedLoad(o, NO);
+        }
+        return false;
+    }
+
+    bool OpensPeek(NicheBrowser* o, CefRefPtr<CefRequest> request, bool user_gesture, bool is_redirect) {
+        if (!user_gesture || is_redirect) return false;
+        cef_transition_type_t tt = request->GetTransitionType();
+        if ((tt & TT_SOURCE_MASK) != TT_LINK || (tt & TT_FORWARD_BACK_FLAG)) return false;
+        if (![o.delegate respondsToSelector:@selector(browser:opensPeekForURL:shiftClick:newTab:)]) return false;
+        return [o.delegate browser:o opensPeekForURL:NSStringFromCef(request->GetURL()) shiftClick:NO newTab:NO];
+    }
+
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& target_url,
+                          WindowOpenDisposition target_disposition, bool user_gesture) override {
+        NicheBrowser* o = owner_;
+        if (!o) return false;
+        // Shift-click (Chrome: a new window).
+        if (user_gesture && target_disposition == CEF_WOD_NEW_WINDOW
+            && [o.delegate respondsToSelector:@selector(browser:opensPeekForURL:shiftClick:newTab:)]
+            && [o.delegate browser:o opensPeekForURL:NSStringFromCef(target_url) shiftClick:YES newTab:NO]) return true;
+        BOOL background = (target_disposition == CEF_WOD_NEW_BACKGROUND_TAB);
+        [o.delegate browser:o requestsNewTabWithURL:NSStringFromCef(target_url) inBackground:background];
+        return true;
+    }
+
+    // "Aw, Snap!" and "Page Unresponsive" leave no trace otherwise: Niche ships no crash
+    // reporter. One line in chromium.log tells a report of a site that "keeps crashing"
+    // apart: crashed, killed, out of memory or hung. Only the host: the log gets shared.
+    void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
+                                   const CefString& error_string) override {
+        static const char* kStatus[] = {"abnormal termination", "killed", "crashed", "out of memory",
+                                        "launch failed", "integrity failure"};
+        const char* what = status >= 0 && status < TS_NUM_VALUES ? kStatus[status] : "unknown";
+        LOG(ERROR) << "Niche: renderer for " << LogHost(browser) << " ended: " << what << " (code " << error_code
+                   << ", " << error_string.ToString() << ")";
+        ReportProcessEvent(browser, @"terminated", @(what));
+    }
+
+    bool OnRenderProcessUnresponsive(CefRefPtr<CefBrowser> browser,
+                                     CefRefPtr<CefUnresponsiveProcessCallback> callback) override {
+        LOG(ERROR) << "Niche: renderer for " << LogHost(browser) << " is unresponsive";
+        ReportProcessEvent(browser, @"unresponsive", @"");
+        return false;  // Chrome's "Page Unresponsive" dialog
+    }
+
+    void OnRenderProcessResponsive(CefRefPtr<CefBrowser> browser) override {
+        ReportProcessEvent(browser, @"responsive", @"");
+    }
+
+    /// To the performance recorder: the host only, and none for incognito or Niche's own pages.
+    void ReportProcessEvent(CefRefPtr<CefBrowser> browser, NSString* kind, NSString* detail, const CefString& url = CefString()) {
+        void (^handler)(NSString*, NSString*, NSString*) = g_processEventHandler;
+        if (!handler) return;
+        NicheBrowser* o = owner_;
+        NSString* site = nil;
+        if (o && !o.isIncognito) {
+            CefString u = url;
+            if (u.empty()) {
+                CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+                if (frame) u = frame->GetURL();
+            }
+            CefURLParts parts;
+            if (!u.empty() && CefParseURL(u, parts)) {
+                std::string scheme = CefString(&parts.scheme).ToString();
+                std::string host = CefString(&parts.host).ToString();
+                if ((scheme == "http" || scheme == "https") && !host.empty()) site = @(host.c_str());
+            }
+        }
+        handler(kind, detail, site);
+    }
+
+    /// The site for chromium.log, which Help ▸ Export Diagnostics sends: never an incognito one
+    /// (nor one whose tab is already gone, when that can't be told).
+    std::string LogHost(CefRefPtr<CefBrowser> browser, const CefString& url = CefString()) {
+        NicheBrowser* o = owner_;
+        if (!o) return "(closed tab)";
+        if (o.isIncognito) return "(incognito)";
+        if (!url.empty()) return UrlHost(url);
+        CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+        return frame ? UrlHost(frame->GetURL()) : "(no page)";
+    }
+
+    static std::string UrlHost(const CefString& url) {
+        CefURLParts parts;
+        if (!CefParseURL(url, parts)) return "(no page)";
+        std::string host = CefString(&parts.host).ToString();
+        return host.empty() ? CefString(&parts.scheme).ToString() + ":" : host;
+    }
+
+    // Context menu --------------------------------------------------------
+
+    // Chrome-style pages get Chrome's own context menu, shown by Chrome as in Chrome and Arc:
+    // extension icons, Look Up, Speech, Services, Writing Tools and AutoFill come with it. A page
+    // embedded in Niche's window (EmbeddedPages.swift) got none until
+    // cef-patches/context-menu-embedded-view.patch, so Niche drew its own from the model then.
+    // Alloy-style pages (Chrome engine off) get CEF's short menu with Niche's few items added.
+    void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                             CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> model) override {
+        if (browser->GetHost()->GetRuntimeStyle() == CEF_RUNTIME_STYLE_CHROME) MakeArcMenu(params, model);
+        else AddAlloyItems(params, model);
+    }
+
+    // Arc's page menus are Chrome's with a few changes (Arc 1.172, 6 Nov 2026):
+    // - link: Open Link in New Tab, New Window, Little Arc, Incognito Window. Niche's New Tab item
+    //   follows the background-links setting, with the other kind of tab under it (LinkMenu, #183).
+    // - page: no QR code item; Translate sits with Save As…, Print… and Cast….
+    // - selected text: Search <engine> for "…" comes before Copy (not with a link).
+    // - image: Capture Image… after Save Image As…, and Search <engine> for Image where Chromium
+    //   156 has Google Lens's "Search image with <engine>"; video: no frame search.
+    void MakeArcMenu(CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> model) {
+        int newTab = model->GetIndexOf(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
+        if (newTab >= 0) {
+            model->RemoveAt(newTab);
+            model->InsertItemAt(newTab, kMenuOpenLinkFirst, g_linkMenuTitles[0].UTF8String);
+            model->InsertItemAt(newTab + 1, kMenuOpenLinkSecond, g_linkMenuTitles[1].UTF8String);
+        }
+        // Little Windows load in the normal profile: none from an incognito page.
+        NicheBrowser* o = owner_;
+        int newWindow = model->GetIndexOf(IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW);
+        if (newWindow >= 0 && !o.isIncognito) model->InsertItemAt(newWindow + 1, kMenuOpenLinkLittleWindow, "Open Link in Little Window");
+        for (int id : {IDC_CONTENT_CONTEXT_GENERATE_QR_CODE, IDC_CONTENT_CONTEXT_OPENLINKINPROFILE,
+                       IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP,
+                       IDC_CONTENT_CONTEXT_SEARCHLENSFORVIDEOFRAME, IDC_CONTENT_CONTEXT_SEARCHWEBFORVIDEOFRAME}) {
+            while (model->Remove(id)) {}
+        }
+        NicheTidySeparators(model);  // the QR code item's group is gone: one separator before Translate
+        int translate = model->GetIndexOf(IDC_CONTENT_CONTEXT_TRANSLATE);
+        int before = translate - 1;
+        while (before >= 0 && model->GetTypeAt(before) != MENUITEMTYPE_SEPARATOR && !model->IsVisibleAt(before)) before--;
+        if (translate > 0 && before >= 0 && model->GetTypeAt(before) == MENUITEMTYPE_SEPARATOR) model->RemoveAt(before);
+        int search = model->GetIndexOf(IDC_CONTENT_CONTEXT_SEARCHWEBFOR), copy = model->GetIndexOf(IDC_CONTENT_CONTEXT_COPY);
+        if (params->GetLinkUrl().empty() && !params->IsEditable() && search > copy && copy >= 0) {
+            CefString label = model->GetLabelAt(search);
+            model->RemoveAt(search);
+            model->InsertItemAt(copy, IDC_CONTENT_CONTEXT_SEARCHWEBFOR, label);
+        }
+        int lens = model->GetIndexOf(IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE);
+        if (lens >= 0) {
+            // "Search image with Google" → "Search Google for Image", Chrome's own item for it.
+            std::string label = model->GetLabelAt(lens).ToString(), with = "Search image with ";
+            std::string engine = label.rfind(with, 0) == 0 ? label.substr(with.size()) : "Google";
+            model->RemoveAt(lens);
+            model->InsertItemAt(lens, IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE, "Search " + engine + " for Image");
+        }
+        int saveImage = model->GetIndexOf(IDC_CONTENT_CONTEXT_SAVEIMAGEAS);
+        if (saveImage >= 0 && params->GetMediaType() == CM_MEDIATYPE_IMAGE &&
+            [o.delegate respondsToSelector:@selector(browser:requestsCaptureOfImageAt:)]) {
+            model->InsertItemAt(saveImage + 1, kMenuCaptureImage, "Capture Image…");
+        }
+        NicheTidySeparators(model);
+    }
+
+    static void AddAlloyItems(CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> model) {
+        size_t index = 0;
+        if (!params->GetLinkUrl().empty()) {
+            model->InsertItemAt(index++, kMenuOpenLinkFirst, g_linkMenuTitles[0].UTF8String);
+            model->InsertItemAt(index++, kMenuOpenLinkSecond, g_linkMenuTitles[1].UTF8String);
+            model->InsertItemAt(index++, kMenuCopyLink, "Copy Link");
+            model->InsertSeparatorAt(index++);
+        }
+        if ((params->GetTypeFlags() & CM_TYPEFLAG_MEDIA) && !params->GetSourceUrl().empty()) {
+            model->InsertItemAt(index++, kMenuOpenImageInNewTab, "Open Image in New Tab");
+            model->InsertItemAt(index++, kMenuCopyImageURL, "Copy Image Address");
+            model->InsertSeparatorAt(index++);
+        }
+        if (params->GetMediaType() == CM_MEDIATYPE_VIDEO && (params->GetMediaStateFlags() & CM_MEDIAFLAG_CAN_PICTURE_IN_PICTURE)) {
+            bool inPiP = params->GetMediaStateFlags() & CM_MEDIAFLAG_PICTURE_IN_PICTURE;
+            model->InsertItemAt(index++, kMenuPictureInPicture, inPiP ? "Exit Picture in Picture" : "Picture in Picture");
+            model->InsertSeparatorAt(index++);
+        }
+        if (model->GetCount() > 0) model->AddSeparator();
+        model->AddItem(kMenuInspectElement, "Inspect Element");
+    }
+
+    bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                              CefRefPtr<CefContextMenuParams> params, int command_id,
+                              EventFlags event_flags) override {
+        NicheBrowser* o = owner_;
+        if (!o) return false;
+        switch (command_id) {
+            case kMenuOpenLinkFirst:
+            case kMenuOpenLinkSecond:
+                [o.delegate browser:o requestsNewTabWithURL:NSStringFromCef(params->GetLinkUrl())
+                       inBackground:g_linkMenuBackground[command_id - kMenuOpenLinkFirst].boolValue];
+                return true;
+            case kMenuOpenImageInNewTab:
+                [o.delegate browser:o requestsNewTabWithURL:NSStringFromCef(params->GetSourceUrl()) inBackground:NO];
+                return true;
+            case kMenuCopyLink:
+            case kMenuCopyImageURL: {
+                NSString* s = NSStringFromCef(command_id == kMenuCopyLink ? params->GetUnfilteredLinkUrl()
+                                                                           : params->GetSourceUrl());
+                NSPasteboard* pb = [NSPasteboard generalPasteboard];
+                [pb clearContents];
+                [pb setString:s forType:NSPasteboardTypeString];
+                return true;
+            }
+            // Chrome's New Window and Incognito Window items would open Chrome windows: Niche's own.
+            case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
+            case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
+            case kMenuOpenLinkLittleWindow: {
+                NSString* url = NSStringFromCef(params->GetLinkUrl());
+                if (![o.delegate respondsToSelector:@selector(browser:requestsWindowWithURL:kind:)]) {
+                    [o.delegate browser:o requestsNewTabWithURL:url inBackground:NO];
+                    return true;
+                }
+                NicheLinkWindow kind = command_id == kMenuOpenLinkLittleWindow ? NicheLinkWindowLittle
+                    : command_id == IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD ? NicheLinkWindowIncognito : NicheLinkWindowNew;
+                [o.delegate browser:o requestsWindowWithURL:url kind:kind];
+                return true;
+            }
+            case kMenuCaptureImage:
+                if ([o.delegate respondsToSelector:@selector(browser:requestsCaptureOfImageAt:)])
+                    [o.delegate browser:o requestsCaptureOfImageAt:NSMakePoint(params->GetXCoord(), params->GetYCoord())];
+                return true;
+            // Chrome's Inspect: Niche's DevTools (docked in the card, DevToolsToggle) on that element.
+            case IDC_CONTENT_CONTEXT_INSPECTELEMENT:
+            case kMenuInspectElement:
+                [o showDevToolsInspectingPoint:NSMakePoint(params->GetXCoord(), params->GetYCoord())];
+                return true;
+            case kMenuPictureInPicture:
+                [o requestPictureInPictureInFrame:frame automatic:NO x:params->GetXCoord() y:params->GetYCoord()];
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // Keyboard ------------------------------------------------------------
+
+    bool OnPreKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent& event, CefEventHandle os_event,
+                       bool* is_keyboard_shortcut) override {
+        if (event.type != KEYEVENT_RAWKEYDOWN || !os_event) return false;
+        NicheBrowser* o = owner_;
+        if (!o) return false;
+        NSEvent* e = (__bridge NSEvent*)os_event;
+        if (e.type != NSEventTypeKeyDown) return false;  // modifier-only presses arrive as flagsChanged
+        return [o.delegate browser:o handleKeyEvent:e] ? true : false;
+    }
+
+    bool OnKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent& event, CefEventHandle os_event) override {
+        if (event.type != KEYEVENT_RAWKEYDOWN || !os_event) return false;
+        NicheBrowser* o = owner_;
+        if (!o) return false;
+        NSEvent* e = (__bridge NSEvent*)os_event;
+        if (e.type != NSEventTypeKeyDown) return false;
+        return [o.delegate browser:o handleUnhandledKeyEvent:e] ? true : false;
+    }
+
+    // Downloads -----------------------------------------------------------
+
+    bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
+                          const CefString& suggested_name, CefRefPtr<CefBeforeDownloadCallback> callback) override {
+        NSString* name = NSStringFromCef(suggested_name);
+        if (name.length == 0) name = @"download";
+        // Niche picks the profile's folder, or asks with a save panel; the callback waits for it.
+        if (auto handler = g_downloadDestinationHandler) {
+            NicheBrowser* o = owner_;
+            NSString* profile = o && !o.isIncognito ? o.profilePath : nil;
+            __block CefRefPtr<CefBeforeDownloadCallback> cb = callback;
+            uint32_t downloadID = download_item->GetId();
+            handler(profile, name, ^(NSString* path) {
+                if (!cb) return;
+                if (path.length) cb->Continue(CefStringFromNS(path), false);
+                // Dropping the callback unanswered cancels in CEF; the next update makes sure.
+                else g_cancelledDownloads.insert(downloadID);
+                cb = nullptr;
+            });
+            return true;
+        }
+        NSString* dir = [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES) firstObject];
+        NSString* path = [dir stringByAppendingPathComponent:name];
+        NSFileManager* fm = [NSFileManager defaultManager];
+        NSString* base = [name stringByDeletingPathExtension];
+        NSString* ext = [name pathExtension];
+        int n = 1;
+        while ([fm fileExistsAtPath:path]) {
+            NSString* candidate = ext.length ? [NSString stringWithFormat:@"%@ (%d).%@", base, n, ext]
+                                             : [NSString stringWithFormat:@"%@ (%d)", base, n];
+            path = [dir stringByAppendingPathComponent:candidate];
+            n++;
+        }
+        callback->Continue(CefStringFromNS(path), false);
+        return true;
+    }
+
+    void OnDownloadUpdated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> item,
+                           CefRefPtr<CefDownloadItemCallback> callback) override {
+        if (g_cancelledDownloads.count(item->GetId())) {
+            if (item->IsInProgress()) callback->Cancel();
+            else g_cancelledDownloads.erase(item->GetId());
+            return;
+        }
+        NicheBrowser* o = owner_;
+        if (!o) return;
+        NicheDownloadInfo* info = [NicheDownloadInfo new];
+        info.identifier = item->GetId();
+        info.url = NSStringFromCef(item->GetURL());
+        info.fullPath = NSStringFromCef(item->GetFullPath());
+        info.suggestedName = NSStringFromCef(item->GetSuggestedFileName());
+        info.receivedBytes = item->GetReceivedBytes();
+        info.totalBytes = item->GetTotalBytes();
+        info.percent = item->GetPercentComplete();
+        if (item->IsComplete()) info.state = NicheDownloadStateComplete;
+        else if (item->IsCanceled()) info.state = NicheDownloadStateCancelled;
+        else if (item->IsInterrupted()) info.state = NicheDownloadStateInterrupted;
+        else info.state = NicheDownloadStateInProgress;
+        [o downloadUpdated:info];
+    }
+
+    // Focus ---------------------------------------------------------------
+
+    void OnGotFocus(CefRefPtr<CefBrowser> browser) override {
+        if (NicheBrowser* o = owner_) [o.delegate browserDidReceiveFocus:o];
+    }
+
+    // Permissions ---------------------------------------------------------
+
+    bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                        const CefString& requesting_origin, uint32_t requested_permissions,
+                                        CefRefPtr<CefMediaAccessCallback> callback) override {
+        NicheBrowser* o = owner_;
+        if (!o || !o.delegate) return false;
+        // Chrome-style pages use Chrome's permission flow: camera and microphone come back
+        // through OnShowPermissionPrompt and Chrome remembers the answer per site (answered
+        // here, every getUserMedia asked again). Screen sharing goes to Chrome's own picker:
+        // tabs, windows or a screen, with "Also share tab audio".
+        if (browser->GetHost()->GetRuntimeStyle() == CEF_RUNTIME_STYLE_CHROME) return false;
+        NSUInteger kinds = 0;
+        if (requested_permissions & (CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE)) kinds |= 1;
+        if (requested_permissions & (CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE)) kinds |= 2;
+        CefRefPtr<CefMediaAccessCallback> cb = callback;
+        uint32_t requested = requested_permissions;
+        [o.delegate browser:o requestsPermissionForOrigin:NSStringFromCef(requesting_origin) kinds:kinds
+                 completion:^(BOOL allowed) {
+            cb->Continue(allowed ? requested : CEF_MEDIA_PERMISSION_NONE);
+        }];
+        return true;
+    }
+
+    bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t prompt_id,
+                                const CefString& requesting_origin, uint32_t requested_permissions,
+                                CefRefPtr<CefPermissionPromptCallback> callback) override {
+        NicheBrowser* o = owner_;
+        if (!o || !o.delegate) return false;
+        // A page's <usermedia> or <permission> element (Meet's "Use microphone and camera")
+        // asks again for the requests just allowed, from inside Continue, when macOS has not
+        // yet given Niche the camera or microphone: Chrome's own prompt shows a macOS step
+        // there. Those requests are decided, so a second answer hits a CHECK in Chromium
+        // (#111). Close the step like Chrome's close button; Chrome's media code asks macOS
+        // itself when the page opens the device. CEF runs this Continue after we return.
+        if (answering_prompt_) {
+            callback->Continue(CEF_PERMISSION_RESULT_DISMISS);
+            return true;
+        }
+        CefRefPtr<CefPermissionPromptCallback> cb = callback;
+        [o.delegate browser:o requestsPermissionForOrigin:NSStringFromCef(requesting_origin)
+                      kinds:NichePermissionKinds(requested_permissions)
+                 completion:^(BOOL allowed) {
+            answering_prompt_ = true;
+            cb->Continue(allowed ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
+            answering_prompt_ = false;
+        }];
+        return true;
+    }
+
+private:
+    // True while a prompt's answer runs (UI thread only).
+    static inline bool answering_prompt_ = false;
+    __weak NicheBrowser* owner_;
+    // Made without a NicheBrowser: Document Picture in Picture's client (owner_ is weak, so it can't say).
+    const bool ownerless_;
+    bool close_requested_ = false;
+    CefRefPtr<FaviconState> favicon_ = new FaviconState();
+    CefRefPtr<CefResourceRequestHandler> blocker_ = new NicheContentBlockingHandler();
+    IMPLEMENT_REFCOUNTING(NicheClient);
+};
+
+// MARK: - NicheBrowser
+
+// MARK: - Chrome-style hosting (Views). One frameless Chrome window per page; the
+// shell attaches it as a child window over the content card.
+
+class NicheDevToolsWindowDelegate : public CefWindowDelegate {
+public:
+    NicheDevToolsWindowDelegate(NicheBrowser* owner, CefRefPtr<CefBrowserView> view) : owner_(owner), view_(view) {}
+    void OnWindowCreated(CefRefPtr<CefWindow> window) override {
+        window->AddChildView(view_);
+        window->Show();
+        NSView* v = (__bridge NSView*)window->GetWindowHandle();
+        if (NicheBrowser* o = owner_) [o.delegate browser:o didCreateDevToolsView:v];
+    }
+    bool IsFrameless(CefRefPtr<CefWindow> window) override { return true; }
+    bool WithStandardWindowButtons(CefRefPtr<CefWindow> window) override { return false; }
+    // Docked, the shell sizes it; a resizable window's edge zone (a few points outside
+    // its frame) would swallow drags meant for the frontend's splitter. Undocking makes
+    // it resizable again (MainWindowController.detachDevToolsWindow).
+    bool CanResize(CefRefPtr<CefWindow> window) override { return false; }
+    cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
+    CefRect GetInitialBounds(CefRefPtr<CefWindow> window) override { return CefRect(0, 0, 10, 10); }
+private:
+    __weak NicheBrowser* owner_;
+    CefRefPtr<CefBrowserView> view_;
+    IMPLEMENT_REFCOUNTING(NicheDevToolsWindowDelegate);
+};
+
+class NicheChromeViewDelegate : public CefBrowserViewDelegate {
+public:
+    explicit NicheChromeViewDelegate(NicheBrowser* owner, bool devtools = false) : owner_(owner), devtools_(devtools) {}
+    // Pages carry Chrome's toolbar, hidden (NicheChromeWindowDelegate): extension popups need
+    // its extensions container as their anchor, and Extensions.triggerAction crashes without
+    // one. NICHE_NO_CHROME_TOOLBAR=1 turns it off (toolbar extension buttons then do nothing).
+    ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView> browser_view) override {
+        return devtools_ || getenv("NICHE_NO_CHROME_TOOLBAR") ? CEF_CTT_NONE : CEF_CTT_NORMAL;
+    }
+    cef_runtime_style_t GetBrowserRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
+    // CEF hides Chrome's web contents background, which makes the first page of each renderer
+    // transparent (chromiumembedded/cef#3891): a page with no background of its own showed this
+    // view's dark-mode fill (#1F1F1F) until a reload gave it a renderer CEF paints white. The
+    // view takes the page's own colour instead; CEF resets it on every theme change.
+    void OnThemeChanged(CefRefPtr<CefView> view) override {
+        NicheBrowser* o = owner_;
+        if (!devtools_) view->SetBackgroundColor(o ? o.pageFill : NicheCanvasColor());
+    }
+    CefRefPtr<CefBrowserViewDelegate> GetDelegateForPopupBrowserView(CefRefPtr<CefBrowserView> browser_view,
+                                                                     const CefBrowserSettings& settings,
+                                                                     CefRefPtr<CefClient> client, bool is_devtools) override {
+        if (is_devtools) return new NicheChromeViewDelegate(owner_, true);
+        NicheClient* cc = AsNicheClient(client.get());
+        return new NicheChromeViewDelegate(cc ? cc->owner() : nil);
+    }
+    bool OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView> browser_view, CefRefPtr<CefBrowserView> popup_browser_view,
+                                   bool is_devtools) override {
+        if (is_devtools) {
+            // Chrome's DevTools for a Chrome-style page: host it in a frameless
+            // window of ours; the shell docks it beside the page like before.
+            NicheBrowser* o = owner_;
+            if (!o) return false;
+            CefWindow::CreateTopLevelWindow(new NicheDevToolsWindowDelegate(o, popup_browser_view));
+            return true;
+        }
+        CefRefPtr<CefBrowser> b = popup_browser_view->GetBrowser();
+        NicheClient* cc = b ? AsNicheClient(b->GetHost()->GetClient().get()) : nullptr;
+        if (!cc) NicheDevToolsLog(@"popup with a non-page client (url %s): CEF default window", b ? b->GetMainFrame()->GetURL().ToString().c_str() : "");
+        NicheBrowser* host = cc ? cc->owner() : nil;
+        if (!host) return false;
+        [host hostPopupBrowserView:popup_browser_view];
+        return true;
+    }
+private:
+    __weak NicheBrowser* owner_;
+    bool devtools_;
+    IMPLEMENT_REFCOUNTING(NicheChromeViewDelegate);
+};
+
+class NicheChromeWindowDelegate : public CefWindowDelegate {
+public:
+    NicheChromeWindowDelegate(NicheBrowser* owner, CefRefPtr<CefBrowserView> view) : owner_(owner), view_(view) {}
+    void OnWindowCreated(CefRefPtr<CefWindow> window) override {
+        window->AddChildView(view_);
+        if (CefRefPtr<CefView> toolbar = view_->GetChromeToolbar()) toolbar->SetVisible(false);
+        window->Show();
+        NSView* v = (__bridge NSView*)window->GetWindowHandle();
+        if (NicheBrowser* o = owner_) [o hostWindowCreated:v.window];
+    }
+    bool IsFrameless(CefRefPtr<CefWindow> window) override { return true; }
+    bool WithStandardWindowButtons(CefRefPtr<CefWindow> window) override { return false; }
+    // The shell sizes page windows; a resizable one grabs drags just outside its edge
+    // (the DevTools splitter, the sidebar edge) and resizes itself instead.
+    bool CanResize(CefRefPtr<CefWindow> window) override { return false; }
+    cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
+    CefRect GetInitialBounds(CefRefPtr<CefWindow> window) override { return CefRect(0, 0, 10, 10); }
+private:
+    __weak NicheBrowser* owner_;
+    CefRefPtr<CefBrowserView> view_;
+    IMPLEMENT_REFCOUNTING(NicheChromeWindowDelegate);
+};
+
+/// Routes DevTools protocol results back to the completion blocks of
+/// -sendDevToolsMethod: (one observer per browser, registered on first use).
+class NicheDevToolsObserver : public CefDevToolsMessageObserver {
+   public:
+    NSMutableDictionary<NSNumber*, void (^)(NSString*, NSString*)>* pending = [NSMutableDictionary dictionary];
+    void OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int message_id, bool success, const void* result,
+                                size_t result_size) override {
+        NSString* json = [[NSString alloc] initWithBytes:result length:result_size encoding:NSUTF8StringEncoding] ?: @"";
+        NSNumber* key = @(message_id);
+        // Capture the table, not `this`: the tab can close before this block runs, and
+        // NicheBrowser's dealloc then frees the observer (read freed memory, crashed 29 Oct).
+        NSMutableDictionary<NSNumber*, void (^)(NSString*, NSString*)>* table = pending;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            void (^done)(NSString*, NSString*) = table[key];
+            [table removeObjectForKey:key];
+            if (done) success ? done(json, nil) : done(nil, json);
+        });
+    }
+    IMPLEMENT_REFCOUNTING(NicheDevToolsObserver);
+};
+
+@implementation NicheBrowser {
+    CefRefPtr<NicheDevToolsObserver> _cdpObserver;
+    CefRefPtr<CefRegistration> _cdpRegistration;
+    int _cdpNextID;
+    CefRefPtr<CefBrowser> _devToolsBrowser;
+    CefRefPtr<CefBrowser> _browser;
+    CefRefPtr<NicheClient> _client;
+    NSString* _pendingURL;
+    BOOL _pendingFocus;
+    BOOL _isPopupHost;
+    NSMutableSet<NSNumber*>* _activeDownloads;
+    BOOL _parked;
+    NSUInteger _audibleChanges;
+}
+
+- (instancetype)initWithFrame:(NSRect)frame url:(NSString*)url delegate:(id<NicheBrowserDelegate>)delegate {
+    return [self initWithFrame:frame url:url delegate:delegate incognito:NO];
+}
+
+- (instancetype)initWithFrame:(NSRect)frame url:(NSString*)url delegate:(id<NicheBrowserDelegate>)delegate incognito:(BOOL)incognito {
+    return [self initWithFrame:frame url:url delegate:delegate incognito:incognito profilePath:nil];
+}
+
+- (instancetype)initWithFrame:(NSRect)frame url:(NSString*)url delegate:(id<NicheBrowserDelegate>)delegate
+                    incognito:(BOOL)incognito profilePath:(NSString*)profilePath {
+    self = [super init];
+    if (!self) return nil;
+    _delegate = delegate;
+    _isIncognito = incognito;
+    _profilePath = incognito ? nil : [profilePath copy];
+    _currentURL = url ?: @"";
+    _currentTitle = @"";
+    _pendingURL = url;
+    _isPopupHost = (url == nil);
+    _containerView = [[NSView alloc] initWithFrame:frame];
+    _containerView.wantsLayer = YES;
+    _containerView.autoresizesSubviews = YES;
+    _client = new NicheClient(self);
+    if (!g_allBrowsers) g_allBrowsers = [NSHashTable weakObjectsHashTable];
+    [g_allBrowsers addObject:self];
+    if (!_isPopupHost) {
+        if (g_contextInitialized) {
+            [self createNow];
+        } else {
+            if (!g_pendingCreation) g_pendingCreation = [NSMutableArray array];
+            [g_pendingCreation addObject:self];
+        }
+    }
+    return self;
+}
+
+- (void)createNow {
+    // Closing pages at quit changes the sidebar, and the window's refresh then asked for a
+    // page Chromium could no longer make: Niche crashed at quit in CreateBrowserView or
+    // CreateTopLevelWindow.
+    if (_isClosed || _browser || g_quitting) return;
+    if (!_isIncognito && !ProfileReady(_profilePath, self)) return;
+    if (g_chromeHosting) {
+        CefBrowserSettings settings;
+        NichePageSettings(settings);
+        CefRefPtr<CefBrowserView> view = CefBrowserView::CreateBrowserView(
+            _client, CefStringFromNS(_pendingURL ?: @"about:blank"), settings, nullptr,
+            [self requestContext], new NicheChromeViewDelegate(self));
+        CefWindow::CreateTopLevelWindow(new NicheChromeWindowDelegate(self, view));
+        return;
+    }
+    CefWindowInfo windowInfo;
+    NSRect b = _containerView.bounds;
+    windowInfo.SetAsChild((__bridge void*)_containerView,
+                          CefRect(0, 0, (int)MAX(b.size.width, 1), (int)MAX(b.size.height, 1)));
+    if (g_useChromeStyle) windowInfo.runtime_style = CEF_RUNTIME_STYLE_CHROME;
+    CefBrowserSettings settings;
+    NichePageSettings(settings);
+    CefBrowserHost::CreateBrowser(windowInfo, _client, CefStringFromNS(_pendingURL ?: @"about:blank"), settings,
+                                  nullptr, [self requestContext]);
+}
+
+- (CefRefPtr<CefRequestContext>)requestContext {
+    return _isIncognito ? IncognitoContext() : ProfileContext(_profilePath);
+}
+
+- (void)updateCapture {
+    BOOL capturing = self.cefMediaAccess || self.chromeCapture;
+    if (capturing == self.isCapturingMedia) return;
+    self.isCapturingMedia = capturing;
+    if ([self.delegate respondsToSelector:@selector(browser:didChangeMediaCapture:)])
+        [self.delegate browser:self didChangeMediaCapture:capturing];
+}
+
+- (CefRefPtr<CefBrowser>)cefBrowser { return _browser; }
+- (CefRefPtr<CefClient>)cefClient { return _client; }
+
+- (void)hostWindowCreated:(NSWindow*)window {
+    self.hostWindow = window;
+    [self.delegate browser:self didCreateHostWindow:window];
+}
+
+- (void)hostPopupBrowserView:(CefRefPtr<CefBrowserView>)view {
+    CefWindow::CreateTopLevelWindow(new NicheChromeWindowDelegate(self, view));
+}
+
+- (void)adoptBrowser:(CefRefPtr<CefBrowser>)browser {
+    _browser = browser;
+    self.isCreated = YES;
+    // The page agent runs new-document scripts only while its domain is enabled.
+    if (g_documentStartParams.count) [self sendDevToolsMethod:@"Page.enable" params:@"{}" completion:^(NSString*, NSString*) {}];
+    for (NSString* params in g_documentStartParams)
+        [self sendDevToolsMethod:@"Page.addScriptToEvaluateOnNewDocument" params:params
+                      completion:^(NSString*, NSString* error) {
+                          if (error) NSLog(@"Niche: document start script not installed: %@", error);
+                      }];
+    if (_pendingFocus) {
+        _pendingFocus = NO;
+        browser->GetHost()->SetFocus(true);
+    }
+}
+
+- (void)browserClosed {
+    _browser = nullptr;
+    self.isClosed = YES;
+    self.closedByPage = !self.closeRequested && !g_quitting;
+    [g_allBrowsers removeObject:self];
+    if (_parked) {
+        // Already reported closed when it was parked. Last: this may release self.
+        [g_parkedBrowsers removeObject:self];
+        return;
+    }
+    id<NicheBrowserDelegate> d = self.delegate;
+    [d browserDidClose:self];
+}
+
+- (void)downloadUpdated:(NicheDownloadInfo*)download {
+    if (!_activeDownloads) _activeDownloads = [NSMutableSet set];
+    if (download.state == NicheDownloadStateInProgress) [_activeDownloads addObject:@(download.identifier)];
+    else [_activeDownloads removeObject:@(download.identifier)];
+    [self.delegate browser:self didUpdateDownload:download];
+    if (_parked && _activeDownloads.count == 0 && _browser) _browser->GetHost()->CloseBrowser(true);
+}
+
+/// Hides the page and reports it closed, but keeps the browser on about:blank until its
+/// downloads end: Chromium cancels a download when the browser that started it closes
+/// (Chrome keeps it going), and only that browser hears how the download goes.
+- (void)park {
+    _parked = YES;
+    if (!g_parkedBrowsers) g_parkedBrowsers = [NSMutableSet set];
+    [g_parkedBrowsers addObject:self];
+    [g_allBrowsers removeObject:self];
+    _browser->GetHost()->SetAudioMuted(true);
+    _browser->GetMainFrame()->LoadURL("about:blank");
+    if (NSWindow* host = self.hostWindow) {
+        [host.parentWindow removeChildWindow:host];
+        [host orderOut:nil];
+    }
+    [self.delegate browserDidClose:self];
+}
+
+- (BOOL)hasDevTools { return _browser ? _browser->GetHost()->HasDevTools() : NO; }
+
+- (void)loadURL:(NSString*)url {
+    if (_browser) {
+        _browser->GetMainFrame()->LoadURL(CefStringFromNS(url));
+    } else {
+        _pendingURL = url;
+    }
+}
+
+- (void)goBack { if (_browser) _browser->GoBack(); }
+- (void)goForward { if (_browser) _browser->GoForward(); }
+- (void)reload { if (_browser) _browser->Reload(); }
+- (void)reloadIgnoringCache { if (_browser) _browser->ReloadIgnoreCache(); }
+- (void)stopLoading { if (_browser) _browser->StopLoad(); }
+- (void)exitFullscreen { if (_browser) _browser->GetHost()->ExitFullscreen(true); }
+
+- (void)setFocused:(BOOL)focused {
+    if (_browser) _browser->GetHost()->SetFocus(focused);
+    else if (focused) _pendingFocus = YES;
+}
+
+- (void)showDevToolsInspectingPoint:(NSPoint)point {
+    if (!_browser) return;
+    if (self.hostWindow) {
+        // Chrome-style: Chrome docks DevTools inside the page window itself.
+        BOOL open = _browser->GetHost()->HasDevTools();
+        _browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(), CefPoint((int)point.x, (int)point.y));
+        // Open DevTools take the action now; new ones when DevToolsClient prepares the frontend.
+        if (open && _devToolsBrowser && !_devToolsBrowser->IsLoading()) [self runDevToolsAction];
+        return;
+    }
+    if (_browser->GetHost()->HasDevTools()) {
+        _browser->GetHost()->ShowDevTools(CefWindowInfo(), nullptr, CefBrowserSettings(),
+                                          CefPoint((int)point.x, (int)point.y));
+        // A frontend still loading takes the action when DevToolsClient prepares it.
+        if (_devToolsBrowser && !_devToolsBrowser->IsLoading()) [self runDevToolsAction];
+        return;
+    }
+    NSView* host = [self.delegate devToolsHostViewForBrowser:self];
+    CefWindowInfo windowInfo;
+    NSRect target = NSZeroRect;
+    if (host) {
+        NSRect b = host.bounds;
+        windowInfo.bounds = CefRect(0, 0, (int)MAX(b.size.width, 1), (int)MAX(b.size.height, 1));
+        windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
+        windowInfo.hidden = true;
+        CefString(&windowInfo.window_name) = "DevTools";
+    } else {
+        // No parent view: CEF creates its own top-level DevTools window (what
+        // cefclient does on macOS); we resize it once it exists.
+        NSWindow* w = _containerView.window;
+        NSRect f = w ? w.frame : NSMakeRect(100, 100, 1100, 760);
+        CGFloat width = MIN(1100, MAX(700, f.size.width * 0.8));
+        CGFloat height = MIN(800, MAX(500, f.size.height * 0.8));
+        target = NSMakeRect(NSMidX(f) - width / 2 + 40, NSMidY(f) - height / 2 - 20, width, height);
+        CefString(&windowInfo.window_name) = "DevTools";
+    }
+    CefBrowserSettings settings;
+    _browser->GetHost()->ShowDevTools(windowInfo, new DevToolsClient(target, self, host), settings,
+                                      CefPoint((int)point.x, (int)point.y));
+}
+
+- (void)showDevTools { [self showDevToolsInspectingPoint:NSZeroPoint]; }
+- (void)closeDevTools { if (_browser) _browser->GetHost()->CloseDevTools(); }
+- (void)applyDevToolsAction {
+    // A frontend still loading takes the action when DevToolsClient prepares it.
+    if (_devToolsBrowser && !_devToolsBrowser->IsLoading()) [self runDevToolsAction];
+}
+// The frontend's own API, which Chrome's DevToolsWindow::DoAction calls through DevToolsAPI.
+- (void)runDevToolsAction {
+    NSString* action = _devToolsAction;
+    if (!action || !_devToolsBrowser) return;
+    _devToolsAction = nil;
+    NSString* call;
+    if ([action isEqualToString:@"inspect"]) call = @"enterInspectElementMode()";
+    else if ([@[@"console", @"network", @"elements"] containsObject:action]) call = [NSString stringWithFormat:@"showPanel('%@')", action];
+    else return;
+    NicheDevToolsLog(@"frontend %@", call);
+    // Hooked frontends run it on loadCompleted (or at once once loaded); one loaded before the
+    // hooks went in never reports it, so the call goes out after 3 s regardless.
+    NSString* js = [NSString stringWithFormat:@"(function(){var h=window.InspectorFrontendHost,done=false;"
+                    "function run(){if(done)return;done=true;var a=window.InspectorFrontendAPI;if(a)a.%@;}"
+                    "if(!h||h.__nicheLoaded){run();return;}(h.__nicheRun=h.__nicheRun||[]).push(run);setTimeout(run,3000);})();", call];
+    CefRefPtr<CefFrame> f = _devToolsBrowser->GetMainFrame();
+    if (f) f->ExecuteJavaScript(CefStringFromNS(js), f->GetURL(), 0);
+}
+
+- (void)devToolsBrowserCreated:(CefRefPtr<CefBrowser>)browser { _devToolsBrowser = browser; }
+- (void)devToolsBrowserClosed { _devToolsBrowser = nullptr; }
+- (void)executeJavaScript:(NSString*)script inDevTools:(BOOL)inDevTools {
+    if (!inDevTools) { [self executeJavaScript:script]; return; }
+    if (!_devToolsBrowser) return;
+    CefRefPtr<CefFrame> f = _devToolsBrowser->GetMainFrame();
+    if (f) f->ExecuteJavaScript(CefStringFromNS(script), f->GetURL(), 0);
+}
+
+- (NicheSSLStatus*)sslStatus {
+    if (!_browser) return nil;
+    CefRefPtr<CefNavigationEntry> entry = _browser->GetHost()->GetVisibleNavigationEntry();
+    CefRefPtr<CefSSLStatus> ssl = entry ? entry->GetSSLStatus() : nullptr;
+    if (!ssl) return nil;
+    NicheSSLStatus* status = [NicheSSLStatus new];
+    status.secureConnection = ssl->IsSecureConnection();
+    status.certStatus = (NSUInteger)ssl->GetCertStatus();
+    status.contentStatus = (NSUInteger)ssl->GetContentStatus();
+    NSMutableArray<NSData*>* certificates = [NSMutableArray array];
+    auto add = [&](CefRefPtr<CefBinaryValue> der) {
+        if (!der || !der->GetSize()) return;
+        NSMutableData* data = [NSMutableData dataWithLength:der->GetSize()];
+        der->GetData(data.mutableBytes, data.length, 0);
+        [certificates addObject:data];
+    };
+    if (CefRefPtr<CefX509Certificate> cert = ssl->GetX509Certificate()) {
+        add(cert->GetDEREncoded());
+        CefX509Certificate::IssuerChainBinaryList chain;
+        cert->GetDEREncodedIssuerChain(chain);
+        for (auto& der : chain) add(der);
+    }
+    status.certificates = certificates;
+    return status;
+}
+
+- (double)zoomLevel { return _browser ? _browser->GetHost()->GetZoomLevel() : 0; }
+- (void)setZoomLevel:(double)level { if (_browser) _browser->GetHost()->SetZoomLevel(level); }
+
+- (void)findText:(NSString*)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext {
+    if (_browser) _browser->GetHost()->Find(CefStringFromNS(text), forward, matchCase, findNext);
+}
+- (void)stopFinding:(BOOL)clearSelection { if (_browser) _browser->GetHost()->StopFinding(clearSelection); }
+- (void)setAudioMuted:(BOOL)muted { if (_browser) _browser->GetHost()->SetAudioMuted(muted); }
+
+// Chrome's RecentlyAudibleHelper: quiet only once the page stayed quiet for 2 s, so the
+// gap between two tracks doesn't blink the speaker.
+- (void)audibleChanged:(BOOL)audible {
+    NSUInteger change = ++_audibleChanges;
+    if ([self.delegate respondsToSelector:@selector(browser:didChangeSoundPlaying:)])
+        [self.delegate browser:self didChangeSoundPlaying:audible];
+    if (audible) { [self updateAudible:YES]; return; }
+    __weak NicheBrowser* weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        NicheBrowser* s = weakSelf;
+        if (s && s->_audibleChanges == change) [s updateAudible:NO];
+    });
+}
+
+- (void)updateAudible:(BOOL)audible {
+    if (audible == self.isAudible) return;
+    self.isAudible = audible;
+    if ([self.delegate respondsToSelector:@selector(browser:didChangeAudible:)])
+        [self.delegate browser:self didChangeAudible:audible];
+}
+
+// MARK: Picture in Picture
+//
+// Chromium only lets a page enter Picture in Picture while it holds a user
+// activation, which clicks in Niche's own UI never give the page. Niche therefore
+// first sends the page a harmless key (F19: no page or Chromium shortcut
+// listens to it), which the renderer counts as an interaction, then runs the
+// request once `navigator.userActivation` reports active. `x`/`y` (view DIPs,
+// -1 for none) pick the video under a context-menu click; otherwise the
+// playing, largest video wins. Automatic requests (leaving the tab) take only
+// an audible, playing video of some size: muted ones are hover previews
+// (YouTube's thumbnails play muted on hover) or GIF-like loops.
+static NSString* PictureInPictureScript(BOOL automatic, int x, int y) {
+    return [NSString stringWithFormat:
+        @"(function(send){var auto=%d,x=%d,y=%d;try{"
+        "if(document.pictureInPictureElement){if(!auto){document.exitPictureInPicture().catch(function(){});}return;}"
+        "var area=function(v){var r=v.getBoundingClientRect();return r.width*r.height;};"
+        "var c=Array.prototype.slice.call(document.querySelectorAll('video')).filter(function(v){return !v.disablePictureInPicture&&v.readyState>=1&&v.videoWidth>0;});"
+        "if(auto){c=c.filter(function(v){return !v.paused&&!v.ended&&!v.muted&&v.volume>0&&area(v)>=20000;});}"
+        "if(!c.length){send('pip:none');return;}"
+        "var v=null;"
+        "if(x>=0){v=c.filter(function(e){var r=e.getBoundingClientRect();return x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom;}).sort(function(a,b){return area(a)-area(b);})[0]||null;}"
+        "if(!v){c.sort(function(a,b){return ((b.paused?0:1)-(a.paused?0:1))||(area(b)-area(a));});v=c[0];}"
+        "var go=function(){v.requestPictureInPicture().then(function(){send('pip:ok');}).catch(function(e){send('pip:err '+e.name+': '+e.message);});};"
+        "var n=0;var t=setInterval(function(){if((navigator.userActivation&&navigator.userActivation.isActive)||++n>20){clearInterval(t);go();}},50);"
+        "}catch(e){send('pip:err '+e);}})", automatic ? 1 : 0, x, y];
+}
+
+// Chromium's own NSView for the page (RenderWidgetHostViewCocoa), the one
+// AppKit hands real key presses to. CefBrowserHost::SendKeyEvent does not
+// reach the page in Chrome-style hosting, so the nudge goes straight to it.
+static NSView* FindRenderWidgetHostView(NSView* root) {
+    if (!root) return nil;
+    if ([NSStringFromClass([root class]) hasPrefix:@"RenderWidgetHostViewCocoa"]) return root;
+    for (NSView* v in root.subviews) {
+        if (NSView* found = FindRenderWidgetHostView(v)) return found;
+    }
+    return nil;
+}
+
+- (void)nudgeUserActivation {
+    if (!_browser) return;
+    NSView* root = self.hostWindow ? self.hostWindow.contentView : _containerView;
+    NSView* target = FindRenderWidgetHostView(root);
+    if (target) {
+        NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
+        NSInteger win = target.window.windowNumber;
+        NSEvent* down = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:now
+                                      windowNumber:win context:nil characters:@"\uF716" charactersIgnoringModifiers:@"\uF716"
+                                         isARepeat:NO keyCode:0x50];
+        NSEvent* up = [NSEvent keyEventWithType:NSEventTypeKeyUp location:NSZeroPoint modifierFlags:0 timestamp:now + 0.01
+                                    windowNumber:win context:nil characters:@"\uF716" charactersIgnoringModifiers:@"\uF716"
+                                       isARepeat:NO keyCode:0x50];
+        [target keyDown:down];
+        [target keyUp:up];
+        return;
+    }
+    CefKeyEvent key;
+    key.windows_key_code = 0x82;  // VK_F19
+    key.native_key_code = 0x50;   // kVK_F19
+    key.modifiers = 0;
+    key.character = 0xF716;
+    key.unmodified_character = 0xF716;
+    key.is_system_key = 0;
+    key.type = KEYEVENT_RAWKEYDOWN;
+    _browser->GetHost()->SendKeyEvent(key);
+    key.type = KEYEVENT_KEYUP;
+    _browser->GetHost()->SendKeyEvent(key);
+}
+
+- (void)requestPictureInPictureInFrame:(CefRefPtr<CefFrame>)frame automatic:(BOOL)automatic x:(int)x y:(int)y {
+    if (!_browser) return;
+    if (self.isInPictureInPicture) {
+        if (!automatic) [self exitPictureInPicture];
+        return;
+    }
+    [self nudgeUserActivation];
+    double zoom = pow(1.2, _browser->GetHost()->GetZoomLevel());  // view DIPs → CSS px
+    NSString* hit = PictureInPictureScript(automatic, x < 0 ? -1 : (int)(x / zoom), y < 0 ? -1 : (int)(y / zoom));
+    NSString* any = PictureInPictureScript(automatic, -1, -1);
+    if (frame) {
+        // Click coordinates are relative to the top-level view, so only the main frame can hit-test.
+        RunPageScript(frame, "", CefStringFromNS(frame->IsMain() ? hit : any));
+        return;
+    }
+    // Every frame looks for a video: embedded players live in iframes.
+    std::vector<CefString> ids;
+    _browser->GetFrameIdentifiers(ids);
+    for (const auto& id : ids) RunPageScript(_browser->GetFrameByIdentifier(id), "", CefStringFromNS(any));
+}
+
+- (void)requestPictureInPictureAutomatic:(BOOL)automatic {
+    [self requestPictureInPictureInFrame:nullptr automatic:automatic x:-1 y:-1];
+}
+
+- (void)skipPictureInPictureBy:(double)seconds {
+    if (!_browser) return;
+    NSString* js = [NSString stringWithFormat:@"(function(){var v=document.pictureInPictureElement;if(!v)return;"
+                    "var t=v.currentTime+(%f);if(isFinite(v.duration))t=Math.min(t,v.duration);v.currentTime=Math.max(0,t);})();", seconds];
+    std::vector<CefString> ids;
+    _browser->GetFrameIdentifiers(ids);
+    for (const auto& id : ids) {
+        CefRefPtr<CefFrame> f = _browser->GetFrameByIdentifier(id);
+        if (f && f->IsValid()) f->ExecuteJavaScript(CefStringFromNS(js), f->GetURL(), 0);
+    }
+}
+
+- (void)togglePictureInPicturePlayback {
+    if (!_browser) return;
+    std::vector<CefString> ids;
+    _browser->GetFrameIdentifiers(ids);
+    for (const auto& id : ids) {
+        CefRefPtr<CefFrame> f = _browser->GetFrameByIdentifier(id);
+        if (f && f->IsValid()) {
+            f->ExecuteJavaScript("(function(){var v=document.pictureInPictureElement;if(!v)return;"
+                                 "if(v.paused||v.ended){v.play().catch(function(){});}else{v.pause();}})();", f->GetURL(), 0);
+        }
+    }
+}
+
+- (void)exitPictureInPicture { [self exitPictureInPicturePausing:NO]; }
+- (void)closePictureInPicture { [self exitPictureInPicturePausing:YES]; }
+
+- (void)exitPictureInPicturePausing:(BOOL)pause {
+    if (!_browser) return;
+    CefString js = pause ? "(function(){var v=document.pictureInPictureElement;if(!v)return;v.pause();"
+                           "document.exitPictureInPicture().catch(function(){});})();"
+                         : "if(document.pictureInPictureElement){document.exitPictureInPicture().catch(function(){});}";
+    std::vector<CefString> ids;
+    _browser->GetFrameIdentifiers(ids);
+    for (const auto& id : ids) {
+        CefRefPtr<CefFrame> f = _browser->GetFrameByIdentifier(id);
+        if (f && f->IsValid()) f->ExecuteJavaScript(js, f->GetURL(), 0);
+    }
+}
+- (void)print { if (_browser) _browser->GetHost()->Print(); }
+- (void)viewSource { if (_browser) _browser->GetMainFrame()->ViewSource(); }
+- (BOOL)runChromeCommand:(NSString*)name {
+    if (!_browser) return NO;
+    int command = cef_id_for_command_id_name(name.UTF8String);
+    if (command <= 0 || !_browser->GetHost()->CanExecuteChromeCommand(command)) return NO;
+    _browser->GetHost()->ExecuteChromeCommand(command, CEF_WOD_CURRENT_TAB);
+    return YES;
+}
+- (void)executeJavaScript:(NSString*)script {
+    if (_browser) _browser->GetMainFrame()->ExecuteJavaScript(CefStringFromNS(script), _browser->GetMainFrame()->GetURL(), 0);
+}
+- (cef_color_t)pageFill { return _pageBackgroundColor ?: NicheCanvasColor(); }
++ (NSColor*)pageCanvasColor { return PagesAreDark() ? NSColor.blackColor : NSColor.whiteColor; }
+- (void)probeBackgroundColor {
+    if (_browser) RunPageScript(_browser->GetMainFrame(), "bg", kBackgroundProbe);
+}
+- (void)sendDevToolsMethod:(NSString*)method params:(NSString*)params
+                completion:(void (^)(NSString* _Nullable, NSString* _Nullable))completion {
+    if (!_browser) { completion(nil, @"no browser"); return; }
+    if (!_cdpObserver) {
+        _cdpObserver = new NicheDevToolsObserver();
+        _cdpRegistration = _browser->GetHost()->AddDevToolsMessageObserver(_cdpObserver);
+    }
+    int messageID = ++_cdpNextID + 100000;  // clear of ids Chromium's own clients use
+    _cdpObserver->pending[@(messageID)] = [completion copy];
+    // Method names are plain identifiers ("Domain.method"), so no escaping is needed.
+    NSString* message = [NSString stringWithFormat:@"{\"id\":%d,\"method\":\"%@\",\"params\":%@}", messageID, method,
+                         params.length ? params : @"{}"];
+    NSData* data = [message dataUsingEncoding:NSUTF8StringEncoding];
+    if (!_browser->GetHost()->SendDevToolsMessage(data.bytes, data.length)) {
+        [_cdpObserver->pending removeObjectForKey:@(messageID)];
+        completion(nil, @"SendDevToolsMessage failed");
+    }
+}
+// The isolated world the document start script made: the main frame's id, then that world's
+// execution context (createIsolatedWorld returns the existing world of that name), then evaluate.
+- (void)evaluateInIsolatedWorld:(NSString*)world params:(NSString*)params
+                     completion:(void (^)(NSString* _Nullable, NSString* _Nullable))completion {
+    __weak NicheBrowser* weakSelf = self;
+    id (^parse)(NSString*) = ^id(NSString* json) {
+        return json ? [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
+    };
+    [self sendDevToolsMethod:@"Page.getFrameTree" params:@"{}" completion:^(NSString* tree, NSString* error) {
+        NSString* frameID = [parse(tree) valueForKeyPath:@"frameTree.frame.id"];
+        NicheBrowser* s = weakSelf;
+        if (!s || ![frameID isKindOfClass:NSString.class]) { completion(nil, error ?: @"no frame"); return; }
+        NSData* body = [NSJSONSerialization dataWithJSONObject:@{@"frameId": frameID, @"worldName": world} options:0 error:nil];
+        [s sendDevToolsMethod:@"Page.createIsolatedWorld" params:[[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding]
+                   completion:^(NSString* made, NSString* error) {
+            NSNumber* context = [parse(made) valueForKey:@"executionContextId"];
+            NSMutableDictionary* evaluate = [parse(params) mutableCopy];
+            NicheBrowser* s = weakSelf;
+            if (!s || ![context isKindOfClass:NSNumber.class] || ![evaluate isKindOfClass:NSMutableDictionary.class]) {
+                completion(nil, error ?: @"no isolated world");
+                return;
+            }
+            evaluate[@"contextId"] = context;
+            NSData* json = [NSJSONSerialization dataWithJSONObject:evaluate options:0 error:nil];
+            [s sendDevToolsMethod:@"Runtime.evaluate" params:[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding]
+                       completion:completion];
+        }];
+    }];
+}
+
+- (void)notifyMoveOrResizeStarted { if (_browser) _browser->GetHost()->NotifyMoveOrResizeStarted(); }
+
+- (void)close {
+    if (_isClosed || _parked) return;
+    self.closeRequested = YES;
+    if (NicheClient* c = _browser ? AsNicheClient(_browser->GetHost()->GetClient().get()) : nullptr) c->SetCloseRequested();
+    if (_browser && _activeDownloads.count && !g_quitting) {
+        [self park];
+    } else if (_browser) {
+        _browser->GetHost()->CloseBrowser(true);
+    } else {
+        // Never created; drop it from the pending list and report closed.
+        [g_pendingCreation removeObject:self];
+        [self browserClosed];
+    }
+}
+
+@end
+
+// MARK: - Runtime
+
+// MARK: - Chrome-style spike (extensions need Chrome style; on macOS that means a Views window)
+
+static void (^g_spikeWindowHandler)(NSWindow*) = nil;
+
+class SpikeBrowserViewDelegate : public CefBrowserViewDelegate {
+public:
+    ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView> browser_view) override { return CEF_CTT_NONE; }
+    cef_runtime_style_t GetBrowserRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
+    IMPLEMENT_REFCOUNTING(SpikeBrowserViewDelegate);
+};
+
+class SpikeWindowDelegate : public CefWindowDelegate {
+public:
+    explicit SpikeWindowDelegate(CefRefPtr<CefBrowserView> view) : view_(view) {}
+    void OnWindowCreated(CefRefPtr<CefWindow> window) override {
+        window->AddChildView(view_);
+        window->Show();
+        NSView* v = (__bridge NSView*)window->GetWindowHandle();
+        if (g_spikeWindowHandler && v.window) g_spikeWindowHandler(v.window);
+    }
+    bool IsFrameless(CefRefPtr<CefWindow> window) override { return true; }
+    bool WithStandardWindowButtons(CefRefPtr<CefWindow> window) override { return false; }
+    cef_runtime_style_t GetWindowRuntimeStyle() override { return CEF_RUNTIME_STYLE_CHROME; }
+    CefRect GetInitialBounds(CefRefPtr<CefWindow> window) override { return CefRect(300, 200, 900, 640); }
+private:
+    CefRefPtr<CefBrowserView> view_;
+    IMPLEMENT_REFCOUNTING(SpikeWindowDelegate);
+};
+
+// Chrome's crash recovery: when the previous run did not quit cleanly (killed,
+// crashed), the profile is left with profile.exit_type = "Crashed" and the
+// Chrome runtime restores the last session (Default/Sessions) into a stock
+// Chrome window (title bar, location bar) the moment the first browser is
+// created. Niche restores its own tabs, so the saved session is dropped and the
+// profile marked clean before Chromium reads it.
+static void MarkProfileExitedCleanly(NSString* profileDir) {
+    NSString* sessions = [profileDir stringByAppendingPathComponent:@"Sessions"];
+    [[NSFileManager defaultManager] removeItemAtPath:sessions error:nil];
+    NSString* prefs = [profileDir stringByAppendingPathComponent:@"Preferences"];
+    NSData* data = [NSData dataWithContentsOfFile:prefs];
+    if (!data) return;
+    NSError* error = nil;
+    id root = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:&error];
+    if (![root isKindOfClass:[NSMutableDictionary class]]) return;
+    NSMutableDictionary* profile = root[@"profile"];
+    if (![profile isKindOfClass:[NSMutableDictionary class]]) return;
+    if ([profile[@"exit_type"] isEqual:@"Normal"] && [profile[@"exited_cleanly"] boolValue]) return;
+    profile[@"exit_type"] = @"Normal";
+    profile[@"exited_cleanly"] = @YES;
+    NSData* out = [NSJSONSerialization dataWithJSONObject:root options:0 error:&error];
+    if (out) [out writeToFile:prefs atomically:YES];
+}
+
+@implementation NicheCEFRuntime
+
++ (void)setChromeHosting:(BOOL)enabled { g_chromeHosting = enabled; }
++ (void)setLinkMenuTitles:(NSArray<NSString*>*)titles opensInBackground:(NSArray<NSNumber*>*)background {
+    if (titles.count != 2 || background.count != 2) return;
+    g_linkMenuTitles = [titles copy];
+    g_linkMenuBackground = [background copy];
+}
++ (void)setDocumentStartScript:(NSString*)script isolatedScript:(NSString*)isolatedScript world:(NSString*)world {
+    NSMutableArray<NSString*>* all = [NSMutableArray array];
+    for (NSDictionary* params in @[@{@"source": script ?: @"", @"runImmediately": @YES},
+                                   @{@"source": isolatedScript ?: @"", @"worldName": world ?: @"", @"runImmediately": @YES}]) {
+        if (![params[@"source"] length]) continue;
+        NSData* json = [NSJSONSerialization dataWithJSONObject:params options:0 error:nil];
+        if (json) [all addObject:[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding]];
+    }
+    g_documentStartParams = all;
+}
++ (BOOL)chromeHosting { return g_chromeHosting; }
+
++ (void)setContentBlockingEnabled:(BOOL)enabled { niche_blocker::Enabled().store(enabled); }
++ (BOOL)contentBlockingEnabled { return niche_blocker::Enabled().load(); }
+
+/// Only contexts that finished loading take preferences (an uninitialised one is fatal);
+/// the rest get it from ApplyProfilePreferences when they load. Every settings write calls
+/// this, so an unchanged value does nothing. Once quitting starts the global context goes
+/// away (GetGlobalContext returns null, #36); the setting is applied again at the next start.
++ (void)setWebsiteAppearance:(NSInteger)mode {
+    if (mode == g_websiteAppearance) return;
+    g_websiteAppearance = mode;
+    if (!g_contextInitialized || g_quitting) return;
+    ApplyWebsiteAppearance(CefRequestContext::GetGlobalContext());
+    for (auto& [path, context] : g_profileContexts) {
+        if ([g_readyProfiles containsObject:@(path.c_str())]) ApplyWebsiteAppearance(context);
+    }
+    if (g_incognitoContext && g_incognitoReady) ApplyWebsiteAppearance(g_incognitoContext);
+}
++ (NSInteger)websiteAppearance { return g_websiteAppearance; }
++ (void)setHttpsOnlyModeEnabled:(BOOL)enabled {
+    if (enabled == g_httpsOnly) return;
+    g_httpsOnly = enabled;
+    if (!g_contextInitialized || g_quitting) return;
+    ApplyHttpsOnly(CefRequestContext::GetGlobalContext());
+    for (auto& [path, context] : g_profileContexts) {
+        if ([g_readyProfiles containsObject:@(path.c_str())]) ApplyHttpsOnly(context);
+    }
+    if (g_incognitoContext && g_incognitoReady) ApplyHttpsOnly(g_incognitoContext);
+}
++ (void)setBlockedDomains:(NSArray<NSString*>*)domains {
+    auto* set = new niche_blocker::DomainSet();
+    set->reserve(domains.count);
+    for (NSString* d in domains) niche_blocker::AddListLine(*set, d.UTF8String ?: "");
+    niche_blocker::Publish(set);
+}
++ (void)loadBlockedDomainsFromFile:(NSString*)path completion:(void (^)(NSInteger))completion {
+    void (^done)(NSInteger) = [completion copy];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSData* data = [NSData dataWithContentsOfFile:path];
+        NSInteger count = 0;
+        if (data.length) {
+            niche_blocker::DomainSet* set =
+                niche_blocker::ParseList(std::string_view(static_cast<const char*>(data.bytes), data.length));
+            count = (NSInteger)set->size();
+            niche_blocker::Publish(set);
+        }
+        if (done) dispatch_async(dispatch_get_main_queue(), ^{ done(count); });
+    });
+}
++ (NSInteger)blockedDomainCount { return (NSInteger)niche_blocker::Count(); }
++ (BOOL)shouldBlockRequestURL:(NSString*)requestURL onPageURL:(NSString*)pageURL {
+    return niche_blocker::ShouldBlock(niche_blocker::WebHost(requestURL.UTF8String ?: ""),
+                                    niche_blocker::WebHost(pageURL.UTF8String ?: ""));
+}
+
++ (void)spikeChromeWindowWithURL:(NSString*)url handler:(void (^)(NSWindow*))handler {
+    g_spikeWindowHandler = [handler copy];
+    CefBrowserSettings settings;
+    CefRefPtr<CefBrowserView> view = CefBrowserView::CreateBrowserView(
+        new DevToolsClient(NSZeroRect, nil, nil), CefStringFromNS(url), settings, nullptr, nullptr, new SpikeBrowserViewDelegate());
+    CefWindow::CreateTopLevelWindow(new SpikeWindowDelegate(view));
+}
+
++ (void)setExtensionPaths:(NSArray<NSString*>*)paths profiles:(NSString*)profiles {
+    g_extensionPaths = [paths copy];
+    g_extensionProfiles = [profiles copy];
+}
+
++ (BOOL)initializeWithCachePath:(NSString*)cachePath
+               userAgentProduct:(NSString*)product
+                        logPath:(NSString*)logPath
+                         locale:(NSString*)locale
+                 useChromeStyle:(BOOL)useChromeStyle
+                useMockKeychain:(BOOL)useMockKeychain {
+    if (g_libraryLoader) return YES;
+    g_useChromeStyle = useChromeStyle;
+    g_useMockKeychain = useMockKeychain;
+    g_libraryLoader = new CefScopedLibraryLoader();
+    if (!g_libraryLoader->LoadInMain()) {
+        NSLog(@"NicheCEF: failed to load Chromium Embedded Framework");
+        return NO;
+    }
+    // Make sure the CefAppProtocol NSApplication exists before CefInitialize.
+    [NicheApplication sharedApplication];
+
+    // Safe Browsing's list updates need a Google API key. Chromium reads it from the
+    // environment (unbranded builds only); one already set there wins, for testing.
+    if (NSString* key = [NSBundle.mainBundle objectForInfoDictionaryKey:@"NicheGoogleAPIKey"]; key.length) {
+        setenv("GOOGLE_API_KEY", key.UTF8String, 0);
+    }
+
+    CefMainArgs mainArgs(*_NSGetArgc(), *_NSGetArgv());
+    CefSettings settings;
+    // Renderer, GPU and utility processes run in Chromium's seatbelt sandbox
+    // (NicheHelper enters it before loading the framework).
+    settings.no_sandbox = false;
+    CefString(&settings.cache_path) = CefStringFromNS(cachePath);
+    CefString(&settings.root_cache_path) = CefStringFromNS(cachePath);
+    settings.persist_session_cookies = true;
+    CefString(&settings.user_agent_product) = CefStringFromNS(product);
+    CefString(&settings.log_file) = CefStringFromNS(logPath);
+    // Without it CEF passes --lang=en-US whatever macOS is set to (#167).
+    if (locale.length) CefString(&settings.locale) = CefStringFromNS(locale);
+    settings.log_severity = LOGSEVERITY_WARNING;
+    settings.background_color = CefColorSetARGB(255, 255, 255, 255);
+
+    // Default plus the spaces' own profiles ("Profile <id>").
+    for (NSString* name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:cachePath error:nil]) {
+        if ([name isEqualToString:@"Default"] || [name hasPrefix:@"Profile "]) {
+            MarkProfileExitedCleanly([cachePath stringByAppendingPathComponent:name]);
+        }
+    }
+    CefRefPtr<NicheApp> app(new NicheApp());
+    if (!CefInitialize(mainArgs, settings, app.get(), nullptr)) {
+        int code = CefGetExitCode();
+        g_alreadyRunning = (code == CEF_RESULT_CODE_NORMAL_EXIT_PROCESS_NOTIFIED);
+        NSLog(@"NicheCEF: CefInitialize failed (exit code %d%@)", code, g_alreadyRunning ? @", another instance is running" : @"");
+        return NO;
+    }
+    return YES;
+}
+
++ (BOOL)anotherInstanceWasNotified { return g_alreadyRunning; }
++ (void)setRelaunchHandler:(void (^)(NSArray<NSString*>*))handler { g_relaunchHandler = [handler copy]; }
++ (void)setStrayPageHandler:(void (^)(NSString*, NSString*))handler { g_strayPageHandler = [handler copy]; }
++ (void)setAppLinkHandler:(BOOL (^)(NicheBrowser*, NSString*, BOOL))handler { g_appLinkHandler = [handler copy]; }
++ (void)setDownloadDestinationHandler:(void (^)(NSString*, NSString*, void (^)(NSString*)))handler { g_downloadDestinationHandler = [handler copy]; }
++ (void)setProcessEventHandler:(void (^)(NSString*, NSString*, NSString*))handler { g_processEventHandler = [handler copy]; }
++ (BOOL)isExtensionWindow:(NSWindow*)window { return window && [g_extensionWindows containsObject:window]; }
++ (BOOL)isPageWindow:(NSWindow*)window {
+    for (NicheBrowser* b in g_allBrowsers) if (window && b.hostWindow == window) return YES;
+    return NO;
+}
+
++ (void)floatOverFullScreenSpaces:(NSWindow*)window { FloatOverFullScreenSpaces(window); }
+
++ (void)runMessageLoop { CefRunMessageLoop(); }
++ (void)quitMessageLoop { NicheQuitMessageLoop(); }
++ (void)shutdown {
+    g_quitting = true;
+    g_incognitoContext = nullptr;
+    g_profileContexts.clear();
+    g_extensionSettingsObservers.clear();
+    g_secureDNSObservers.clear();
+    g_waitingForProfile = nil;
+    CefShutdown();
+}
+
++ (void)closeAllBrowsersAndQuit {
+    g_quitting = true;
+    if (g_strayClient) g_strayClient->CloseWindows();
+    NSArray<NicheBrowser*>* all = [g_allBrowsers allObjects];
+    if ((all.count == 0 && g_parkedBrowsers.count == 0) || g_liveBrowsers <= 0) {
+        NicheQuitMessageLoop();
+        return;
+    }
+    for (NicheBrowser* b in all) [b close];
+    for (NicheBrowser* b in [g_parkedBrowsers allObjects]) if (CefRefPtr<CefBrowser> cef = [b cefBrowser]) cef->GetHost()->CloseBrowser(true);
+}
+
++ (NSInteger)liveBrowserCount { return g_liveBrowsers; }
++ (void)endIncognitoSession { g_incognitoContext = nullptr; g_incognitoReady = false; }
++ (NSString*)chromiumVersion {
+    return [NSString stringWithFormat:@"%d.%d.%d.%d", CHROME_VERSION_MAJOR, CHROME_VERSION_MINOR,
+            CHROME_VERSION_BUILD, CHROME_VERSION_PATCH];
+}
++ (NSString*)cefVersion { return @CEF_VERSION; }
++ (BOOL)hasBrowserDevTools { return g_cdpWriteFD >= 0; }
++ (void)setBrowserDevToolsEventHandler:(void (^)(NSString*, NSString*, NSString* _Nullable))handler {
+    g_cdpEventHandler = [handler copy];
+}
++ (NSString*)extensionSettingsForProfile:(NSString*)profilePath {
+    // Quitting: the contexts are going away, and ProfileContext would make a new one.
+    if (!g_contextInitialized || g_quitting) return nil;
+    if (profilePath.length && ![g_readyProfiles containsObject:profilePath]) return nil;
+    CefRefPtr<CefRequestContext> context = profilePath.length ? ProfileContext(profilePath) : CefRequestContext::GetGlobalContext();
+    CefRefPtr<CefValue> value = context ? context->GetPreference("extensions.settings") : nullptr;
+    if (!value || value->GetType() != VTYPE_DICTIONARY) return nil;
+    return NSStringFromCef(CefWriteJSON(value, JSON_WRITER_DEFAULT));
+}
++ (NSString*)preference:(NSString*)name forProfile:(NSString*)profilePath {
+    if (!g_contextInitialized || g_quitting) return nil;
+    if (profilePath.length && ![g_readyProfiles containsObject:profilePath]) return nil;
+    CefRefPtr<CefRequestContext> context = profilePath.length ? ProfileContext(profilePath) : CefRequestContext::GetGlobalContext();
+    CefRefPtr<CefValue> value = context ? context->GetPreference(CefStringFromNS(name)) : nullptr;
+    if (!value) return nil;
+    return NSStringFromCef(CefWriteJSON(value, JSON_WRITER_DEFAULT));
+}
++ (BOOL)setPreference:(NSString*)name json:(NSString*)json forProfile:(NSString*)profilePath {
+    if (!g_contextInitialized || g_quitting) return NO;
+    if (profilePath.length && ![g_readyProfiles containsObject:profilePath]) return NO;
+    CefRefPtr<CefRequestContext> context = profilePath.length ? ProfileContext(profilePath) : CefRequestContext::GetGlobalContext();
+    CefRefPtr<CefValue> value = CefParseJSON(CefStringFromNS(json), JSON_PARSER_RFC);
+    if (!context || !value) return NO;
+    CefString cefName = CefStringFromNS(name);
+    if (!context->CanSetPreference(cefName)) return NO;
+    CefString error;
+    if (!context->SetPreference(cefName, value, error)) {
+        NSLog(@"NicheCEF: %@: %s", name, error.ToString().c_str());
+        return NO;
+    }
+    return YES;
+}
++ (void)setExtensionSettingsChangeHandler:(void (^)(void))handler {
+    g_extensionSettingsHandler = [handler copy];
+}
++ (NSString*)secureDNSMode { return SecureDNSPreference("dns_over_https.mode"); }
++ (NSString*)secureDNSTemplates { return SecureDNSPreference("dns_over_https.templates"); }
++ (BOOL)setSecureDNSMode:(NSString*)mode templates:(NSString*)templates {
+    if (!g_contextInitialized || g_quitting || [self secureDNSIsManaged]) return NO;
+    CefRefPtr<CefPreferenceManager> local = CefPreferenceManager::GetGlobalPreferenceManager();
+    if (!local) return NO;
+    // Provider first when turning secure on, mode first otherwise, so the network service
+    // never sees "secure" without a server in between.
+    std::vector<std::pair<const char*, NSString*>> writes = {{"dns_over_https.mode", mode}, {"dns_over_https.templates", templates}};
+    if ([mode isEqualToString:@"secure"]) std::swap(writes[0], writes[1]);
+    for (const auto& [name, string] : writes) {
+        CefRefPtr<CefValue> value = CefValue::Create();
+        value->SetString(CefStringFromNS(string));
+        CefString error;
+        if (!local->SetPreference(name, value, error)) {
+            NSLog(@"NicheCEF: %s: %s", name, error.ToString().c_str());
+            return NO;
+        }
+    }
+    return YES;
+}
++ (BOOL)secureDNSIsManaged {
+    if (!g_contextInitialized || g_quitting) return NO;
+    CefRefPtr<CefPreferenceManager> local = CefPreferenceManager::GetGlobalPreferenceManager();
+    return local && !(local->CanSetPreference("dns_over_https.mode") && local->CanSetPreference("dns_over_https.templates"));
+}
++ (void)setSecureDNSChangeHandler:(void (^)(void))handler {
+    g_secureDNSHandler = [handler copy];
+    if (g_contextInitialized) NotifySecureDNS();
+}
++ (void)sendBrowserDevToolsMethod:(NSString*)method params:(NSString*)params
+                       completion:(void (^)(NSString* _Nullable, NSString* _Nullable))completion {
+    [self sendBrowserDevToolsMethod:method params:params sessionID:nil completion:completion];
+}
++ (void)fetchURL:(NSString*)url headers:(NSDictionary<NSString*, NSString*>*)headers profilePath:(NSString*)profilePath
+      completion:(void (^)(NSInteger, NSString*, NSString*, NSString*))completion {
+    [self fetchURL:url headers:headers profilePath:profilePath attempt:0 completion:completion];
+}
++ (void)fetchURL:(NSString*)url headers:(NSDictionary<NSString*, NSString*>*)headers profilePath:(NSString*)profilePath
+         attempt:(int)attempt completion:(void (^)(NSInteger, NSString*, NSString*, NSString*))completion {
+    // Chromium's profiles load asynchronously; a fetch waits for its profile like a page does.
+    BOOL ready = g_contextInitialized && (!profilePath.length || (ProfileContext(profilePath), [g_readyProfiles containsObject:profilePath]));
+    if (!ready) {
+        if (attempt >= 60) { completion(0, url, @"", @""); return; }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self fetchURL:url headers:headers profilePath:profilePath attempt:attempt + 1 completion:completion];
+        });
+        return;
+    }
+    CefRefPtr<CefRequest> request = CefRequest::Create();
+    request->SetURL(CefStringFromNS(url));
+    request->SetMethod("GET");
+    // Sent like the page's own navigation: stored cookies, first party = the site itself.
+    request->SetFlags(UR_FLAG_ALLOW_STORED_CREDENTIALS | UR_FLAG_SKIP_CACHE);
+    request->SetFirstPartyForCookies(CefStringFromNS(url));
+    CefRequest::HeaderMap map;
+    for (NSString* name in headers) map.insert({CefStringFromNS(name), CefStringFromNS(headers[name])});
+    request->SetHeaderMap(map);
+    CefRefPtr<CefRequestContext> context = profilePath.length ? ProfileContext(profilePath) : CefRequestContext::GetGlobalContext();
+    CefRefPtr<CefURLRequest> r = CefURLRequest::Create(request, new FetchClient(completion), context);
+    if (r) FetchClient::InFlight().insert(r); else completion(0, url, @"", @"");
+}
++ (void)sendBrowserDevToolsMethod:(NSString*)method params:(NSString*)params sessionID:(NSString*)sessionID
+                       completion:(void (^)(NSString* _Nullable, NSString* _Nullable))completion {
+    if (g_cdpWriteFD < 0) { completion(nil, @"no DevTools pipe"); return; }
+    int messageID = ++g_cdpNextID;
+    g_cdpPending[@(messageID)] = [completion copy];
+    NSString* session = sessionID.length ? [NSString stringWithFormat:@",\"sessionId\":\"%@\"", sessionID] : @"";
+    NSString* message = [NSString stringWithFormat:@"{\"id\":%d,\"method\":\"%@\",\"params\":%@%@}", messageID, method,
+                         params.length ? params : @"{}", session];
+    NSMutableData* data = [[message dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+    [data appendBytes:"" length:1];
+    const char* bytes = (const char*)data.bytes;
+    for (size_t sent = 0; sent < data.length;) {
+        ssize_t n = write(g_cdpWriteFD, bytes + sent, data.length - sent);
+        if (n <= 0) { [g_cdpPending removeObjectForKey:@(messageID)]; completion(nil, @"pipe write failed"); return; }
+        sent += (size_t)n;
+    }
+}
+
+@end
+
+// MARK: - NSApplication subclass
+
+@interface NicheApplication () <CefAppProtocol>
+@end
+
+@implementation NicheApplication {
+    BOOL _handlingSendEvent;
+    NSHashTable<NSEvent*>* _forwardedKeyEvents;
+}
+
+- (BOOL)isHandlingSendEvent { return _handlingSendEvent; }
+- (void)setHandlingSendEvent:(BOOL)handlingSendEvent { _handlingSendEvent = handlingSendEvent; }
+
+// A background test instance (NICHE_TEST_BACKGROUND, HitchMonitor.swift) never takes the front:
+// Chromium activates the app whenever it shows one of its windows.
+static BOOL NicheTestBackground(void) {
+    static BOOL background = [NSProcessInfo.processInfo.environment[@"NICHE_TEST_BACKGROUND"] isEqualToString:@"1"];
+    return background;
+}
+- (void)activateIgnoringOtherApps:(BOOL)flag {
+    if (!NicheTestBackground()) [super activateIgnoringOtherApps:flag];
+}
+- (void)activate {
+    if (!NicheTestBackground()) [super activate];
+}
+
+// A Chromium page view, wherever it lives: in its own window, or embedded in a Niche
+// window's pane (EmbeddedPages.swift), where sendEvent's other two checks miss it.
+static BOOL NicheIsInPageView(NSView* v) {
+    for (NSView* p = v; p; p = p.superview) {
+        if ([NSStringFromClass([p class]) isEqualToString:@"WebContentsViewCocoa"]) return YES;
+    }
+    return NO;
+}
+
+// Whether a key is a shortcut that Chromium keeps from pages because it is enabled in System
+// Settings ▸ Keyboard ▸ Shortcuts (EventIsReservedBySystem, content/browser/cocoa/
+// system_hotkey_map.mm): ⌘Space set to switch input sources (#174), ⌘` for the next window.
+// macOS acts on these inside -[NSApplication sendEvent:]. Same set as Chromium's map: the
+// enabled "standard" entries of com.apple.symbolichotkeys, without 80 and 82, plus ⌘` and ⇧⌘`
+// for 27 when the user hasn't changed it. Read live (a few µs) so a changed setting applies.
+static BOOL NicheIsSystemHotKey(NSEvent* event) {
+    const NSEventModifierFlags relevant =
+        NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl;
+    NSEventModifierFlags mods = event.modifierFlags & relevant;
+    NSDictionary* stored = CFBridgingRelease(
+        CFPreferencesCopyAppValue(CFSTR("AppleSymbolicHotKeys"), CFSTR("com.apple.symbolichotkeys")));
+    NSMutableDictionary* hotKeys = [@{@"27": @{@"enabled": @YES,
+                                              @"value": @{@"type": @"standard", @"parameters": @[@96, @50, @(NSEventModifierFlagCommand)]}}}
+                                       mutableCopy];
+    if ([stored isKindOfClass:[NSDictionary class]]) [hotKeys addEntriesFromDictionary:stored];
+    [hotKeys removeObjectsForKeys:@[@"80", @"82"]];
+    for (NSString* identifier in hotKeys) {
+        NSDictionary* hotKey = hotKeys[identifier];
+        if (![hotKey isKindOfClass:[NSDictionary class]] || ![hotKey[@"enabled"] respondsToSelector:@selector(boolValue)] ||
+            ![hotKey[@"enabled"] boolValue])
+            continue;
+        NSDictionary* value = hotKey[@"value"];
+        if (![value isKindOfClass:[NSDictionary class]] || ![value[@"type"] isEqual:@"standard"]) continue;
+        NSArray* parameters = value[@"parameters"];
+        if (![parameters isKindOfClass:[NSArray class]] || parameters.count != 3 ||
+            ![parameters[1] isKindOfClass:[NSNumber class]] || ![parameters[2] isKindOfClass:[NSNumber class]])
+            continue;
+        if ([parameters[1] unsignedShortValue] != event.keyCode) continue;
+        NSEventModifierFlags hotKeyMods = [parameters[2] unsignedIntegerValue] & relevant;
+        if (hotKeyMods == mods) return YES;
+        if ([identifier isEqualToString:@"27"] && hotKeyMods == (mods & ~NSEventModifierFlagShift)) return YES;
+    }
+    return NO;
+}
+
+// Chrome's rule: when a web view has focus, ⌘-shortcuts go to the page
+// first and only reach the menu bar if the page leaves them alone (so ⌘F in
+// Google Docs or ⌘← in a text field keep working). Reserved shortcuts are
+// taken in OnPreKeyEvent, the rest in OnKeyEvent. Keys the page leaves alone
+// come back here from Chromium's CommandDispatcher (redispatchKeyEvent:), and
+// those must take the normal path so the menu bar sees them: ⌘C/⌘V/⌘X/⌘A/⌘Z
+// only exist as Edit menu items sent to the page's first responder. Enabled macOS
+// shortcuts (NicheIsSystemHotKey) always take the normal path, as in Chrome and Arc.
+- (void)sendEvent:(NSEvent*)event {
+    CefScopedSendingEvent sendingEventScoper;
+    if ([_forwardedKeyEvents containsObject:event]) {
+        [_forwardedKeyEvents removeObject:event];
+        [super sendEvent:event];
+        return;
+    }
+    if (event.type == NSEventTypeKeyDown && (event.modifierFlags & NSEventModifierFlagCommand) && !NicheIsSystemHotKey(event)) {
+        NSWindow* key = self.keyWindow;
+        NSResponder* fr = key.firstResponder;
+        if ([fr isKindOfClass:[NSView class]]) {
+            NSView* v = (NSView*)fr;
+            for (NicheBrowser* b in [g_allBrowsers allObjects]) {
+                if ([v isDescendantOf:b.containerView] || (b.hostWindow && key == b.hostWindow) || NicheIsInPageView(v)) {
+                    if (!_forwardedKeyEvents) _forwardedKeyEvents = [NSHashTable weakObjectsHashTable];
+                    [_forwardedKeyEvents addObject:event];
+                    [key sendEvent:event];
+                    return;
+                }
+            }
+        }
+    }
+    [super sendEvent:event];
+}
+
+// Pages, DevTools and panels are child windows docked over the main window, and
+// the page is usually key. Window managers (Rectangle, Magnet, Raycast) move
+// the AX focused window, which tore the page off its dock instead of moving
+// Niche; hand them the top-level window the child belongs to.
+static id NicheTopLevelWindow(id element) {
+    if (![element isKindOfClass:[NSWindow class]]) return element;
+    NSWindow* w = element;
+    while (w.parentWindow) w = w.parentWindow;
+    return w;
+}
+
+- (id)accessibilityFocusedWindow { return NicheTopLevelWindow([super accessibilityFocusedWindow]); }
+- (id)accessibilityMainWindow { return NicheTopLevelWindow([super accessibilityMainWindow]); }
+
+// Cmd-Q, the Dock, logout: give the delegate a say, then tear Chromium down
+// in order (browsers first, then the message loop, then CefShutdown in main).
+- (void)terminate:(id)sender {
+    id<NSApplicationDelegate> delegate = self.delegate;
+    if ([delegate respondsToSelector:@selector(applicationShouldTerminate:)]) {
+        NSApplicationTerminateReply reply = [delegate applicationShouldTerminate:self];
+        if (reply == NSTerminateCancel) return;
+    }
+    [NicheCEFRuntime closeAllBrowsersAndQuit];
+}
+
+// Chromium sends this when "Stay" is picked on a "Leave site?" dialog, to stop a quit in
+// progress (chrome_browser_application_mac::CancelTerminate). Niche's quit force-closes pages,
+// which never asks, so there's nothing to cancel; without the method Niche crashed on "Stay".
+- (void)cancelTerminate:(id)sender {}
+
+@end
