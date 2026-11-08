@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <img alt="macOS 14+, Apple silicon" src="https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20silicon-lightgrey">
-  <img alt="Chromium 156" src="https://img.shields.io/badge/Chromium-156-lightgrey?logo=googlechrome&logoColor=white">
+  <img alt="macOS 14+, Apple silicon" src="docs/badges/macos.svg">
+  <img alt="Chromium 156" src="docs/badges/chromium.svg">
   <a href="https://github.com/niche-browser/niche/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/niche-browser/niche/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-lightgrey"></a>
+  <a href="LICENSE"><img alt="MIT licence" src="docs/badges/licence.svg"></a>
 </p>
 
 Niche is built for people who live in their browser. Tabs live in a sidebar, grouped into
