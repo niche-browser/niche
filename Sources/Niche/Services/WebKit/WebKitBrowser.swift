@@ -772,11 +772,11 @@ final class WebKitBrowser: NicheBrowser, WKNavigationDelegate, WKUIDelegate, WKD
                 web.configuration.websiteDataStore.removeData(ofTypes: types, modifiedSince: .distantPast) { [weak self] in
                     self?.reply(completion, "{}", nil)
                 }
-            case "Cra.setFreezingVote", "Cra.load":
+            case "Niche.setFreezingVote", "Niche.load":
                 // WebKit decides when a hidden page sleeps; tab sleeping closes the page instead.
                 reply(completion, "{}", nil)
             default:
-                // Cra.discard, Cra.getFreezingState, Target.*: Chromium only. Each caller has a path for this.
+                // Niche.discard, Niche.getFreezingState, Target.*: Chromium only. Each caller has a path for this.
                 reply(completion, nil, "\(method) is not available in a WebKit page")
             }
         }

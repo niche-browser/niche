@@ -3,7 +3,7 @@ import Foundation
 /// extension-profiles.json: the Chromium profile folders ("Default", "Profile <id>") each folder in
 /// Extensions/ loads in, by folder name. Chromium loads those folders with --load-extension, which
 /// installs them in every profile; Niche's CEF build skips a profile the list leaves out
-/// (--cra-load-extension-profiles), so such an extension is not installed there at all. A folder
+/// (--niche-load-extension-profiles), so such an extension is not installed there at all. A folder
 /// with no list loads in every profile, as every one did before GitHub #131. The import fills it
 /// from the browser profiles that had the extension, as Arc keeps extensions per profile.
 public struct ExtensionProfiles: Codable, Equatable, Sendable {
@@ -28,7 +28,7 @@ public struct ExtensionProfiles: Codable, Equatable, Sendable {
 
     public mutating func remove(folder: String) { folders[folder] = nil }
 
-    /// --cra-load-extension-profiles for the --load-extension `folders` in that order: each one's
+    /// --niche-load-extension-profiles for the --load-extension `folders` in that order: each one's
     /// profiles joined by "|", "*" for every profile. nil when every folder loads everywhere.
     public func commandLineValue(forFolders names: [String]) -> String? {
         let values = names.map { name in folders[name].map { $0.sorted().joined(separator: "|") } ?? "*" }

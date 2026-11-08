@@ -27,8 +27,8 @@ niche://debug?cdp=Page.captureScreenshot&params={"format":"jpeg","quality":80}
 expect-log Niche cdp Page.captureScreenshot → \{"data":"/9j/
 niche://debug?cdp=Page.getLayoutMetrics
 expect-log Niche cdp Page.getLayoutMetrics → .*cssContentSize
-niche://debug?cdp=Cra.discard
-expect-log Niche cdp Cra.discard → error: Cra.discard is not available in a WebKit page
+niche://debug?cdp=Niche.discard
+expect-log Niche cdp Niche.discard → error: Niche.discard is not available in a WebKit page
 
 # Arc's Clear Cookies and Refresh empties the WebKit page's own cookies.
 niche://debug?cdp=Runtime.evaluate&params={"expression":"document.cookie='niche=1; max-age=3600',document.cookie"}

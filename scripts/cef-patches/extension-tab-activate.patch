@@ -22,7 +22,7 @@ index 3c4eead..8df4ecf 100644
           create_params_.popup_with_views_hosted_opener;
  }
  
-+// Niche: delivered as a "Cra.activate" message from PID_BROWSER (no arguments);
++// Niche: delivered as a "Niche.activate" message from PID_BROWSER (no arguments);
 +// the client selects the tab in its own UI.
 +void ChromeBrowserDelegate::TabActivationRequested() {
 +  auto browser = ChromeBrowserHostImpl::GetBrowserForBrowser(browser_);
@@ -34,7 +34,7 @@ index 3c4eead..8df4ecf 100644
 +    return;
 +  }
 +  CefRefPtr<CefProcessMessage> message =
-+      CefProcessMessage::Create("Cra.activate");
++      CefProcessMessage::Create("Niche.activate");
 +  client->OnProcessMessageReceived(browser.get(), browser->GetMainFrame(),
 +                                   PID_BROWSER, message);
 +}

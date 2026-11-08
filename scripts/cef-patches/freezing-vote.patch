@@ -55,7 +55,7 @@ index c60f22d1a..f0d609890 100644
 +// freeze token. Chromium's freezing policy freezes the page only while no
 +// CannotFreezeReason applies (audible, capturing, Web Locks, WebRTC,
 +// notification permission, ...).
-+const char kNicheFreezingVoteKey[] = "cra-freezing-vote";
++const char kNicheFreezingVoteKey[] = "niche-freezing-vote";
 +
 +struct NicheFreezingVote : public base::SupportsUserData::Data {
 +  explicit NicheFreezingVote(content::WebContents* contents) : vote(contents) {}
@@ -98,10 +98,10 @@ index c60f22d1a..f0d609890 100644
 +    {media_session::mojom::MediaSessionAction::kNextSlide, "nextslide"},
 +};
 +
-+// {"id":N,"method":"Cra.mediaSession"}: {"actions":[names],
++// {"id":N,"method":"Niche.mediaSession"}: {"actions":[names],
 +// "pictureInPicture":bool}, the actions the page has handlers for and whether
 +// this page has the Picture in Picture window.
-+// {"id":N,"method":"Cra.mediaSession","params":{"action":name}}: runs the
++// {"id":N,"method":"Niche.mediaSession","params":{"action":name}}: runs the
 +// page's handler for it, as Chrome's media keys and global media controls do;
 +// "handled" is false when the page has none.
 +void HandleNicheMediaSession(content::WebContents* contents,
@@ -143,7 +143,7 @@ index c60f22d1a..f0d609890 100644
 +
 +// Niche: Chrome's automatic Picture in Picture (AutoPictureInPictureTabHelper),
 +// which a tab strip drives in Chrome and the client drives here.
-+// {"id":N,"method":"Cra.autoPictureInPicture","params":{"tab":"hidden"}}: the
++// {"id":N,"method":"Niche.autoPictureInPicture","params":{"tab":"hidden"}}: the
 +// tab went out of sight. A page that registered an enterpictureinpicture media
 +// session handler and uses the camera or microphone (a Google Meet call) has it
 +// run, with the reason "contentoccluded" and the browser's authorization to
@@ -151,7 +151,7 @@ index c60f22d1a..f0d609890 100644
 +// automatic picture-in-picture permission applies, and nothing replaces a
 +// Picture in Picture window that is already open ({"pictureInPicture":true}
 +// when this page has it).
-+// {"id":N,"method":"Cra.autoPictureInPicture","params":{"tab":"shown"}}: the
++// {"id":N,"method":"Niche.autoPictureInPicture","params":{"tab":"shown"}}: the
 +// tab is in front again, which closes the window automatic Picture in Picture
 +// opened, as Chrome does.
 +void HandleNicheAutoPictureInPicture(content::WebContents* contents,
@@ -178,14 +178,14 @@ index c60f22d1a..f0d609890 100644
 +  result->Set("asked", helper->NicheOnTabHidden());
 +}
 +
-+// {"id":N,"method":"Cra.setFreezingVote","params":{"vote":true|false}}: sets
-+// or drops the vote. {"id":N,"method":"Cra.getFreezingState"}: whether the
++// {"id":N,"method":"Niche.setFreezingVote","params":{"vote":true|false}}: sets
++// or drops the vote. {"id":N,"method":"Niche.getFreezingState"}: whether the
 +// page has Niche's vote, is frozen, and why the policy won't freeze it.
-+// {"id":N,"method":"Cra.discard"}: discards the page in place, like Chrome's
++// {"id":N,"method":"Niche.discard"}: discards the page in place, like Chrome's
 +// TabLifecycleUnit with WebContentsDiscard on: its renderer goes, the
 +// WebContents keeps its back/forward list and each entry's page state (scroll
 +// position, form contents), and showing it loads the page again.
-+// {"id":N,"method":"Cra.load"}: loads a discarded page now, as Chrome does
++// {"id":N,"method":"Niche.load"}: loads a discarded page now, as Chrome does
 +// when its tab is selected, even while the window is covered.
 +// Returns true for these; any other message returns false.
 +bool HandleNicheMethod(content::WebContents* contents,
@@ -245,7 +245,7 @@ index c60f22d1a..f0d609890 100644
 +  base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
 +};
 +
-+// Niche (GitHub #203): {"id":N,"method":"Cra.installFromWebStore","params":
++// Niche (GitHub #203): {"id":N,"method":"Niche.installFromWebStore","params":
 +// {"id":extension id,"manifest":{...}}} installs a Chrome Web Store item in
 +// this page's profile the way the store's "Add to Chrome" does
 +// (webstorePrivate.completeInstall): WebstoreInstaller fetches the signed CRX
@@ -262,7 +262,7 @@ index c60f22d1a..f0d609890 100644
 +    content::WebContents* contents,
 +    std::string_view message,
 +    base::OnceCallback<void(std::string json)> send) {
-+  if (message.find("\"Cra.installFromWebStore\"") == std::string_view::npos) {
++  if (message.find("\"Niche.installFromWebStore\"") == std::string_view::npos) {
 +    return false;
 +  }
 +  std::optional<base::DictValue> dict =
@@ -272,7 +272,7 @@ index c60f22d1a..f0d609890 100644
 +  }
 +  const std::string* method = dict->FindString("method");
 +  std::optional<int> message_id = dict->FindInt("id");
-+  if (!method || !message_id || *method != "Cra.installFromWebStore") {
++  if (!method || !message_id || *method != "Niche.installFromWebStore") {
 +    return false;
 +  }
 +  auto fail = [&](const std::string& error) {
@@ -360,27 +360,27 @@ index c60f22d1a..f0d609890 100644
 +  const std::string* method = dict->FindString("method");
 +  std::optional<int> id = dict->FindInt("id");
 +  if (!method || !id ||
-+      (*method != "Cra.setFreezingVote" && *method != "Cra.getFreezingState" &&
-+       *method != "Cra.discard" && *method != "Cra.load" &&
-+       *method != "Cra.mediaSession" && *method != "Cra.autoPictureInPicture")) {
++      (*method != "Niche.setFreezingVote" && *method != "Niche.getFreezingState" &&
++       *method != "Niche.discard" && *method != "Niche.load" &&
++       *method != "Niche.mediaSession" && *method != "Niche.autoPictureInPicture")) {
 +    return false;
 +  }
 +  *message_id = *id;
-+  if (*method == "Cra.autoPictureInPicture") {
++  if (*method == "Niche.autoPictureInPicture") {
 +    HandleNicheAutoPictureInPicture(contents, dict->FindDict("params"), result,
 +                                  error);
 +    return true;
 +  }
-+  if (*method == "Cra.mediaSession") {
++  if (*method == "Niche.mediaSession") {
 +    HandleNicheMediaSession(contents, dict->FindDict("params"), result, error);
 +    return true;
 +  }
-+  if (*method == "Cra.load") {
++  if (*method == "Niche.load") {
 +    // Does nothing unless the page was discarded and hasn't loaded since.
 +    contents->GetController().LoadIfNecessary();
 +    return true;
 +  }
-+  if (*method == "Cra.discard") {
++  if (*method == "Niche.discard") {
 +    if (!base::FeatureList::IsEnabled(features::kWebContentsDiscard)) {
 +      *error = "discarding needs the WebContentsDiscard feature";
 +      return true;
@@ -402,7 +402,7 @@ index c60f22d1a..f0d609890 100644
 +    result->Set("discarded", contents->WasDiscarded());
 +    return true;
 +  }
-+  if (*method == "Cra.getFreezingState") {
++  if (*method == "Niche.getFreezingState") {
 +    result->Set("vote", !!contents->GetUserData(kNicheFreezingVoteKey));
 +    const performance_manager::PageNode* page =
 +        performance_manager::PerformanceManager::

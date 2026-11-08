@@ -73,9 +73,9 @@ It also answers the DevTools Protocol methods Niche calls from WebKit's own API:
 | `Page.captureScreenshot` | `takeSnapshot` (tab switcher, Capture); the full page goes through `createPDF` |
 | `Page.getLayoutMetrics` | the document's scroll size and the visual viewport |
 | `Storage.clearDataForOrigin`, `Network.clearBrowserCache` | the profile's `WKWebsiteDataStore` |
-| `Cra.setFreezingVote`, `Cra.load` | accepted; WebKit throttles hidden pages itself |
-| `Cra.discard`, `Cra.getFreezingState`, `Target.*` | an error. Tab sleeping then closes the page, and it loads again when shown; extension actions don't apply. |
-| `Cra.mediaSession`, `Cra.autoPictureInPicture` | never sent: a WebKit page's media session handlers go through PageScript's wrapper, and leaving its tab asks its video for Picture in Picture |
+| `Niche.setFreezingVote`, `Niche.load` | accepted; WebKit throttles hidden pages itself |
+| `Niche.discard`, `Niche.getFreezingState`, `Target.*` | an error. Tab sleeping then closes the page, and it loads again when shown; extension actions don't apply. |
+| `Niche.mediaSession`, `Niche.autoPictureInPicture` | never sent: a WebKit page's media session handlers go through PageScript's wrapper, and leaving its tab asks its video for Picture in Picture |
 
 PageScript's scripts run in WebKit as user scripts, in the page world and in a `niche` content
 world. With them come Niche's typed-text and long-task tracking, the sidebar player's media session

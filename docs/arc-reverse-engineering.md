@@ -1388,7 +1388,7 @@ opened from Dia ▸ Import from Another Browser… (stopped before "Begin Import
 - [O] Since GitHub #203 a copy of a Web Store extension (the store's `update_url`, folder named
   after the ID its `key` gives) becomes the store's own install in each profile it loads in, as
   Dia's `ExtensionsController` installs from the store: the first page a profile loads sends
-  `Cra.installFromWebStore` (scripts/cef-patches/freezing-vote.patch, WebstoreInstaller, the
+  `Niche.installFromWebStore` (scripts/cef-patches/freezing-vote.patch, WebstoreInstaller, the
   signed CRX), which lands as location 1 with `from_webstore`; the copy then stops loading there
   and is deleted once no profile loads it. The store's version may not ask for more permissions
   than the copy. Before, a copy that reloaded itself (`chrome.runtime.reload()`) came back as
@@ -2931,7 +2931,7 @@ Reported on #233: in Arc a mouse's back and forward buttons over the sidebar swi
   imported space uses goes to Default, as everything did before.
 - `--load-extension` installs in every profile (`ExtensionService::Init` runs it per profile, and command-line
   installs are never restored from prefs). `extension-profiles.patch` (CEF codecs9) adds
-  `--cra-load-extension-profiles`: for each `--load-extension` path, in order, the profile folders that load it
+  `--niche-load-extension-profiles`: for each `--load-extension` path, in order, the profile folders that load it
   ("Default|Profile <id>") or `*`. An imported extension loads only in the Niche profiles of the Arc profiles that
   had it turned on (extension-profiles.json); one every profile had, or one from an import that bound no profiles,
   still loads everywhere. CDP's `Extensions.loadUnpacked`/`uninstall` only reach the default profile, and a

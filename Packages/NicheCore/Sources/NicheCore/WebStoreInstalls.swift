@@ -7,7 +7,7 @@ import Foundation
 /// and before Niche's CEF fix a reload (`chrome.runtime.reload()`, chrome://extensions) turned it
 /// into an UNPACKED one (location 4), which Chromium turns off without developer mode. A copy
 /// of a Web Store extension is installed again from the store in each profile it loads in, the
-/// way the store's "Add to Chrome" does (Cra.installFromWebStore): the signed CRX, location 1
+/// way the store's "Add to Chrome" does (Niche.installFromWebStore): the signed CRX, location 1
 /// (INTERNAL), from the Web Store, updated by Chromium. Once a profile has that install on disk,
 /// the folder stops loading there from the next launch, and the folder goes when no profile
 /// loads it any more (never while Chromium runs, which may still read it). A copy

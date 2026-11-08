@@ -35,23 +35,23 @@ through `Sources/Niche/App/NicheCoreExports.swift`.
 
 ## The engine contract
 
-The CEF build in `vendor/cef` is downloaded prebuilt (`scripts/fetch-cef.sh`), with Niche's
-patches from `scripts/cef-patches` compiled in. Strings both sides must agree on are compiled
-into that binary, so they keep their upstream spelling until the engine is rebuilt with
-`scripts/build-cef.sh`:
+Niche builds its own engine: `scripts/build-cef.sh` compiles CEF with the patches in
+`scripts/cef-patches`, `scripts/publish-cef.sh` puts it on a `cef-*` pre-release of
+niche-browser/niche, and `scripts/fetch-cef.sh` downloads it into `vendor/cef`. Strings both
+sides must agree on are compiled into that binary:
 
 - DevTools methods sent by `BrowserManager`, `ExtensionStore` and `WebKitBrowser`:
-  `Cra.discard`, `Cra.load`, `Cra.getFreezingState`, `Cra.setFreezingVote`,
-  `Cra.mediaSession`, `Cra.autoPictureInPicture`, `Cra.installFromWebStore`.
-- Process messages handled in `NicheCEF.mm`: `Cra.audible`, `Cra.capture`, `Cra.activate`.
-- The command-line switch `cra-load-extension-profiles`.
+  `Niche.discard`, `Niche.load`, `Niche.getFreezingState`, `Niche.setFreezingVote`,
+  `Niche.mediaSession`, `Niche.autoPictureInPicture`, `Niche.installFromWebStore`.
+- Process messages handled in `NicheCEF.mm`: `Niche.audible`, `Niche.capture`, `Niche.activate`.
+- The command-line switch `niche-load-extension-profiles`.
+
+- The Keychain item `Niche Safe Store` (`keychain-service-name.patch`, `SafeStorage.swift`).
 
 Renaming any of them in Swift alone breaks tab sleeping, media keys, Picture in Picture,
-Web Store installs or per-profile extensions. Rename them in the patches and the app in one
-change, together with a rebuilt engine.
-
-The Keychain item is `Niche Safe Store`. It has the upstream name's 16-byte length so
-`fetch-cef.sh` swaps it into the binary in place; a longer name needs a rebuilt engine.
+Web Store installs, per-profile extensions or saved passwords. Change the patches and the app
+in one pull request, with a rebuilt engine published and `CEF_RELEASE` bumped in
+`fetch-cef.sh`.
 
 ## Known exceptions
 
