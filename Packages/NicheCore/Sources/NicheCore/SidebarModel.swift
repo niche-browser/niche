@@ -680,10 +680,12 @@ public struct WindowPrefs: Codable, Equatable {
     }
     /// Last Little Window size (Arc: LittleBrowserWindow_size).
     public var littleWindowSize: String?
+    /// How much wider than the tab sidebar the user dragged the Library (LibraryWidth); nil: the default.
+    public var libraryExtraWidth: Double?
 
     public init(sidebarWidth: Double = 328, expandedFolders: Set<UUID> = [], collapsedPinnedSpaces: Set<UUID> = [],
                 favoritesEmptyStateDismissed: Set<UUID> = [], peekedFolders: [UUID: [UUID]] = [:],
-                windows: [WindowSession] = [WindowSession()], littleWindowSize: String? = nil) {
+                windows: [WindowSession] = [WindowSession()], littleWindowSize: String? = nil, libraryExtraWidth: Double? = nil) {
         self.sidebarWidth = sidebarWidth
         self.expandedFolders = expandedFolders
         self.collapsedPinnedSpaces = collapsedPinnedSpaces
@@ -691,6 +693,7 @@ public struct WindowPrefs: Codable, Equatable {
         self.peekedFolders = peekedFolders
         self.windows = windows
         self.littleWindowSize = littleWindowSize
+        self.libraryExtraWidth = libraryExtraWidth
     }
 }
 
@@ -823,6 +826,7 @@ extension WindowPrefs {
                                      sidebarVisible: try legacy.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? true)]
         }
         littleWindowSize = try c.decodeIfPresent(String.self, forKey: .littleWindowSize)
+        libraryExtraWidth = try? c.decodeIfPresent(Double.self, forKey: .libraryExtraWidth)
     }
 }
 

@@ -118,9 +118,12 @@ built release app with a test profile. Note anything that fails in the release's
 - **#203:** import a store extension from Arc, open a page, then reload the extension in
   `chrome://extensions`: it stays on and shows as from the Web Store. "Add to Chrome" puts
   nothing in `~/Downloads` and shows no save panel.
-- Install an extension from the Chrome Web Store with the window against the screen's left
-  edge: the "added" bubble that follows the confirmation shows whole inside the window, and
-  stays there while it lays out and after the extension lands in the toolbar.
+- With the window against the screen's left edge, install an extension from the Chrome Web
+  Store, then remove it with the store's Remove from Chrome: "… has been added" and "Remove …?"
+  both open whole at the page's top right (niche.log: `bubble … placed`), and "Add …?" stays
+  centred.
+- In the Library, drag the sidebar's edge: it widens and narrows (never below the tab sidebar),
+  the page under it doesn't reflow, and the width is the same after closing and reopening it.
 - **#43:** Load unpacked in `chrome://extensions`. The extension shows in the open Extensions
   popover within about 1 s, and so does an on/off switch.
 - **#41:** on a test copy, `Extensions.triggerAction` on a turned-off extension answers "No

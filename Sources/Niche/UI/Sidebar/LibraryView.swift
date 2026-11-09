@@ -66,10 +66,10 @@ enum LibraryPage: String, CaseIterable {
 ///
 /// Niche's own rail since 0.1.3 is lighter than Arc's: 74 pt, its buttons stacked from the top
 /// like a source list (64 × 56, 4 pt apart) instead of a 113 pt column of 97 × 80 tiles centred in
-/// the window, so the Library takes 40 pt more than the tab sidebar instead of 70.
+/// the window. The Library is 40 pt wider than the tab sidebar until its edge is dragged
+/// (LibraryWidth).
 enum LibraryMetrics {
     static let rail: CGFloat = 74
-    static let extraWidth: CGFloat = 40
     static let button = NSSize(width: 64, height: 56)
     static let buttonGap: CGFloat = 4
 }

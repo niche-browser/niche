@@ -68,7 +68,8 @@ change width, and redraw in steps, not per event.
 ## Library
 
 A 74 pt rail of 64 × 56 buttons stacked under the traffic lights, a 32 pt search field. Opening
-it widens the sidebar by 40 pt over the page: pages keep the size they have beside the plain
+it widens the sidebar by 40 pt over the page, or as far as its edge was last dragged
+(`LibraryWidth`, never narrower than the tab sidebar): pages keep the size they have beside the plain
 sidebar (`ShellView.pageSidebarWidth`), so the Library never makes Chromium lay a page out again.
 
 ## Boost editor

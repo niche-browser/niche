@@ -14,4 +14,22 @@ public enum ChromiumBubblePlacement {
         r.origin.y = max(window.minY + inset, min(r.minY, window.maxY - inset - r.height))
         return r == bubble ? nil : r
     }
+
+    /// Chromium's extension dialogs ("Add …?", "… has been added", "Remove …?") hang from the
+    /// page's hidden toolbar, whose buttons all sit at the page's top-left corner: some went off the
+    /// screen's left edge, others dropped over the page's top left. A dialog hanging there (its top
+    /// within `band` of the page's top, its left edge left of `page.minX + reach`: Chrome's toolbar
+    /// puts back, forward, reload and home before the extensions area, so "Remove …?" sat 172 pt in) opens at the
+    /// page's top right instead, where Chrome's extensions button is. Nil leaves it.
+    public static func toolbarDialogFrame(for bubble: CGRect, page: CGRect, inset: CGFloat = 10,
+                                          band: CGFloat = 72, reach: CGFloat = 240) -> CGRect? {
+        guard !bubble.isEmpty, !page.isEmpty,
+              bubble.maxY <= page.maxY + 4, bubble.maxY >= page.maxY - band,
+              bubble.minX < page.minX + reach,
+              // A site's alert() hangs from the page's top too, but centred on it.
+              abs(bubble.midX - page.midX) > 24 else { return nil }
+        let x = max(page.minX, page.maxX - inset - bubble.width)
+        let r = CGRect(x: x, y: page.maxY - inset - bubble.height, width: bubble.width, height: bubble.height)
+        return r == bubble ? nil : r
+    }
 }
