@@ -6,9 +6,8 @@ import SwiftUI
 /// opening at the top right of the screen. "Essential Keyboard Shortcuts" in heavy 20.5 pt at 30 pt
 /// in, a "View All ↗" button (96 × 28, #282D3F, 6 pt corners, a faint rim) level with it, then
 /// five rows 73 pt apart: a 15 pt title, a 12 pt grey line under it, the shortcut's key caps on
-/// the right, and a #212739 hairline between rows. Each cap is 28 pt: a light blue face (#EEF3FB
-/// at the top to #CFDDF5) in a blue rim, on a #2B60C4 lip, the glyph in blue. Niche's rows show the
-/// user's own bindings.
+/// the right, and a hairline between rows. Niche draws it on its own graphite with neutral key
+/// caps (Arc's was navy with blue caps), and its rows show the user's own bindings.
 @MainActor
 final class EssentialShortcutsWindow {
     static let shared = EssentialShortcutsWindow()
@@ -39,7 +38,7 @@ final class EssentialShortcutsWindow {
         p.isReleasedWhenClosed = false
         p.hidesOnDeactivate = false
         p.appearance = NSAppearance(named: .darkAqua)
-        p.backgroundColor = NSColor(srgbRed: 0x16 / 255.0, green: 0x1C / 255.0, blue: 0x2F / 255.0, alpha: 1)
+        p.backgroundColor = NSColor(Design.graphite)
         p.standardWindowButton(.zoomButton)?.isEnabled = false
         let host = NSHostingView(rootView: EssentialShortcutsView(bindings: bindings, viewAll: { [weak p] in
             p?.close()
@@ -65,8 +64,8 @@ private struct EssentialShortcutsView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center) {
                 Text("Essential Keyboard Shortcuts")
-                    .font(.system(size: 20.5, weight: .heavy))
-                    .kerning(-0.3)
+                    .font(.system(size: 20, weight: .semibold))
+                    .kerning(-0.4)
                     .foregroundStyle(.white)
                 Spacer(minLength: 8)
                 ViewAllButton(action: viewAll)
@@ -76,7 +75,7 @@ private struct EssentialShortcutsView: View {
             .padding(.bottom, 3)
             ForEach(Array(EssentialShortcutsWindow.rows.enumerated()), id: \.offset) { i, row in
                 if i > 0 {
-                    Rectangle().fill(Color(red: 0x21 / 255, green: 0x27 / 255, blue: 0x39 / 255)).frame(height: 1)
+                    Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
                 }
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 2.5) {
@@ -111,38 +110,31 @@ private struct ViewAllButton: View {
             }
             .foregroundStyle(.white.opacity(0.92))
             .frame(width: 96, height: 28)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(red: 0x28 / 255, green: 0x2D / 255, blue: 0x3F / 255).opacity(hover ? 0.8 : 1)))
-            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous)
+                .fill(Color.white.opacity(hover ? 0.12 : 0.08)))
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
     }
 }
 
-/// One key cap, as Arc draws it: a light blue face in a blue rim, on a darker blue lip.
+/// One key cap: a graphite face on a darker lip, the glyph in white.
 private struct KeyCap: View {
     let text: String
 
-    private static let rim = Color(red: 0x2F / 255, green: 0x6F / 255, blue: 0xE8 / 255)
-    private static let lip = Color(red: 0x2B / 255, green: 0x60 / 255, blue: 0xC4 / 255)
-
     var body: some View {
         ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Self.lip)
-            RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Self.rim).frame(height: 26)
-            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                .fill(LinearGradient(colors: [Color(red: 0xEE / 255, green: 0xF3 / 255, blue: 0xFB / 255),
-                                              Color(red: 0xCF / 255, green: 0xDD / 255, blue: 0xF5 / 255)],
-                                     startPoint: .top, endPoint: .bottom))
-                .overlay(RoundedRectangle(cornerRadius: 4.5, style: .continuous).strokeBorder(.white.opacity(0.7), lineWidth: 0.75))
-                .padding(1.5)
+            RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(Color.white.opacity(0.06))
+            RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous)
+                .fill(Color.white.opacity(0.13))
+                .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 0.75))
                 .frame(height: 26)
             Text(text)
-                .font(.system(size: text.count > 1 ? 10.5 : 15, weight: .bold, design: .rounded))
-                .foregroundStyle(Self.rim)
+                .font(.system(size: text.count > 1 ? 10 : 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
                 .frame(height: 26)
         }
-        .frame(width: text.count > 1 ? 34 : 28, height: 29)
+        .frame(width: text.count > 1 ? 34 : 28, height: 28)
     }
 }

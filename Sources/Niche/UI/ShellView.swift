@@ -116,6 +116,11 @@ final class ShellView: NSView {
     }
 
     var sidebarWidth: CGFloat = NicheMetrics.sidebarDefaultWidth { didSet { needsLayout = true } }
+    /// While the Library has the sidebar: the sidebar width the pages are sized for, its width
+    /// without the Library. The cards move over their pages, which keep their size, so opening
+    /// and closing the Library never makes Chromium lay a page out again (the page jumped, as if
+    /// zoomed, once the sidebar settled).
+    var pageSidebarWidth: CGFloat? { didSet { if pageSidebarWidth != oldValue { needsLayout = true } } }
     /// Off while the Library has the sidebar: its width is not the user's to drag.
     var sidebarResizable = true { didSet { needsLayout = true } }
     var sidebarVisible = true { didSet { needsLayout = true } }
@@ -712,6 +717,13 @@ final class ShellView: NSView {
         updateFocusRings()
         let toolbarVisible = panesShowBars
         let layout = paneLayout(in: cb)
+        let held = animatingFrames || animatingPanes ? nil : heldPageLayout(in: cb)
+        if let held {
+            for c in paneCards where c.tabID != ShellView.noTabID {
+                guard let f = held.frames[c.tabID] else { continue }
+                c.frozenWebBounds = NSRect(x: 0, y: 0, width: f.width, height: max(0, f.height - (toolbarVisible ? c.toolbarHeight : 0)))
+            }
+        }
         for c in paneCards {
             c.showToolbar = toolbarVisible
             // Arc's cards cast a soft shadow on the window; edge to edge there is no margin for it.
@@ -779,7 +791,26 @@ final class ShellView: NSView {
             findHost.isHidden = !findVisible
             findHost.frame = NSRect(x: wb.maxX - size.width - inset, y: wb.maxY - size.height - inset, width: size.width, height: size.height)
         }
-        if !animatingPanes, paneCards.allSatisfy({ $0.frozenWebBounds == nil }) { onPaneFrames?(paneWebFrames(layout)) }
+        if !animatingPanes, paneCards.allSatisfy({ $0.frozenWebBounds == nil }) {
+            onPaneFrames?(paneWebFrames(layout))
+        } else if held != nil {
+            // Chromium's windows follow the pages where they are, at the size they kept, so its
+            // menus and popups open over them.
+            var frames = paneWebFrames(layout)
+            for c in paneCards { if let w = c.frozenWebBounds?.width { frames[c.tabID]?.size.width = w } }
+            onPaneFrames?(frames)
+        }
+    }
+
+    /// The pane layout the pages keep while the Library widens the sidebar (`pageSidebarWidth`),
+    /// nil when they follow their cards. Pages in their own windows (DevTools open, or embedding
+    /// off) can't be clipped by a card, so those follow it.
+    private func heldPageLayout(in cb: NSRect) -> SplitPaneLayout.Result? {
+        guard let base = pageSidebarWidth, EmbeddedPages.isEnabled, sidebarVisible, !floatingSidebar,
+              !contentFullscreen, !devToolsVisible else { return nil }
+        let extra = sidebarWidth - base
+        guard extra > 0 else { return nil }
+        return paneLayout(in: NSRect(x: 0, y: 0, width: cb.width + extra, height: cb.height))
     }
 
     private func layoutSidePanel(in cb: NSRect) {
@@ -831,7 +862,10 @@ final class ShellView: NSView {
     func animateSidebar(visible: Bool, floating: Bool, fullscreen: Bool, width: CGFloat, duration: TimeInterval = SidebarMotion.duration) {
         let target = frames(sidebarVisible: visible, floating: floating, fullscreen: fullscreen, width: width)
         // Size the pages for their destination once, up front; the cards then just slide over them.
-        let targetLayout = paneLayout(in: NSRect(origin: .zero, size: target.content.size))
+        // Into the Library they keep the size they have beside the plain sidebar.
+        let pageContent = visible && !floating && !fullscreen && EmbeddedPages.isEnabled && !devToolsVisible
+            ? pageSidebarWidth.map { frames(sidebarVisible: true, floating: false, fullscreen: false, width: min($0, width)).content } : nil
+        let targetLayout = paneLayout(in: NSRect(origin: .zero, size: (pageContent ?? target.content).size))
         var webTargets: [UUID: NSRect] = [:]
         for c in paneCards where c.tabID != ShellView.noTabID {
             guard let f = targetLayout.frames[c.tabID] else { continue }

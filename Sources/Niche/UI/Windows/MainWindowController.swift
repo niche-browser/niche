@@ -2135,6 +2135,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         shell.sidebarResizable = false
         let width = libraryWidth(page)
         if sidebarVisible {
+            shell.pageSidebarWidth = CGFloat(store.prefs.sidebarWidth)
             shell.sidebarWidth = width
             shell.animateSidebar(visible: true, floating: false, fullscreen: shell.contentFullscreen, width: width)
         } else {
@@ -2162,6 +2163,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         withAnimation(.easeOut(duration: 0.1)) { sidebarUI.libraryPage = nil }
         shell.sidebarResizable = true
         let width = CGFloat(store.prefs.sidebarWidth)
+        shell.pageSidebarWidth = nil
         shell.sidebarWidth = width
         if libraryShowedSidebar {
             libraryShowedSidebar = false
@@ -2421,7 +2423,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// Library's, so the Library lands at its width with nothing left to resize.
     private func setLibraryReveal(_ r: CGFloat) {
         // Embedded pages keep their size under their cards until the swipe lands.
-        if sidebarUI.libraryReveal == nil, EmbeddedPages.isEnabled { shell.freezePages() }
+        // Pages the Library held (open before this swipe) stay at that size.
+        if sidebarUI.libraryReveal == nil, EmbeddedPages.isEnabled {
+            shell.freezePages()
+            shell.pageSidebarWidth = nil
+        }
         sidebarUI.libraryReveal = r
         shell.sidebarWidth = LibrarySwipe.sidebarWidth(reveal: r, base: sidebarUI.libraryRevealBase, library: sidebarUI.libraryRevealWidth)
     }
@@ -2509,7 +2515,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
                 window?.makeKey()
             }
             width = libraryWidth(page)
+            shell.pageSidebarWidth = sidebarUI.libraryRevealBase
         } else {
+            shell.pageSidebarWidth = nil
             if sidebarUI.libraryPage != nil {
                 withTransaction(instant) { sidebarUI.libraryPage = nil }
                 shell.sidebarResizable = true

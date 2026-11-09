@@ -45,6 +45,10 @@ final class SoftwareUpdater: NSObject {
     }
 
     private(set) var phase: Phase = .idle
+    /// Bytes received so far; the phase (what the window draws) follows it in steps
+    /// (UpdateDownloadProgress), not on each of the hundreds of chunks a second.
+    @ObservationIgnored fileprivate var downloadReceived: UInt64 = 0
+    @ObservationIgnored fileprivate var downloadExpected: UInt64 = 0
     /// Downloaded and waiting for a restart: "An update is ready!" in the sidebar.
     private(set) var readyRelease: Release?
     /// Found by a background check while automatic updates are off.
@@ -358,16 +362,22 @@ extension SoftwareUpdater: SPUUserDriver {
 
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
         self.cancellation = cancellation
+        downloadReceived = 0
+        downloadExpected = 0
         phase = .downloading(received: 0, expected: 0)
     }
 
     func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
-        phase = .downloading(received: 0, expected: expectedContentLength)
+        downloadExpected = expectedContentLength
+        phase = .downloading(received: downloadReceived, expected: expectedContentLength)
     }
 
     func showDownloadDidReceiveData(ofLength length: UInt64) {
-        if case .downloading(let received, let expected) = phase {
-            phase = .downloading(received: received + length, expected: max(expected, received + length))
+        guard case .downloading(let drawn, _) = phase else { return }
+        downloadReceived += length
+        downloadExpected = max(downloadExpected, downloadReceived)
+        if UpdateDownloadProgress.shouldPublish(drawn: drawn, received: downloadReceived, expected: downloadExpected) {
+            phase = .downloading(received: downloadReceived, expected: downloadExpected)
         }
     }
 

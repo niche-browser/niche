@@ -16,6 +16,8 @@ enum LibraryPage: String, CaseIterable {
         case .archive: "Archived Tabs"
         }
     }
+    /// The rail's label, short enough for its 64 pt button.
+    var railTitle: String { self == .archive ? "Archive" : title }
     var symbol: String {
         switch self {
         case .media: "photo.on.rectangle"
@@ -61,10 +63,15 @@ enum LibraryPage: String, CaseIterable {
 ///   clicking elsewhere, and reopens it on the page last shown.
 /// - Opening takes 2–3 frames (the Library slides in from a little to the left); closing slides
 ///   it left over ~0.1 s while the tab list fades back in.
+///
+/// Niche's own rail since 0.1.3 is lighter than Arc's: 74 pt, its buttons stacked from the top
+/// like a source list (64 × 56, 4 pt apart) instead of a 113 pt column of 97 × 80 tiles centred in
+/// the window, so the Library takes 40 pt more than the tab sidebar instead of 70.
 enum LibraryMetrics {
-    static let rail: CGFloat = 113
-    /// Arc's Library sidebar was 70 pt wider than the 347 pt tab sidebar.
-    static let extraWidth: CGFloat = 70
+    static let rail: CGFloat = 74
+    static let extraWidth: CGFloat = 40
+    static let button = NSSize(width: 64, height: 56)
+    static let buttonGap: CGFloat = 4
 }
 
 /// The Library column: the page rail on the left, the page's search and list on the right.
@@ -223,14 +230,13 @@ private final class LibraryRailView: NSView {
         wash.frame = NSRect(x: 0, y: 0, width: w, height: h)
         hairline.frame = NSRect(x: w, y: 0, width: 1, height: h)
         CATransaction.commit()
-        // Spacer(minLength: title area), the buttons 20 apart, Spacer, the back arrow 8 pt in.
-        let group = CGFloat(buttons.count) * 80 + CGFloat(max(0, buttons.count - 1)) * 20
-        let free = max(0, h - group - 40)
-        let top = max(NicheMetrics.titleAreaHeight, free / 2)
+        // Under the traffic lights, stacked like a source list; the back arrow centred at the bottom.
+        let size = LibraryMetrics.button, step = size.height + LibraryMetrics.buttonGap
+        let top = NicheMetrics.titleAreaHeight + 10
         for (i, b) in buttons.enumerated() {
-            b.frame = NSRect(x: (w - 97) / 2, y: top + CGFloat(i) * 100, width: 97, height: 80)
+            b.frame = NSRect(x: ((w - size.width) / 2).rounded(), y: top + CGFloat(i) * step, width: size.width, height: size.height)
         }
-        back?.frame = NSRect(x: 8, y: h - 8 - 32, width: 32, height: 32)
+        back?.frame = NSRect(x: ((w - 32) / 2).rounded(), y: h - 10 - 32, width: 32, height: 32)
     }
 }
 
@@ -250,11 +256,13 @@ private final class LibraryRailButton: NSView {
         self.page = page
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = Design.Radius.card
         layer?.cornerCurve = .continuous
         glyph.imageScaling = .scaleNone
+        label.font = .systemFont(ofSize: 10.5, weight: .medium)
+        label.lineBreakMode = .byTruncatingTail
         addSubview(glyph)
-        label.stringValue = page.title
+        label.stringValue = page.railTitle
         label.alignment = .center
         addSubview(label)
         setAccessibilityLabel(page.title)
@@ -275,7 +283,7 @@ private final class LibraryRailButton: NSView {
     }
 
     private func refresh() {
-        let config = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
         if selected {
             // The filled glyph in palette mode: the space's dark mark on its light tint (Arc 1.172.1).
             glyph.image = NSImage(systemSymbolName: page.selectedSymbol, accessibilityDescription: nil)?
@@ -285,15 +293,17 @@ private final class LibraryRailButton: NSView {
             glyph.image = NSImage(systemSymbolName: page.symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config)
             glyph.contentTintColor = ink.withAlphaComponent(0.6)
         }
-        label.textColor = ink.withAlphaComponent(selected ? 0.82 : 0.6)
-        layer?.backgroundColor = ink.withAlphaComponent(selected ? 0.07 : (hovering ? 0.04 : 0)).cgColor
+        label.textColor = ink.withAlphaComponent(selected ? 0.9 : (hovering ? 0.72 : 0.55))
+        label.font = .systemFont(ofSize: 10.5, weight: selected ? .semibold : .medium)
+        layer?.backgroundColor = ink.withAlphaComponent(selected ? 0.09 : (hovering ? 0.045 : 0)).cgColor
     }
 
     override func layout() {
         super.layout()
-        // The glyph in a 20 pt band 21 pt down, the label 9 pt under it.
-        glyph.frame = NSRect(x: 0, y: 21, width: bounds.width, height: 20)
-        label.frame = NSRect(x: 0, y: 50, width: bounds.width, height: 15)
+        // The glyph in a 20 pt band 10 pt down, the label 6 pt under it.
+        glyph.frame = NSRect(x: 0, y: 10, width: bounds.width, height: 20)
+        // The label may run a little past the plate ("Downloads" at 10.5 pt is 58 pt plus the field's inset).
+        label.frame = NSRect(x: -5, y: 34, width: bounds.width + 10, height: 14)
     }
 
     override func updateTrackingAreas() {
@@ -308,6 +318,15 @@ private final class LibraryRailButton: NSView {
     override func mouseUp(with event: NSEvent) {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress() }
     }
+}
+
+extension LibraryListView {
+    /// Inside the column, 12 pt from either side (it overhung the rail when the column was narrow).
+    fileprivate var mediaCardWidth: CGFloat { max(160, min(240, bounds.width - 24)) }
+}
+
+enum LibraryListMetrics {
+    static let searchHeight: CGFloat = 32
 }
 
 /// The page's list column: search, then the downloads or the archived tabs by day.
@@ -353,7 +372,7 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         self.favicons = favicons
         super.init(frame: .zero)
         searchBox.wantsLayer = true
-        searchBox.layer?.cornerRadius = 12
+        searchBox.layer?.cornerRadius = Design.Radius.control
         searchBox.layer?.cornerCurve = .continuous
         addSubview(searchBox)
         searchGlyph.image = SidebarSymbols.image("magnifyingglass", size: 14)
@@ -362,21 +381,21 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 14)
+        field.font = .systemFont(ofSize: 13)
         field.placeholderString = page.searchPrompt
         field.usesSingleLineMode = true
         field.cell?.isScrollable = true
         field.delegate = self
         searchBox.addSubview(field)
         menuButton.wantsLayer = true
-        menuButton.layer?.cornerRadius = 12
+        menuButton.layer?.cornerRadius = Design.Radius.control
         menuButton.layer?.cornerCurve = .continuous
         // Arc's Filter button: a line.3 circle and "Filter", 73 × 36 pt.
         menuGlyph.image = SidebarSymbols.image("line.3.horizontal.decrease.circle", size: 14, weight: .medium)
         menuGlyph.imageScaling = .scaleNone
         menuGlyph.frame = NSRect(x: 9, y: 0, width: 18, height: 36)
         menuButton.addSubview(menuGlyph)
-        filterLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        filterLabel.font = .systemFont(ofSize: 13, weight: .medium)
         filterLabel.stringValue = "Filter"
         menuButton.addSubview(filterLabel)
         menuButton.setAccessibilityElement(true)
@@ -524,9 +543,9 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         empty.ink = ink
     }
 
-    /// Arc's opt-in card, over the page until Show Media is pressed.
+    /// The opt-in card, in the list column until Show Media is pressed.
     private func showMediaCard() {
-        let card = MediaOptInCard(dark: colors.isDark) { [store] in store.settings.mediaLibraryEnabled = true }
+        let card = MediaOptInCard(dark: colors.isDark, width: mediaCardWidth) { [store] in store.settings.mediaLibraryEnabled = true }
         if let mediaCard { mediaCard.rootView = card } else {
             let host = NSHostingView(rootView: card)
             addSubview(host)
@@ -558,15 +577,17 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         let w = bounds.width
         menuButton.isHidden = !hasFilter || filtering
         searchBox.isHidden = filtering
-        let fw: CGFloat = 73
-        searchBox.frame = NSRect(x: 7, y: 10, width: max(0, w - 7 - 8 - (hasFilter ? 7 + fw : 0)), height: 36)
-        menuButton.frame = NSRect(x: w - 8 - fw, y: 10, width: fw, height: 36)
-        filterLabel.frame = NSRect(x: 31, y: (36 - 18) / 2, width: fw - 33, height: 18)
+        // A 32 pt field (Arc's is 36): the same height as the sidebar's own controls.
+        let fw: CGFloat = 70, bh = LibraryListMetrics.searchHeight
+        searchBox.frame = NSRect(x: 7, y: 10, width: max(0, w - 7 - 8 - (hasFilter ? 6 + fw : 0)), height: bh)
+        menuButton.frame = NSRect(x: w - 8 - fw, y: 10, width: fw, height: bh)
+        menuGlyph.frame = NSRect(x: 9, y: 0, width: 18, height: bh)
+        filterLabel.frame = NSRect(x: 30, y: (bh - 17) / 2, width: fw - 32, height: 17)
         let gw = searchGlyph.image?.size.width ?? 14
-        searchGlyph.frame = NSRect(x: 12, y: 0, width: gw, height: 36)
+        searchGlyph.frame = NSRect(x: 11, y: 0, width: gw, height: bh)
         let fh = ceil(field.intrinsicContentSize.height)
-        let fx = 12 + gw + 10
-        field.frame = NSRect(x: fx - SidebarText.inset, y: (36 - fh) / 2, width: max(0, searchBox.bounds.width - fx - 12) + 2 * SidebarText.inset, height: fh)
+        let fx = 11 + gw + 8
+        field.frame = NSRect(x: fx - SidebarText.inset, y: (bh - fh) / 2, width: max(0, searchBox.bounds.width - fx - 12) + 2 * SidebarText.inset, height: fh)
         // Arc leaves room between the search and the first item (Arc 1.172.1, 8 Nov 2026, 2x stills):
         // 10.5 pt to a boost's card, 15 pt to the first media tile's; a day header brings its own.
         let gap: CGFloat
@@ -575,7 +596,7 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         case .header?, nil: gap = 0
         default: gap = 10
         }
-        var top: CGFloat = 46
+        var top: CGFloat = 10 + bh
         if let host = filterHost {
             if host.rootView.width != w { host.rootView = filterPanel() }
             let h = host.fittingSize.height
@@ -590,6 +611,10 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         }
         empty.frame = scroll.frame
         if let card = mediaCard {
+            // Built before the space's colours arrived it was drawn light on a dark sidebar.
+            if card.rootView.width != mediaCardWidth || card.rootView.dark != colors.isDark {
+                card.rootView = MediaOptInCard(dark: colors.isDark, width: mediaCardWidth, show: card.rootView.show)
+            }
             let size = card.fittingSize
             card.frame = NSRect(x: ((w - size.width) / 2).rounded(), y: max(56, ((bounds.height - size.height) / 2).rounded()),
                                 width: size.width, height: size.height)

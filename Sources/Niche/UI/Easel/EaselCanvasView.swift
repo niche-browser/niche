@@ -2,9 +2,8 @@ import AppKit
 import UniformTypeIdentifiers
 
 /// Arc's Easel canvas (Arc 1.172.1, `easelCanvasView`): as wide as the page area and 2436 pt
-/// tall, scrolling; the title box 894 pt wide, centred, 52 pt down, bold white; a toolbar at the
-/// bottom left, 16 pt in: 36 pt buttons 38 pt apart on the palette's dark backgroundExtra, the
-/// picked tool on a lighter fill with 8 pt corners, glyphs in its foreground. Shapes, arrows and
+/// tall, scrolling; the title box 894 pt wide, centred, 52 pt down, bold white; the toolbar
+/// (EaselToolbar) centred 20 pt above the bottom. Shapes, arrows and
 /// strokes are drawn with a drag, text with a click, pictures from a file or the clipboard.
 @MainActor
 final class EaselCanvasView: NSView {
@@ -64,9 +63,10 @@ final class EaselCanvasView: NSView {
         scroll.frame = bounds
         sheet.frame = NSRect(x: 0, y: 0, width: max(bounds.width - (scroll.verticalScroller?.frame.width ?? 0) * 0, 300),
                              height: Easel.canvasHeight)
-        let n = CGFloat(Easel.Tool.allCases.count + 1)  // the tools, then Duplicate
-        let w = 4 + n * 38 - 2 + 4
-        toolbar.frame = NSRect(x: 16, y: bounds.height - 16 - 44, width: w, height: 44)
+        // Centred under the drawing, where both hands find it, rather than in Arc's bottom-left corner.
+        let size = toolbar.fittingSize
+        toolbar.frame = NSRect(x: ((bounds.width - size.width) / 2).rounded(), y: bounds.height - 20 - size.height,
+                               width: size.width, height: size.height)
     }
 }
 
@@ -513,57 +513,115 @@ final class EaselSizePill: NSView {
     }
 }
 
-/// Arc's Easel toolbar: Pointer, Image, Text, Ellipse, Rectangle, Arrow, Freehand.
+/// The Easel toolbar: Select, Image, Text, Ellipse, Rectangle, Arrow, Draw, then Duplicate after a
+/// divider. A dark glass capsule centred at the bottom of the canvas; the picked tool sits on a
+/// light plate, the one under the pointer on a fainter one, and each button names itself on hover.
 @MainActor
-final class EaselToolbar: NSView {
+final class EaselToolbar: NSView, NSViewToolTipOwner {
     var onPick: (Easel.Tool) -> Void = { _ in }
     /// Arc's eighth button, Duplicate (AX "Duplicate"), after the tools.
     var onDuplicate: () -> Void = {}
     var tool: Easel.Tool = .pointer { didSet { needsDisplay = true } }
+    private var hovered: Int? { didSet { if hovered != oldValue { needsDisplay = true } } }
 
     private static let symbols: [Easel.Tool: String] = [
-        .pointer: "cursorarrow", .image: "photo", .text: "character", .ellipse: "circle",
-        .rectangle: "square", .arrow: "arrow.up.right", .freehand: "scribble",
+        .pointer: "cursorarrow", .image: "photo", .text: "textformat", .ellipse: "circle",
+        .rectangle: "square", .arrow: "arrow.up.right", .freehand: "scribble.variable",
     ]
     private static let names: [Easel.Tool: String] = [
         .pointer: "Select", .image: "Image", .text: "Text", .ellipse: "Ellipse", .rectangle: "Rectangle", .arrow: "Arrow", .freehand: "Draw",
     ]
-    // Measured on a gold space: bar #100D00 (backgroundExtra), picked #716328, glyphs #FAEEC2.
-    private static let bar = NSColor(srgbRed: 0.06, green: 0.05, blue: 0.0, alpha: 0.96)
-    private static let picked = NSColor(white: 1, alpha: 0.22)
+    private static let bar = NSColor(srgbRed: 0.09, green: 0.09, blue: 0.1, alpha: 0.92)
+    private static let rim = NSColor(white: 1, alpha: 0.1)
+    private static let picked = NSColor(white: 1, alpha: 0.2)
+    private static let hover = NSColor(white: 1, alpha: 0.08)
     private static let glyph = NSColor(white: 1, alpha: 0.92)
+    private static let button: CGFloat = 36, step: CGFloat = 38, pad: CGFloat = 6, divider: CGFloat = 13
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.35
+        layer?.shadowRadius = 14
+        layer?.shadowOffset = CGSize(width: 0, height: -4)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
 
     override var isFlipped: Bool { true }
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    private func buttonRect(_ i: Int) -> NSRect { NSRect(x: 4 + CGFloat(i) * 38, y: 4, width: 36, height: 36) }
+    private var count: Int { Easel.Tool.allCases.count + 1 }
 
-    override func draw(_ dirtyRect: NSRect) {
-        Self.bar.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12).fill()
-        for (i, t) in Easel.Tool.allCases.enumerated() {
-            let r = buttonRect(i)
-            if t == tool {
-                Self.picked.setFill()
-                NSBezierPath(roundedRect: r, xRadius: 8, yRadius: 8).fill()
-            }
-            let config = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold).applying(.init(paletteColors: [Self.glyph]))
-            guard let img = NSImage(systemSymbolName: Self.symbols[t] ?? "circle", accessibilityDescription: Self.names[t])?
-                .withSymbolConfiguration(config) else { continue }
-            img.draw(in: NSRect(x: r.midX - img.size.width / 2, y: r.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
-        }
-        let dr = buttonRect(Easel.Tool.allCases.count)
-        let config = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold).applying(.init(paletteColors: [Self.glyph]))
-        if let img = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: "Duplicate")?.withSymbolConfiguration(config) {
-            img.draw(in: NSRect(x: dr.midX - img.size.width / 2, y: dr.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
-        }
+    override var fittingSize: NSSize {
+        NSSize(width: 2 * Self.pad + CGFloat(count - 1) * Self.step + Self.button + Self.divider, height: Self.button + 2 * Self.pad)
     }
 
+    /// Button `i`: the tools, then Duplicate past the divider.
+    private func buttonRect(_ i: Int) -> NSRect {
+        let x = Self.pad + CGFloat(i) * Self.step + (i == count - 1 ? Self.divider : 0)
+        return NSRect(x: x, y: Self.pad, width: Self.button, height: Self.button)
+    }
+
+    override func layout() {
+        super.layout()
+        let r = bounds.height / 2
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: r, cornerHeight: r, transform: nil)
+        removeAllToolTips()
+        for i in 0..<count { addToolTip(buttonRect(i), owner: self, userData: nil) }
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        guard let i = index(at: point) else { return "" }
+        return i < Easel.Tool.allCases.count ? Self.names[Easel.Tool.allCases[i]] ?? "" : "Duplicate"
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds.height / 2
+        let capsule = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: r - 0.5, yRadius: r - 0.5)
+        Self.bar.setFill()
+        capsule.fill()
+        Self.rim.setStroke()
+        capsule.lineWidth = 1
+        capsule.stroke()
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold).applying(.init(paletteColors: [Self.glyph]))
+        func plate(_ rect: NSRect, _ color: NSColor) {
+            color.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2).fill()
+        }
+        func glyph(_ name: String, _ label: String, in rect: NSRect) {
+            guard let img = NSImage(systemSymbolName: name, accessibilityDescription: label)?.withSymbolConfiguration(config) else { return }
+            img.draw(in: NSRect(x: (rect.midX - img.size.width / 2).rounded(), y: (rect.midY - img.size.height / 2).rounded(),
+                                width: img.size.width, height: img.size.height))
+        }
+        for (i, t) in Easel.Tool.allCases.enumerated() {
+            let rect = buttonRect(i)
+            if t == tool { plate(rect, Self.picked) } else if hovered == i { plate(rect, Self.hover) }
+            glyph(Self.symbols[t] ?? "circle", Self.names[t] ?? "", in: rect)
+        }
+        let d = buttonRect(count - 1)
+        Self.rim.setFill()
+        NSRect(x: d.minX - Self.divider / 2 - 1.5, y: Self.pad + 9, width: 1, height: Self.button - 18).fill()
+        if hovered == count - 1 { plate(d, Self.hover) }
+        glyph("plus.square.on.square", "Duplicate", in: d)
+    }
+
+    private func index(at p: NSPoint) -> Int? { (0..<count).first { buttonRect($0).contains(p) } }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) { hovered = index(at: convert(event.locationInWindow, from: nil)) }
+    override func mouseExited(with event: NSEvent) { hovered = nil }
+
     override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        for (i, t) in Easel.Tool.allCases.enumerated() where buttonRect(i).contains(p) { onPick(t) }
-        if buttonRect(Easel.Tool.allCases.count).contains(p) { onDuplicate() }
+        guard let i = index(at: convert(event.locationInWindow, from: nil)) else { return }
+        if i < Easel.Tool.allCases.count { onPick(Easel.Tool.allCases[i]) } else { onDuplicate() }
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }

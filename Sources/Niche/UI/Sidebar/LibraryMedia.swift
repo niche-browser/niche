@@ -240,37 +240,39 @@ final class MediaTile: NSView, NSDraggingSource {
 /// does, a Show Media button and the privacy line under it (Arc 1.172.1).
 struct MediaOptInCard: View {
     let dark: Bool
+    var width: CGFloat = 220
     let show: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 0) {
             Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 28, weight: .medium))
-                .foregroundStyle(Color(red: 0.55, green: 0.47, blue: 0.93))
-                .padding(.top, 4)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(.primary.opacity(0.75))
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color.primary.opacity(0.07)))
             Text("Your Media in the Library").font(.system(size: 13, weight: .semibold))
-            Text("Quickly grab screenshots, images, and videos from your computer by showing them in the Niche Library!")
-                .font(.system(size: 11.5)).multilineTextAlignment(.center).foregroundStyle(.primary.opacity(0.8))
+                .padding(.top, 12)
+            Text("Screenshots, pictures and videos from your Mac, one click away.")
+                .font(.system(size: 11.5)).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
             Button(action: show) {
-                Text("Show Media").font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).frame(height: 32)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(LinearGradient(colors: [Color(red: 0.85, green: 0.55, blue: 0.80), Color(red: 0.40, green: 0.42, blue: 0.95)],
-                                             startPoint: .leading, endPoint: .trailing)))
+                Text("Show Media").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 30)
+                    .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.accent))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.top, 4)
-            HStack(alignment: .top, spacing: 4) {
-                Image(systemName: "lock.fill").font(.system(size: 8))
-                Text("Media never leaves your computer and is not viewable by anyone but you.").font(.system(size: 10))
-            }
-            .foregroundStyle(.secondary)
+            .padding(.top, 14)
+            Label("Stays on this Mac. Only you can see it.", systemImage: "lock.fill")
+                .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                .labelStyle(.titleAndIcon)
+                .padding(.top, 10)
         }
         .padding(16)
-        .frame(width: 222)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(dark ? Color(white: 0.18) : .white)
-            .shadow(color: .black.opacity(0.15), radius: 10, y: 3))
+        .frame(width: width)
+        .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(Color.primary.opacity(0.04)))
+        .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Color.primary.opacity(0.07), lineWidth: 1))
         .environment(\.colorScheme, dark ? .dark : .light)
     }
 }

@@ -97,7 +97,7 @@ struct UpdaterWindowView: View {
             LaterButton(title: "Later") { updater.dismissWindowAction() }
         case .downloading(let received, let expected):
             progress(expected > 0 ? Double(received) / Double(expected) : nil,
-                     expected > 0 ? "\(Self.bytes(received)) of \(Self.bytes(expected))" : "Downloading…")
+                     UpdateDownloadProgress.label(received: received, expected: expected))
             UpdaterButton(title: "Cancel") { updater.dismissWindowAction() }
         case .extracting:
             progress(nil, "Preparing update…")
@@ -129,8 +129,10 @@ struct UpdaterWindowView: View {
 
     private func progress(_ value: Double?, _ label: String) -> some View {
         VStack(spacing: 6) {
-            if let value { ProgressView(value: value) } else { ProgressView().progressViewStyle(.linear) }
-            Text(label).font(.system(size: 11)).foregroundStyle(Color(nsColor: .updaterSecondary)).monospacedDigit()
+            // Each step glides into the next instead of snapping.
+            if let value { ProgressView(value: value).animation(.linear(duration: 0.25), value: value) } else { ProgressView().progressViewStyle(.linear) }
+            Text(label).font(.system(size: 11).monospacedDigit()).foregroundStyle(Color(nsColor: .updaterSecondary))
+                .contentTransition(.identity)
         }
         .controlSize(.small)
         .frame(width: 170)
@@ -138,9 +140,6 @@ struct UpdaterWindowView: View {
         .padding(.bottom, 10)
     }
 
-    private static func bytes(_ n: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
-    }
 }
 
 /// The wide button.
