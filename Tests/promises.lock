@@ -26,7 +26,7 @@
 #32    Tests/Scenarios/tab-sleep-probe.scenario  28ddc928aa6b
 #33    Tests/BrowserManagerLifecycleTests.swift::nowPlayingCase  896f39d0c04e
 #33    Tests/BrowserManagerLifecycleTests.swift::nowPlayingSkipsPictureInPictureCase  df2bec09cf49
-#33    Tests/BrowserManagerLifecycleTests.swift::playerMediaSessionCase  7742e3b3f7cf
+#33    Tests/BrowserManagerLifecycleTests.swift::playerMediaSessionCase  10b18d559640
 #38    Packages/NicheCore/Tests/NicheCoreTests/ExtensionPagePlacementTests.swift::openInAnotherSpaceOfTheProfileIsSelected  87c707ac5123
 #38    Packages/NicheCore/Tests/NicheCoreTests/ExtensionPagePlacementTests.swift::openInThisSpaceWins  bc04cd573b84
 #38    Tests/BrowserManagerLifecycleTests.swift::extensionTabActivationCase  49320dcef25f
@@ -52,7 +52,7 @@
 #66    Packages/NicheCore/Tests/NicheCoreTests/ProtectedMediaTests.swift::choosingPerSite  2b6f1b2c1e2c
 #66    Packages/NicheCore/Tests/NicheCoreTests/ProtectedMediaTests.swift::handoffRules  6709178bcc58
 #66    Packages/NicheCore/Tests/NicheCoreTests/ProtectedMediaTests.swift::servicesOpenInWebKit  35c129ad2c63
-#66    Tests/Scenarios/webkit-drm-tabs.scenario  504bf0262ef6
+#66    Tests/Scenarios/webkit-drm-tabs.scenario  81d07b686749
 #80    Packages/NicheCore/Tests/NicheCoreTests/DisplayDiagnosticsTests.swift::differentTopRatesAreMixed  9da18696ebb0
 #80    Packages/NicheCore/Tests/NicheCoreTests/DisplayDiagnosticsTests.swift::fixedRateDisplayShowsOneRate  74d639787649
 #80    Packages/NicheCore/Tests/NicheCoreTests/DisplayDiagnosticsTests.swift::intervalsBecomeWholeHertz  8811dd51560a
@@ -197,7 +197,7 @@
 #135   Tests/PerfTests.swift::workAcrossATimerBoundaryIsOnePass  f398d95a67d4
 #136   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::defaultsAreArcs  53d379878256
 #136   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::fourHoursKeepsTheTenUsedLast  7d12ec7e2662
-#136   Tests/BrowserManagerLifecycleTests.swift::freezingVoteCase  edf0a4d06cf6
+#136   Tests/BrowserManagerLifecycleTests.swift::freezingVoteCase  4a421aebf6a8
 #136   Tests/BrowserManagerLifecycleTests.swift::loadingTabCase  49ae346fce0b
 #136   Tests/BrowserManagerLifecycleTests.swift::recentTabsCase  72d6480042f0
 #136   Tests/StoreTests.swift::tabRestTimes  ca5370f5f3ea
@@ -229,7 +229,7 @@
 #153   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::thresholds  5ca166a89caa
 #153   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::unknownTimeFallsBack  3dba9bb0a341
 #153   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::visiblePagesStay  658c4197bcb0
-#153   Tests/BrowserManagerLifecycleTests.swift::discardCase  0646d074a745
+#153   Tests/BrowserManagerLifecycleTests.swift::discardCase  bbabf41b6163
 #153   Tests/BrowserManagerLifecycleTests.swift::pressureSweepCase  b9895c19bf83
 #153   Tests/BrowserManagerLifecycleTests.swift::recentlyAudibleCase  1d3a7c7d2db1
 #153   Tests/BrowserManagerLifecycleTests.swift::shortTimerCase  a9d9c860bc51
@@ -306,7 +306,7 @@
 #195   Packages/NicheCore/Tests/NicheCoreTests/HiddenFrameReleaseTests.swift::tabsHiddenLongerThanTheCullAreDue  6d8ee4ac91a3
 #195   Packages/NicheCore/Tests/NicheCoreTests/HiddenFrameReleaseTests.swift::tabsPastTheCapAreDueOldestFirst  9175e00a715d
 #195   Packages/NicheCore/Tests/NicheCoreTests/ShippedWindowsTests.swift::littleWindowShortcutWorksFromAnyAppUnlessTurnedOff  8ad001a224ec
-#198   Tests/BrowserManagerLifecycleTests.swift::callPictureInPictureCase  bac93fb0309d
+#198   Tests/BrowserManagerLifecycleTests.swift::callPictureInPictureCase  13f3af3d51fd
 #202   Packages/NicheCore/Tests/NicheCoreTests/PeekTriggerTests.swift::aNewTabLinkInsideThePeekLeavesIt  042528c5dd2a
 #203   Packages/NicheCore/Tests/NicheCoreTests/WebStoreInstallsTests.swift::folderStopsLoadingWhereTheStoreHasIt  05989f9e36dd
 #203   Packages/NicheCore/Tests/NicheCoreTests/WebStoreInstallsTests.swift::onlyStoreCopiesNamedAfterTheirID  6aaa41ce6169

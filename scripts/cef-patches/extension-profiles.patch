@@ -13,15 +13,15 @@ diff --git a/chrome/browser/extensions/extension_service.cc b/chrome/browser/ext
    base::StringTokenizerT<base::CommandLine::StringType,
                           base::CommandLine::StringType::const_iterator>
        t(path_list, FILE_PATH_LITERAL(","));
-+  // Niche: --cra-load-extension-profiles names, for each --load-extension path in
++  // Niche: --niche-load-extension-profiles names, for each --load-extension path in
 +  // the same order, the profile folders that load it ("Default|Profile <id>"),
 +  // or "*" for every profile. A path a profile does not list is not loaded
 +  // there, so it is not installed in that profile at all.
 +  std::vector<std::string> niche_profiles;
 +  if (switch_name == switches::kLoadExtension &&
-+      command_line_->HasSwitch("cra-load-extension-profiles")) {
++      command_line_->HasSwitch("niche-load-extension-profiles")) {
 +    niche_profiles = base::SplitString(
-+        command_line_->GetSwitchValueASCII("cra-load-extension-profiles"), ",",
++        command_line_->GetSwitchValueASCII("niche-load-extension-profiles"), ",",
 +        base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 +  }
 +  const std::string niche_profile = profile_->GetBaseName().AsUTF8Unsafe();

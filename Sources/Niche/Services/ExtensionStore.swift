@@ -214,7 +214,7 @@ final class ExtensionStore {
     @ObservationIgnored private var webStoreAsked: Set<String> = []
 
     /// A page in `profile` has loaded, so the profile's extensions are up: its Web Store copies
-    /// are installed from the store there (Cra.installFromWebStore, the store's own install).
+    /// are installed from the store there (Niche.installFromWebStore, the store's own install).
     /// The store's version may not ask for more permissions than the copy the person picked.
     func installFromWebStore(using browser: NicheBrowser, profile: String) {
         let scopes = Self.loadProfiles()
@@ -225,7 +225,7 @@ final class ExtensionStore {
                   let params = try? JSONSerialization.data(withJSONObject: ["id": copy.folder, "manifest": copy.manifest]) else { continue }
             webStoreAsked.insert("\(profile)/\(copy.folder)")
             NicheLog.note("extension \(copy.folder): installing from the Web Store in \(profile)")
-            browser.sendDevToolsMethod("Cra.installFromWebStore", params: String(decoding: params, as: UTF8.self)) { [weak self] _, error in
+            browser.sendDevToolsMethod("Niche.installFromWebStore", params: String(decoding: params, as: UTF8.self)) { [weak self] _, error in
                 DispatchQueue.main.async {
                     if let error { NicheLog.note("extension \(copy.folder): Web Store install in \(profile) failed (\(error)); it keeps loading from its folder") }
                     self?.reload()

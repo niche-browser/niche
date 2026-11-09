@@ -109,6 +109,13 @@ automate --no-build --no-distrib
 #    gcm-enabled.patch reverses CEF's components_gcm_disable.patch, and every
 #    patcher run re-applies that one. automate --force-build runs this hook right
 #    before ninja, which is why the build below calls autoninja itself.
+#    On a re-run Niche's patches from last time are still on the files CEF patches too, and
+#    CEF's patcher then fails, so take them off first (newest last, so in reverse).
+for p in $(ls -r "$PATCHES"/*.patch); do
+  if git -C chromium/src apply --check --reverse "$p" 2>/dev/null; then
+    git -C chromium/src apply --reverse "$p" && echo "Took off $(basename "$p")"
+  fi
+done
 (cd chromium/src/cef && python3 tools/gclient_hook.py)
 # 3. Niche's Chromium fixes on top (skipped when already applied).
 for p in "$PATCHES"/*.patch; do

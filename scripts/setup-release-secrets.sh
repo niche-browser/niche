@@ -34,6 +34,12 @@ read -rsp "Password you gave $(basename "$P12"): " P12_PASSWORD; echo
 read -rp "Apple ID email of the developer account: " APPLE_ID
 echo "An app-specific password: account.apple.com ▸ Sign-In and Security ▸ App-Specific Passwords ▸ +"
 read -rsp "App-specific password: " APPLE_APP_PASSWORD; echo
+echo "Checking those with Apple's notary service…"
+if ! xcrun notarytool history --apple-id "$APPLE_ID" --team-id "$TEAM" --password "$APPLE_APP_PASSWORD" >/dev/null 2>&1; then
+  echo "Apple refused that Apple ID and app-specific password for team $TEAM. Check the email is the" >&2
+  echo "account in that team, make a new app-specific password, and run this again." >&2
+  exit 1
+fi
 
 base64 -i "$P12" | gh secret set MACOS_CERTIFICATE_P12 -R "$REPO"
 printf %s "$P12_PASSWORD" | gh secret set MACOS_CERTIFICATE_PASSWORD -R "$REPO"

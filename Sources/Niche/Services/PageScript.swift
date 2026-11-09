@@ -13,7 +13,7 @@ import Foundation
 ///   live in the page's world, so a small wrapper there (`mediaSessionWrapper`) keeps them in a
 ///   closure and answers an event whose name is random per launch: nothing in the page's world
 ///   names Niche. Chromium pages don't get it: Chromium routes their handlers itself
-///   (`Cra.mediaSession`, like Arc), which also finds a handler the page registered before a
+///   (`Niche.mediaSession`, like Arc), which also finds a handler the page registered before a
 ///   wrapper could be in place (the first page of a new tab).
 /// - `drm`: the page asked for Widevine (navigator.requestMediaKeySystemAccess): the Site Control
 ///   Center then offers to play the site in Safari's engine (docs/protected-media.md). A wrapper in

@@ -31,7 +31,7 @@ index 72dd7c5..12186c2 100644
  }
  
 +// Niche: Chromium's audible state (Chrome's tab speaker icon), which CEF has no
-+// callback for. Delivered as a "Cra.audible" message from PID_BROWSER whose
++// callback for. Delivered as a "Niche.audible" message from PID_BROWSER whose
 +// only argument is the new state.
 +void CefBrowserContentsDelegate::OnAudioStateChanged(bool audible) {
 +  auto c = client();
@@ -40,14 +40,14 @@ index 72dd7c5..12186c2 100644
 +    return;
 +  }
 +  CefRefPtr<CefProcessMessage> message =
-+      CefProcessMessage::Create("Cra.audible");
++      CefProcessMessage::Create("Niche.audible");
 +  message->GetArgumentList()->SetBool(0, audible);
 +  c->OnProcessMessageReceived(b, b->GetMainFrame(), PID_BROWSER, message);
 +}
 +
 +// Niche: whether the page uses the camera and the microphone, as Chrome's tab
 +// recording indicator (MediaStreamCaptureIndicator) counts them. Delivered as a
-+// "Cra.capture" message from PID_BROWSER with the camera and microphone states.
++// "Niche.capture" message from PID_BROWSER with the camera and microphone states.
 +void CefBrowserContentsDelegate::OnIsCapturingVideoChanged(
 +    content::WebContents* web_contents,
 +    bool is_capturing_video) {
@@ -74,7 +74,7 @@ index 72dd7c5..12186c2 100644
 +  auto indicator =
 +      MediaCaptureDevicesDispatcher::GetInstance()->GetMediaStreamCaptureIndicator();
 +  CefRefPtr<CefProcessMessage> message =
-+      CefProcessMessage::Create("Cra.capture");
++      CefProcessMessage::Create("Niche.capture");
 +  message->GetArgumentList()->SetBool(0, indicator->IsCapturingVideo(wc));
 +  message->GetArgumentList()->SetBool(1, indicator->IsCapturingAudio(wc));
 +  c->OnProcessMessageReceived(b, b->GetMainFrame(), PID_BROWSER, message);

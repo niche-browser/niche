@@ -166,7 +166,7 @@ static NicheClient* AsNicheClient(CefClient* c) {
 @property (nonatomic) BOOL isPictureInPicturePlaying;
 @property (nonatomic) BOOL isCapturingMedia;
 /// Media access CEF's own permission flow granted (OnMediaAccessChange), and the camera or
-/// microphone Chrome's tab recording indicator counts ("Cra.capture"); isCapturingMedia is either.
+/// microphone Chrome's tab recording indicator counts ("Niche.capture"); isCapturingMedia is either.
 @property (nonatomic) BOOL cefMediaAccess;
 @property (nonatomic) BOOL chromeCapture;
 - (void)updateCapture;
@@ -661,10 +661,10 @@ public:
         if (process_type.empty()) {
             // The app lists them from the same data root as AppPaths/ExtensionStore. The
             // command line installs them in every profile; Niche's CEF build skips a profile
-            // --cra-load-extension-profiles leaves out (extension-profiles.patch, #131).
+            // --niche-load-extension-profiles leaves out (extension-profiles.patch, #131).
             if (g_extensionPaths.count) {
                 command_line->AppendSwitchWithValue("load-extension", CefStringFromNS([g_extensionPaths componentsJoinedByString:@","]));
-                if (g_extensionProfiles) command_line->AppendSwitchWithValue("cra-load-extension-profiles", CefStringFromNS(g_extensionProfiles));
+                if (g_extensionProfiles) command_line->AppendSwitchWithValue("niche-load-extension-profiles", CefStringFromNS(g_extensionProfiles));
             }
         }
         command_line->AppendSwitchWithValue("autoplay-policy", "document-user-activation-required");
@@ -690,7 +690,7 @@ public:
         std::string enabled = command_line->GetSwitchValue("enable-features");
         command_line->AppendSwitchWithValue("enable-features",
             (enabled.empty() ? "" : enabled + ",") + "ForceWebRequestProxyForTest,"
-            // Tab sleeping discards a page in place (Cra.discard), as Arc's Chromium does: the tab
+            // Tab sleeping discards a page in place (Niche.discard), as Arc's Chromium does: the tab
             // keeps its back/forward list and scroll position, and loads again when shown (#153).
             + "WebContentsDiscard,"
             // Chrome keeps its video PiP's origin strip (favicon, host, a dark top scrim) on screen
@@ -1491,7 +1491,7 @@ public:
     }
 
     // Chromium's audible state, which CEF has no callback for: the engine sends it as a
-    // "Cra.audible" message (scripts/cef-patches/audible-state.patch). "Cra.activate": an
+    // "Niche.audible" message (scripts/cef-patches/audible-state.patch). "Niche.activate": an
     // extension asked for this tab to be in front (scripts/cef-patches/extension-tab-activate.patch),
     // or with true the page did (scripts/cef-patches/page-activate.patch).
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
@@ -1502,7 +1502,7 @@ public:
         }
         if (source_process != PID_BROWSER) return false;
         NicheBrowser* o = owner_;
-        if (message->GetName() == "Cra.audible") {
+        if (message->GetName() == "Niche.audible") {
             if (o) [o audibleChanged:message->GetArgumentList()->GetBool(0)];
             return true;
         }
@@ -1510,7 +1510,7 @@ public:
         // Chrome-style page's media never reaches OnMediaAccessChange with (Arc's
         // didChangeCameraState / didChangeMicrophoneState; scripts/cef-patches/
         // media-capture-and-session.patch).
-        if (message->GetName() == "Cra.capture") {
+        if (message->GetName() == "Niche.capture") {
             CefRefPtr<CefListValue> args = message->GetArgumentList();
             if (o) {
                 o.chromeCapture = (args->GetSize() > 0 && args->GetBool(0)) || (args->GetSize() > 1 && args->GetBool(1));
@@ -1518,7 +1518,7 @@ public:
             }
             return true;
         }
-        if (message->GetName() == "Cra.activate") {
+        if (message->GetName() == "Niche.activate") {
             CefRefPtr<CefListValue> args = message->GetArgumentList();
             BOOL byPage = args->GetSize() > 0 && args->GetBool(0);
             if (o && [o.delegate respondsToSelector:@selector(browserRequestsActivation:byPage:)])

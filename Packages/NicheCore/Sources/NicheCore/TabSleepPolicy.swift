@@ -194,7 +194,7 @@ public struct TabSleepPolicy: Equatable, Sendable {
     /// Chromium's freezing policy sees what Niche's page probes can't: a call with the camera and
     /// microphone off (an open RTCPeerConnection), a USB, Bluetooth, HID or serial device, a
     /// mirrored or captured tab. `reasons` are its CannotFreezeReasonToString names for the page
-    /// and the pages connected to it (Cra.getFreezingState); "" when none of them keeps it awake.
+    /// and the pages connected to it (Niche.getFreezingState); "" when none of them keeps it awake.
     public static func refusal(freezingReasons reasons: [String]) -> String {
         if reasons.contains("has an active WebRTC connection") { return "call" }
         if reasons.contains(where: { $0.hasPrefix("connected to ") }) { return "device" }

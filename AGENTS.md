@@ -14,9 +14,9 @@ English.
 
 - Put a decision that needs no window or page (model, file format, layout rule, policy) in
   NicheCore, with a test. Before adding a type or moving logic, read docs/architecture.md.
-- Strings shared with the prebuilt engine (`Cra.*` DevTools methods and process messages,
-  `cra-load-extension-profiles`, `Niche Safe Store`) keep their spelling: see
-  docs/architecture.md, "The engine contract".
+- Strings shared with the engine (`Niche.*` DevTools methods and process messages,
+  `niche-load-extension-profiles`, `Niche Safe Store`) change only together with
+  `scripts/cef-patches` and a rebuilt engine: see docs/architecture.md, "The engine contract".
 - A bug fix comes with a test written first and seen failing. A test locked in
   `Tests/promises.lock` changes only when the product owner decides the behaviour changes.
   Before writing or changing a test, read docs/testing.md.

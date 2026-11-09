@@ -14,9 +14,9 @@ CEF_VERSION="${CEF_VERSION:-156.0.26+g8ea0c73+chromium-156.0.8078.88}"
 # Note: Spotify's CEF builds index names the Intel platform "macosx64".
 ARCH="${CEF_ARCH:-$([ "$(uname -m)" = arm64 ] && echo macosarm64 || echo macosx64)}"
 NAME="cef_binary_${CEF_VERSION}_${ARCH}_minimal"
-# Bump the suffix (codecs2, …) when the build changes but CEF_VERSION does not.
-CEF_RELEASE="${CEF_RELEASE:-cef-${CEF_VERSION%%+*}-codecs3}"
-URL="${CEF_URL:-https://github.com/VictorKildahl/cra/releases/download/${CEF_RELEASE}/cef_binary_${ARCH}_minimal.tar.bz2}"
+# Bump the suffix (niche2, …) when the build changes but CEF_VERSION does not.
+CEF_RELEASE="${CEF_RELEASE:-cef-${CEF_VERSION%%+*}-niche1}"
+URL="${CEF_URL:-https://github.com/niche-browser/niche/releases/download/${CEF_RELEASE}/cef_binary_${ARCH}_minimal.tar.bz2}"
 
 mkdir -p vendor
 # A different pinned build replaces vendor/cef.
@@ -52,40 +52,13 @@ fi
 # Chromium encrypts cookies, passwords and card numbers with a secret from the login
 # Keychain item "Chromium Safe Storage", which every Chromium-based app without its own
 # name shares. Niche's is "Niche Safe Store" (SafeStorage.swift creates it before Chromium
-# starts; scripts/cef-patches/keychain-service-name.patch renames it in CEF builds).
-# cef-156.0.14-codecs2 predates that patch, so its framework is patched here: the name
-# in os_crypt's constant pool, and the length (21) the compiler folded into both places
-# that copy it into a std::string. Any other build must come with the source patch.
-# Stop rather than ship a framework that looks for the old item: Niche would encrypt with
-# one secret and Chromium decrypt with another.
+# starts; scripts/cef-patches/keychain-service-name.patch compiles the name in). Stop rather
+# than run a framework that looks for another item: Niche would encrypt with one secret and
+# Chromium decrypt with another. Stock CEF builds (CEF_URL to spotifycdn.com) still use the
+# shared item; NICHE_ALLOW_STOCK_CEF=1 accepts that.
 FRAMEWORK_BIN="vendor/cef/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework"
-# Stock CEF builds (CEF_URL to spotifycdn.com) still use the shared "Chromium Safe
-# Storage" item, and this binary patch is arm64-specific (the folded-length stores are
-# ARM mov immediates). NICHE_ALLOW_STOCK_CEF=1 accepts that: cookies and passwords are
-# still encrypted, under the item every unpatched Chromium-based app shares.
-if [ "${NICHE_ALLOW_STOCK_CEF:-0}" = 1 ]; then
-  if LC_ALL=C grep -qa "Chromium Safe Storage" "$FRAMEWORK_BIN"; then
-    echo "NICHE_ALLOW_STOCK_CEF=1: keeping the shared 'Chromium Safe Storage' Keychain item" >&2
-  fi
-else
-  if LC_ALL=C grep -qa "Chromium Safe Storage" "$FRAMEWORK_BIN"; then
-    if [ "$(shasum -a 256 "$FRAMEWORK_BIN" | cut -d' ' -f1)" != a910874407a9064fb6a944b2ffa0f86d9b5e1ea0a790608e8febea8d4949c7be ]; then
-      echo "This CEF build still uses Chromium Safe Storage; build it with scripts/cef-patches" >&2
-      exit 1
-    fi
-    patch_at() { printf "$2" | dd of="$FRAMEWORK_BIN" bs=1 seek=$(($1)) conv=notrunc status=none; }
-    patch_at 0xc4fcaa1 'Niche Safe Store\000\000\000\000\000'  # was "Chromium Safe Storage"
-    patch_at 0x215fe50 '\011\002\200\122'                      # mov w9, #16 (was #21)
-    patch_at 0x215ff8c '\010\002\200\122'                      # mov w8, #16 (was #21)
-    echo "Renamed the Keychain item to Niche Safe Store"
-  fi
-  # The prebuilt engine comes from upstream with its own 16-byte Keychain name baked in.
-  # "Niche Safe Store" has the same length, so it swaps in place with no length change.
-  upstream_item="$(printf 'C%s Safe Storage' ra)"
-  if LC_ALL=C grep -qa "$upstream_item" "$FRAMEWORK_BIN"; then
-    UP="$upstream_item" perl -0777 -pi -e 's/\Q$ENV{UP}\E/Niche Safe Store/g' "$FRAMEWORK_BIN"
-    echo "Renamed the Keychain item to Niche Safe Store"
-  fi
-  LC_ALL=C grep -qa "Niche Safe Store" "$FRAMEWORK_BIN" || { echo "CEF names no Niche Safe Store" >&2; exit 1; }
+if [ "${NICHE_ALLOW_STOCK_CEF:-0}" != 1 ]; then
+  LC_ALL=C grep -qa "Niche Safe Store" "$FRAMEWORK_BIN" || {
+    echo "This CEF build names no Niche Safe Store; build it with scripts/build-cef.sh" >&2; exit 1; }
 fi
 echo "CEF ready: vendor/cef"

@@ -19,7 +19,7 @@ diff --git a/cef/libcef/browser/chrome/chrome_browser_delegate.cc b/cef/libcef/b
    return opener_host_ && opener_host_->is_views_hosted();
  }
  
-+// Niche: "Cra.activate" with true: the client selects the tab and brings its
++// Niche: "Niche.activate" with true: the client selects the tab and brings its
 +// window and the app to the front, as Chrome does for its own tabs.
 +void ChromeBrowserDelegate::PageActivationRequested() {
 +  auto browser = ChromeBrowserHostImpl::GetBrowserForBrowser(browser_);
@@ -31,7 +31,7 @@ diff --git a/cef/libcef/browser/chrome/chrome_browser_delegate.cc b/cef/libcef/b
 +    return;
 +  }
 +  CefRefPtr<CefProcessMessage> message =
-+      CefProcessMessage::Create("Cra.activate");
++      CefProcessMessage::Create("Niche.activate");
 +  message->GetArgumentList()->SetBool(0, true);
 +  client->OnProcessMessageReceived(browser.get(), browser->GetMainFrame(),
 +                                   PID_BROWSER, message);

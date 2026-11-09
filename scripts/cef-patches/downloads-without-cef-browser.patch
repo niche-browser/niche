@@ -18,12 +18,12 @@ index e5363cc46..4af0a70c3 100644
 +namespace {
 +
 +// Niche (GitHub #203): the CRX a Web Store install downloads (WebstoreInstaller,
-+// from the store page's "Add to Chrome" or Cra.installFromWebStore) is Chrome's
++// from the store page's "Add to Chrome" or Niche.installFromWebStore) is Chrome's
 +// own: it goes to the path WebstoreInstaller set, under the profile's "Webstore
 +// Downloads", and CrxInstaller takes it from there. The client's download
 +// handler never sees it, so no save panel asks where to put it and it never
 +// lands in the Downloads folder; and one from a page with no CefBrowser
-+// (Cra.installFromWebStore's) isn't cancelled.
++// (Niche.installFromWebStore's) isn't cancelled.
 +bool IsNicheExtensionInstall(download::DownloadItem* item) {
 +  return item->GetDownloadSource() ==
 +         download::DownloadSource::EXTENSION_INSTALLER;

@@ -98,8 +98,8 @@ print(gn_args.GetConfigFileContents(gn_args.GetAllPlatformConfigs({}, quiet=True
   LC_ALL=C grep -qa "GCM.RegistrationCacheStatus" "$FRAMEWORK" || { echo "GCM is compiled out (Web Push)" >&2; exit 1; }
   # Both CPUs come from the same patched sources, so the Niche.* page methods the patches
   # add must match the other CPU's package when there is one. Only NUL-terminated
-  # strings count: a literal of 8 bytes or less, like Cra.load, compiles to an immediate,
-  # which arm64 splits up but x86_64's movabs keeps whole ("Niche.loadH" in a plain grep).
+  # strings count: a literal of 8 bytes or less compiles to an immediate, which arm64
+  # splits up but x86_64's movabs keeps whole (no NUL after it in a plain grep).
   OTHER="$([ "$cpu" = x64 ] && echo macosarm64 || echo macosx64)"
   OTHER_FW="$SRC/cef/binary_distrib/cef_binary_${CEF_VERSION}_${OTHER}_minimal/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework"
   if [ -f "$OTHER_FW" ]; then

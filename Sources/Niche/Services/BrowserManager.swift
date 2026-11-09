@@ -31,7 +31,7 @@ final class TabRuntime {
     var hiddenFrameReleasedFor: Date?
     /// When the page last started or stopped playing sound; tab sleeping waits as long after it.
     var audibleAt: Date?
-    /// Tab sleeping discarded the page in place (Cra.discard): Chromium keeps its history and
+    /// Tab sleeping discarded the page in place (Niche.discard): Chromium keeps its history and
     /// scroll position and loads it again when the tab is shown.
     var discarded = false
     /// Invalidates a pending sleep probe even when navigation returns to the same URL.
@@ -457,7 +457,7 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
                             guard refusal.isEmpty else { return self.keepAwake(rt, url, refusal) }
                             // Chromium knows about calls, devices and capture that the page's own
                             // world can't show; an older CEF without Niche's methods doesn't say.
-                            rt.browser.sendDevToolsMethod("Cra.getFreezingState", params: "{}") { [weak self, weak rt] result, _ in
+                            rt.browser.sendDevToolsMethod("Niche.getFreezingState", params: "{}") { [weak self, weak rt] result, _ in
                                 DispatchQueue.main.async {
                                     guard let self, let rt, self.stillSleepable(id, rt, url, navigationRevision, cutoff) else { return }
                                     let refusal = TabSleepPolicy.refusal(freezingReasons: Self.freezingReasons(result))
@@ -486,10 +486,10 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
         deinit { for line in log.lines { NicheLog.note(line) } }
     }
 
-    /// Chrome's in-place discard (Cra.discard, which needs WebContentsDiscard). A CEF without it
+    /// Chrome's in-place discard (Niche.discard, which needs WebContentsDiscard). A CEF without it
     /// answers an error: the page closes instead, and its tab loads the URL again when shown.
     private func discard(_ id: UUID, _ rt: TabRuntime, _ url: String, _ policy: TabSleepPolicy, _ pass: SleepPass) {
-        rt.browser.sendDevToolsMethod("Cra.discard", params: "{}") { [weak self, weak rt] result, error in
+        rt.browser.sendDevToolsMethod("Niche.discard", params: "{}") { [weak self, weak rt] result, error in
             DispatchQueue.main.async {
                 guard let self, let rt, self.runtimes[id] === rt, !self.visibleTabIDs.contains(id) else { return }
                 let reply = error == nil ? Self.jsonObject(result) : nil
@@ -512,21 +512,21 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
         }
     }
 
-    /// Shown again: Chromium loads a discarded page when it becomes visible; Cra.load starts it
+    /// Shown again: Chromium loads a discarded page when it becomes visible; Niche.load starts it
     /// now, as Chrome does on selecting the tab, so a covered window doesn't wait.
     private func wake(_ id: UUID, _ rt: TabRuntime) {
         guard rt.discarded else { return }
         rt.discarded = false
         if sleptTabs.remove(id) != nil { Perf.begin(.tabWake, id.uuidString) }
         log(id, "loads its discarded page again")
-        rt.browser.sendDevToolsMethod("Cra.load", params: "{}") { _, _ in }
+        rt.browser.sendDevToolsMethod("Niche.load", params: "{}") { _, _ in }
     }
 
     private static func jsonObject(_ s: String?) -> [String: Any]? {
         s?.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
     }
 
-    /// Cra.getFreezingState's reasons for the page and the pages connected to it.
+    /// Niche.getFreezingState's reasons for the page and the pages connected to it.
     private static func freezingReasons(_ result: String?) -> [String] {
         guard let json = jsonObject(result) else { return [] }
         return (json["reasons"] as? [String] ?? []) + (json["connectedReasons"] as? [String] ?? [])
@@ -562,7 +562,7 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     /// voting for it in Chromium's freezing policy (its freeze token). The policy freezes it only
     /// while nothing it knows forbids that: sound now or lately, capture, a Web Lock or IndexedDB
     /// lock, a device, a WebRTC connection, notification permission. Showing the tab drops the
-    /// vote. Needs the CEF patch behind "Cra.setFreezingVote" (cef-patches/freezing-vote.patch);
+    /// vote. Needs the CEF patch behind "Niche.setFreezingVote" (cef-patches/freezing-vote.patch);
     /// an older CEF answers that the method doesn't exist and nothing freezes (GitHub #136).
     func freezeIdleTabs(hiddenLongerThan seconds: TimeInterval) {
         let cutoff = clock.now.addingTimeInterval(-seconds)
@@ -578,7 +578,7 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     private func setFreezingVote(_ rt: TabRuntime, _ vote: Bool) {
         rt.freezeVoted = vote
         log(rt.tabID, vote ? "votes to freeze its page" : "drops its freezing vote")
-        rt.browser.sendDevToolsMethod("Cra.setFreezingVote", params: vote ? #"{"vote":true}"# : #"{"vote":false}"#) { _, error in
+        rt.browser.sendDevToolsMethod("Niche.setFreezingVote", params: vote ? #"{"vote":true}"# : #"{"vote":false}"#) { _, error in
             guard let error, vote, !Self.loggedFreezingError else { return }
             Self.loggedFreezingError = true
             DispatchQueue.main.async { NicheLog.note("tab freezing unavailable: \(error)") }
@@ -722,7 +722,7 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     ///
     /// A call goes first through Chrome's own automatic Picture in Picture
     /// (AutoPictureInPictureTabHelper, which Arc uses for Google Meet), driven by Niche's tab switch
-    /// since CEF has no tab strip for it to watch (`Cra.autoPictureInPicture`). A page that uses
+    /// since CEF has no tab strip for it to watch (`Niche.autoPictureInPicture`). A page that uses
     /// the camera or microphone and registered an `enterpictureinpicture` media session handler
     /// has it run, and Chromium lets it open its Picture in Picture window without a gesture:
     /// Meet's "Automatic picture-in-picture" opens a Document Picture in Picture window of the
@@ -737,7 +737,7 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
             return
         }
         let asked = clock.now
-        rt.browser.sendDevToolsMethod("Cra.autoPictureInPicture", params: #"{"tab":"hidden"}"#) { [weak self, weak rt] result, _ in
+        rt.browser.sendDevToolsMethod("Niche.autoPictureInPicture", params: #"{"tab":"hidden"}"#) { [weak self, weak rt] result, _ in
             DispatchQueue.main.async {
                 guard let self, let rt, self.runtimes[tabID] === rt else { return }
                 let answer = Self.jsonObject(result) ?? [:]
@@ -833,11 +833,11 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     /// tab). A window the page was still opening (the user came straight back) is closed once it
     /// is up, a second later, if the tab is still in front.
     private func closeAutomaticPictureInPicture(_ rt: TabRuntime, again: Bool) {
-        rt.browser.sendDevToolsMethod("Cra.autoPictureInPicture", params: #"{"tab":"shown"}"#) { _, _ in }
+        rt.browser.sendDevToolsMethod("Niche.autoPictureInPicture", params: #"{"tab":"shown"}"#) { _, _ in }
         guard again else { return }
         clock.after(1) { [weak self, weak rt] in
             guard let self, let rt, self.visibleTabIDs.contains(rt.tabID), !self.windowCovered else { return }
-            rt.browser.sendDevToolsMethod("Cra.autoPictureInPicture", params: #"{"tab":"shown"}"#) { _, _ in }
+            rt.browser.sendDevToolsMethod("Niche.autoPictureInPicture", params: #"{"tab":"shown"}"#) { _, _ in }
         }
     }
 
@@ -936,11 +936,11 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
         guard let rt = runtimes[id] else { nowPlaying?.remove(id); return }
         if rt.browser is WebKitBrowser { return performWebKitNowPlaying(id, rt, op) }
         // Chromium routes the page's own media session handlers (YouTube, Spotify and SoundCloud
-        // skip tracks that way), as Arc does: `Cra.mediaSession` runs the handler the way
+        // skip tracks that way), as Arc does: `Niche.mediaSession` runs the handler the way
         // Chrome's media keys do, and a page without one has its media elements played or paused.
         let run = { [weak self, weak rt] (op: String) in
             guard let rt else { return }
-            rt.browser.sendDevToolsMethod("Cra.mediaSession", params: Self.jsonObjectString(["action": op])) { result, _ in
+            rt.browser.sendDevToolsMethod("Niche.mediaSession", params: Self.jsonObjectString(["action": op])) { result, _ in
                 DispatchQueue.main.async {
                     guard let self else { return }
                     if Self.jsonObject(result)?["handled"] as? Bool == true {
@@ -1047,7 +1047,7 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
             }
         }
         guard !webKit else { return }
-        browser.sendDevToolsMethod("Cra.mediaSession", params: "{}") { [weak self] result, _ in
+        browser.sendDevToolsMethod("Niche.mediaSession", params: "{}") { [weak self] result, _ in
             DispatchQueue.main.async {
                 guard let actions = Self.jsonObject(result)?["actions"] as? [String] else { return }
                 self?.nowPlaying?.update(id) { $0.hasPrevious = actions.contains("previoustrack"); $0.hasNext = actions.contains("nexttrack") }
