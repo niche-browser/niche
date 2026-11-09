@@ -1,58 +1,65 @@
 import AppKit
 import SwiftUI
 
-/// Dia's Shortcuts pane: a search field with filter and more buttons, a 272 pt list card of
-/// actions grouped under their menu titles (36 pt rows, shortcut right-aligned), and a detail
-/// column with the action's title, description and a black full-width shortcut field.
+/// Every menu action and its keyboard shortcut: a searchable list grouped under the menus, and a
+/// detail column to record a new shortcut for the selected action.
 struct ShortcutsPane: View {
     @Environment(KeyBindingRegistry.self) private var bindings
     @State private var query = ""
     @State private var selectedID: String?
     @State private var customizedOnly = false
     @State private var conflictingOnly = false
+    /// The search field has the keyboard only while the user is typing in it: picking an action
+    /// or clicking elsewhere takes it away, and the pane never opens with it focused.
+    @FocusState private var searchFocused: Bool
 
-    /// Dia's selected shortcut row (sampled 95,144,229 in dark mode; it is not the accent colour).
-    private static let selectionFill = Color(.sRGB, red: 95 / 255, green: 144 / 255, blue: 229 / 255, opacity: 1)
-    private static let listWidth: CGFloat = 272
-    private static let rowHeight: CGFloat = 36
+    private static let listWidth: CGFloat = 300
+    private static let rowHeight: CGFloat = 32
     private static let sections: [(MenuSection, String)] = [
         (.app, "Niche"), (.file, "File"), (.edit, "Edit"), (.view, "View"), (.spaces, "Spaces"),
         (.tabs, "Tabs"), (.archive, "Archive"), (.window, "Window"),
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                SettingsSearchField(text: $query)
-                    .frame(height: 26)
-                Menu {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                SettingsSearchField(text: $query, focused: $searchFocused)
+                iconMenu("line.3.horizontal.decrease", help: "Filter", active: customizedOnly || conflictingOnly) {
                     Toggle("Customized Shortcuts", isOn: $customizedOnly)
                     Toggle("Conflicting Shortcuts", isOn: $conflictingOnly)
-                } label: {
-                    Image(systemName: "line.3.horizontal.decrease").font(.system(size: 13, weight: .medium))
                 }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .frame(width: 26, height: 26)
-                Menu {
+                iconMenu("ellipsis", help: "More", active: false) {
                     Button("Reset All Shortcuts") { bindings.resetOverrides() }
-                } label: {
-                    Image(systemName: "ellipsis").font(.system(size: 13, weight: .medium))
                 }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .frame(width: 26, height: 26)
             }
-            .padding(.horizontal, 19)
-            .padding(.top, 19)
-            HStack(alignment: .top, spacing: 15) {
+            HStack(alignment: .top, spacing: 20) {
                 list
                 detail
             }
-            .padding(.leading, 19)
-            .padding(.trailing, 20.5)
-            .padding(.top, 14)
-            .padding(.bottom, 20)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: SettingsMetrics.contentWidth)
+        .padding(.horizontal, Design.Space.pane)
+        .padding(.top, 4)
+        .padding(.bottom, Design.Space.pane)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .contentShape(Rectangle())
+        .onTapGesture { searchFocused = false }
+        .onAppear {
+            // AppKit hands the window's first text field the keyboard when the pane appears.
+            DispatchQueue.main.async { searchFocused = false }
+        }
+    }
+
+    private func iconMenu<Items: View>(_ symbol: String, help: String, active: Bool, @ViewBuilder items: () -> Items) -> some View {
+        Menu { items() } label: {
+            SettingsIconTile(symbol: symbol, active: active)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     // MARK: List
@@ -76,114 +83,213 @@ struct ShortcutsPane: View {
 
     private var list: some View {
         ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 1) {
                 ForEach(visible, id: \.title) { group in
                     Text(group.title)
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
                         .padding(.leading, 10)
-                        .frame(maxWidth: .infinity, minHeight: Self.rowHeight, alignment: .bottomLeading)
+                        .padding(.top, 12)
                         .padding(.bottom, 4)
-                    ForEach(group.actions) { a in
-                        SettingsCardDivider()
-                        row(a)
-                    }
+                    ForEach(group.actions) { a in row(a) }
+                }
+                if visible.isEmpty {
+                    Text("No matching actions").font(Design.Font.detail).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.top, 24)
                 }
             }
+            .padding(6)
         }
         .frame(width: Self.listWidth)
         .frame(maxHeight: .infinity)
-        // Dia's list card is the window colour with a 1 pt white-6% outline (not the filled card).
+        .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(Design.surface))
         .clipShape(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Design.hairline))
     }
 
     private func row(_ a: KeyAction) -> some View {
-        let selected = a.id == selectedID
-        return Button { selectedID = a.id } label: {
-            HStack(spacing: 8) {
-                Text(a.name).font(.system(size: 13)).foregroundStyle(selected ? Color.white : Color.primary)
-                Spacer(minLength: 8)
-                Text(a.shortcuts.map(\.display).joined(separator: "  "))
-                    .font(.system(size: 13)).foregroundStyle(selected ? Color.white : Color.secondary)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: Self.rowHeight)
-            .background(selected ? Self.selectionFill : Color.clear)
-            .contentShape(Rectangle())
+        ShortcutListRow(action: a, selected: a.id == selectedID) {
+            selectedID = a.id
+            searchFocused = false
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: Detail
 
     @ViewBuilder private var detail: some View {
         if let a = selectedID.flatMap({ bindings.action($0) }) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top) {
-                    Text(a.name).font(.system(size: 22, weight: .bold))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center) {
+                    Text(a.name).font(.system(size: 17, weight: .semibold))
                     Spacer()
                     Menu {
                         Button("Reset to Default") { bindings.resetShortcuts(for: a.id) }.disabled(!bindings.isOverridden(a.id))
                         Button("Remove Shortcut") { bindings.setShortcuts([], for: a.id) }.disabled(a.shortcuts.isEmpty)
                     } label: {
-                        Image(systemName: "gearshape.fill").font(.system(size: 16)).foregroundStyle(.secondary)
+                        SettingsIconTile(symbol: "ellipsis", active: false, size: 26)
                     }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                    .help("Shortcut options")
+                    .accessibilityLabel("Shortcut options")
                 }
                 Text(ShortcutDescriptions.text(for: a))
-                    .font(.system(size: 15)).foregroundStyle(.secondary)
+                    .font(Design.Font.body).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 ShortcutRecorder(action: a)
+                    .padding(.top, 6)
+                Text("Click the field, then press the new keys. Esc cancels, ⌫ removes the shortcut.")
+                    .font(Design.Font.detail).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                 let c = conflicts(of: a)
                 if !c.isEmpty {
-                    Text((c.count == 1 ? "This shortcut conflicts with another shortcut: " : "This shortcut conflicts with other shortcuts: ")
-                         + c.map(\.name).joined(separator: ", "))
-                        .font(.system(size: 11)).foregroundStyle(.orange)
+                    Label((c.count == 1 ? "Also used by " : "Also used by ") + c.map(\.name).joined(separator: ", "),
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(Design.Font.detail).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(.top, 8)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         } else {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Perform common actions in Niche faster and from anywhere.")
-                Text("Select an action to customize its keyboard shortcut.")
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: "command")
+                    .font(.system(size: 22, weight: .medium)).foregroundStyle(.tertiary)
+                    .frame(width: 44, height: 44)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06)))
+                Text("Perform common actions faster, from anywhere in Niche.")
+                    .font(Design.Font.body)
+                Text("Select an action to change its keyboard shortcut.")
+                    .font(Design.Font.body).foregroundStyle(.secondary)
             }
-            .font(.system(size: 15)).foregroundStyle(.secondary)
-            .padding(.top, 14)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 8)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 }
 
-/// Dia's shortcut field: a black 29 pt capsule-cornered bar showing the keys, 15 pt white.
-/// Click it, then press the new keys; Esc cancels, ⌫ removes the shortcut.
+/// A square icon button: the symbol centred on a soft plate that fills the whole hit area,
+/// darker on hover and tinted while its filter is on.
+struct SettingsIconTile: View {
+    let symbol: String
+    let active: Bool
+    var size: CGFloat = 30
+    @State private var hovered = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(active ? Design.accent : Color.secondary)
+            .frame(width: size, height: size)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(active ? Design.accent.opacity(0.14) : Color.primary.opacity(hovered ? 0.12 : 0.06)))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onHover { hovered = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovered)
+    }
+}
+
+/// One action in the list: name, its keys as caps, a soft plate when hovered or selected.
+private struct ShortcutListRow: View {
+    let action: KeyAction
+    let selected: Bool
+    let select: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: select) {
+            HStack(spacing: 8) {
+                Text(action.name).font(Design.Font.body).foregroundStyle(.primary).lineLimit(1)
+                Spacer(minLength: 8)
+                if let s = action.primary { KeyCaps(caps: s.caps, compact: true) }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: Design.Radius.row - 2, style: .continuous)
+                .fill(selected ? Design.accent.opacity(0.16) : (hovered ? Design.rowHover : .clear)))
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.row - 2, style: .continuous)
+                .strokeBorder(selected ? Design.accent.opacity(0.35) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// A shortcut as one cap per key.
+struct KeyCaps: View {
+    let caps: [String]
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: compact ? 3 : 4) {
+            ForEach(Array(caps.enumerated()), id: \.offset) { _, cap in
+                Text(cap)
+                    .font(.system(size: compact ? 11 : 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(compact ? .secondary : .primary)
+                    .frame(minWidth: compact ? 18 : 26, minHeight: compact ? 18 : 26)
+                    .padding(.horizontal, cap.count > 1 ? 4 : 0)
+                    .background(RoundedRectangle(cornerRadius: compact ? 4 : 6, style: .continuous)
+                        .fill(Color.primary.opacity(compact ? 0.07 : 0.1)))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(caps.joined())
+    }
+}
+
+/// The shortcut field: the keys as caps, or a prompt. Click it, then press the new keys; Esc
+/// cancels, ⌫ removes the shortcut. While it records, an accent ring pulses.
 struct ShortcutRecorder: View {
     let action: KeyAction
     @Environment(KeyBindingRegistry.self) private var bindings
     @State private var recording = false
+    @State private var pulse = false
     @State private var monitor: Any?
 
     var body: some View {
-        Button {
-            recording ? stop() : start()
-        } label: {
-            Text(recording ? "Press keys…" : (action.shortcuts.isEmpty ? "None" : action.shortcuts.map(\.display).joined(separator: "  ")))
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(recording ? Design.accent : Color.white)
+        HStack(spacing: 8) {
+            Button {
+                recording ? stop() : start()
+            } label: {
+                HStack {
+                    if recording {
+                        Circle().fill(Design.accent).frame(width: 7, height: 7).opacity(pulse ? 0.35 : 1)
+                        Text("Press the new shortcut…").font(Design.Font.body).foregroundStyle(Design.accent)
+                    } else if action.shortcuts.isEmpty {
+                        Text("Record Shortcut").font(Design.Font.body).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(action.shortcuts.enumerated()), id: \.offset) { _, s in KeyCaps(caps: s.caps) }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 40)
                 .frame(maxWidth: .infinity)
-                .frame(height: 29)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(recording ? Design.accent : Color.clear))
+                .background(RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous).fill(Design.surface))
+                .overlay(RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous)
+                    .strokeBorder(recording ? Design.accent : Design.hairline, lineWidth: recording ? 1.5 : 1))
                 .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(recording ? "Recording shortcut" : "Shortcut")
+            .accessibilityValue(action.shortcuts.map(\.display).joined(separator: ", "))
+            if !action.shortcuts.isEmpty && !recording {
+                Button { bindings.setShortcuts([], for: action.id) } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 15)).foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove shortcut")
+                .accessibilityLabel("Remove shortcut")
+            }
         }
-        .buttonStyle(.plain)
-        .help("Click, then press the new shortcut. Esc cancels, ⌫ removes it.")
         .onChange(of: action.id) { _, _ in stop() }
         .onDisappear { stop() }
     }
 
     private func start() {
         recording = true
+        withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
             handle(e)
             return nil
@@ -192,6 +298,7 @@ struct ShortcutRecorder: View {
 
     private func stop() {
         recording = false
+        pulse = false
         if let m = monitor { NSEvent.removeMonitor(m) }
         monitor = nil
     }
@@ -205,36 +312,36 @@ struct ShortcutRecorder: View {
     }
 }
 
-/// NSSearchField, so the field matches Dia's standard search field.
-struct SettingsSearchField: NSViewRepresentable {
+/// A search field at the row controls' height: glass, the query, and a clear button.
+struct SettingsSearchField: View {
     @Binding var text: String
+    var focused: FocusState<Bool>.Binding
 
-    func makeNSView(context: Context) -> NSSearchField {
-        let f = NSSearchField()
-        f.placeholderString = "Search"
-        f.delegate = context.coordinator
-        f.controlSize = .regular
-        f.font = .systemFont(ofSize: 13)
-        return f
-    }
-
-    func updateNSView(_ v: NSSearchField, context: Context) {
-        if v.stringValue != text { v.stringValue = text }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    final class Coordinator: NSObject, NSSearchFieldDelegate {
-        var text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
-        func controlTextDidChange(_ n: Notification) {
-            guard let f = n.object as? NSSearchField else { return }
-            text.wrappedValue = f.stringValue
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+            TextField("Search", text: $text)
+                .textFieldStyle(.plain)
+                .font(Design.Font.body)
+                .focused(focused)
+                .onExitCommand { focused.wrappedValue = false }
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
         }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(focused.wrappedValue ? Design.accent.opacity(0.7) : Design.hairline, lineWidth: focused.wrappedValue ? 1.5 : 1))
     }
 }
 
-/// One-line descriptions for the detail column (Dia: "Create a new tab.").
+/// One-line descriptions for the detail column ("Create a new tab.").
 enum ShortcutDescriptions {
     static func text(for a: KeyAction) -> String {
         if let t = table[a.id] { return t }
@@ -311,9 +418,9 @@ enum ShortcutDescriptions {
         "closeLittleWindows": "Close all Little Windows.",
         "settings": "Open Settings.",
         "setDefaultBrowser": "Make Niche the default browser.",
-        "importData": "Bring tabs, spaces and extensions over from Arc or Dia.",
+        "importData": "Bring tabs, spaces and extensions over from another browser.",
         "rebuildArcProfiles": "Put spaces imported from Arc back on their Arc profiles, with their sign-ins and extensions.",
-        "clearBrowsingData": "Delete history, cookies and cached files with Chrome’s dialog.",
+        "clearBrowsingData": "Delete history, cookies and cached files.",
         "languageSettings": "Choose the languages websites show their pages in, for this space’s profile.",
         "checkForUpdates": "Look for a newer version of Niche.",
     ]

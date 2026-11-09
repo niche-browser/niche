@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// General ▸ App Icon: the bundled icon, the alternates and the user's own image, a row of
-/// tiles like Arc's App Icon pane (AppIconPreferencesContentView) in Niche's card idiom.
+/// tiles in Niche's card idiom.
 struct AppIconSection: View {
     private let icons = AppIconManager.shared
     @State private var error: String?
@@ -13,7 +13,7 @@ struct AppIconSection: View {
     }
 
     @ViewBuilder private var content: some View {
-        SettingsHeader("App Icon")
+        SettingsHeader("App icon")
         SettingsCard {
             HStack(alignment: .top, spacing: 0) {
                 ForEach(AppIconManager.presets) { option in
@@ -30,7 +30,7 @@ struct AppIconSection: View {
                 }
             }
             .padding(.horizontal, Design.Space.rowInset)
-            .padding(.vertical, 8)
+            .padding(.vertical, 12)
             SettingsCardDivider()
             SettingsCardRow {
                 Text("Your own icon").font(.system(size: 13))

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// What Arc's space menu opens (the header's ••• and its right-click menu).
 extension MainWindowController {
-    /// Change Space Icon…: Arc's picker in a popover pointing up at the header's icon.
+    /// Change Space Icon…: the icon picker in a popover pointing up at the header's icon.
     func showSpaceIconPicker(space: Space, anchor: NSView) {
         let popover = NSPopover()
         popover.behavior = .transient
@@ -21,9 +21,9 @@ extension MainWindowController {
         // shrank toward its bottom-left corner, which left it 52 pt low with the arrow off-centre.
         let host = NSHostingController(rootView: picker)
         host.sizingOptions = []
-        host.preferredContentSize = NSSize(width: 272, height: 272)
+        host.preferredContentSize = SpaceIconPicker.size
         popover.contentViewController = host
-        popover.contentSize = NSSize(width: 272, height: 272)
+        popover.contentSize = SpaceIconPicker.size
         guard let content = anchor.window?.contentView else { return }
         var rect = anchor.convert((anchor as? SpaceHeaderView)?.iconRect ?? anchor.bounds, to: content)
         // Arc's arrow tip sits a point higher, at the icon box's last row.

@@ -29,11 +29,11 @@ final class TidyTabsService {
         /// What Settings ▸ Max says under its features.
         var explanation: String {
             switch self {
-            case .available: return "Max features run on Apple Intelligence on this Mac. Nothing is sent anywhere."
-            case .off: return "Max features run on Apple Intelligence, which is off on this Mac."
-            case .preparing: return "Apple Intelligence is still downloading. Max features turn on once it’s ready."
-            case .ineligible: return "Max features run on Apple Intelligence, which needs a Mac with Apple silicon."
-            case .needsNewerMacOS: return "Max features run on Apple Intelligence, which needs macOS 26 or later."
+            case .available: return "These features run on Apple Intelligence on this Mac. Nothing is sent anywhere."
+            case .off: return "These features run on Apple Intelligence, which is off on this Mac."
+            case .preparing: return "Apple Intelligence is still downloading. Intelligence features turn on once it’s ready."
+            case .ineligible: return "These features run on Apple Intelligence, which needs a Mac with Apple silicon."
+            case .needsNewerMacOS: return "These features run on Apple Intelligence, which needs macOS 26 or later."
             case .unavailable: return "Apple Intelligence isn’t available right now."
             }
         }

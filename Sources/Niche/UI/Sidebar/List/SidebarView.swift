@@ -958,6 +958,7 @@ final class SpaceCellView: NSView, ArcTooltipTarget {
     /// An Icon-tab glyph (Space.symbol) in the emoji's place.
     private let symbol = NSImageView()
     private var symbolName: String?
+    private var symbolColored = false
     /// Arc's dot, outside `emojiHolder` so its own ink sets how faint it is.
     private let dot = CALayer()
     private var icon = SpaceIcon.none
@@ -1022,7 +1023,7 @@ final class SpaceCellView: NSView, ArcTooltipTarget {
         dot.backgroundColor = (colors.isDark ? NSColor.white : NSColor.black)
             .withAlphaComponent(SpaceDock.dotAlpha(dark: colors.isDark, lit: lit)).cgColor
         emojiHolder.alphaValue = lit ? 1 : 0.45
-        symbol.contentTintColor = colors.textPrimary
+        symbol.contentTintColor = symbolColored ? nil : colors.textPrimary
         emojiHolder.layer?.filters = lit ? nil : [CIFilter(name: "CIColorControls", parameters: ["inputSaturation": 0.2])!]
         refreshFill(hovered || pressed)
     }
@@ -1030,7 +1031,9 @@ final class SpaceCellView: NSView, ArcTooltipTarget {
     private func showSymbol(_ name: String?) {
         guard symbolName != name else { return }
         symbolName = name
-        symbol.image = name.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+        let picture = name.map { SpaceIconCatalog.image($0) }
+        symbol.image = picture?.image
+        symbolColored = picture?.colored ?? false
         symbol.isHidden = name == nil
         if symbol.superview == nil { symbol.imageScaling = .scaleNone; emojiHolder.addSubview(symbol) }
     }

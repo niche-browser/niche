@@ -32,7 +32,7 @@ final class CommandTextField {
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 19, weight: .regular)
+        field.font = .systemFont(ofSize: 20, weight: .regular)
         field.placeholderString = controller.placeholder
         field.delegate = coordinator
         field.lineBreakMode = .byTruncatingTail

@@ -1,7 +1,8 @@
 import AppKit
 
 /// Applies `ChromiumDialogFrame` to every window as it appears: Chromium's buttonless dialogs
-/// get a full-size, transparent title bar so nothing covers their top edge.
+/// get a full-size, transparent title bar so nothing covers their top edge. Bubbles Chromium
+/// left off the screen are moved into their window (`ChromiumBubblePlacement`).
 @MainActor
 enum ChromiumDialogTitleBar {
     static func install() {
@@ -13,6 +14,7 @@ enum ChromiumDialogTitleBar {
     }
 
     static func fix(_ w: NSWindow) {
+        placeBubble(w)
         let mask = w.styleMask
         let window = ChromiumDialogFrame.Window(
             className: NSStringFromClass(type(of: w)), titled: mask.contains(.titled),
@@ -23,5 +25,17 @@ enum ChromiumDialogTitleBar {
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { w.standardWindowButton(type)?.isHidden = true }
+    }
+
+    private static func placeBubble(_ w: NSWindow) {
+        // Extension popups wait transparent until ExtensionActions frames them.
+        guard w.isVisible, w.alphaValue > 0, !w.styleMask.contains(.titled), !(w is NSPanel),
+              NSStringFromClass(type(of: w)) == "NativeWidgetMacNSWindow" else { return }
+        var owner = w.parent
+        while let up = owner?.parent { owner = up }
+        guard let owner = owner ?? NSApp.mainWindow,
+              let frame = ChromiumBubblePlacement.frame(for: w.frame, window: owner.frame,
+                                                        screens: NSScreen.screens.map(\.frame)) else { return }
+        w.setFrame(frame, display: true)
     }
 }

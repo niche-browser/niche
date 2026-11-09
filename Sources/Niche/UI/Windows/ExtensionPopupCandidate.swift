@@ -20,4 +20,11 @@ enum ExtensionPopupCandidate {
         !window.isVisible && !window.styleMask.contains(.titled) && !(window is NSPanel)
             && NSStringFromClass(type(of: window)) == "NativeWidgetMacNSWindow"
     }
+
+    /// Whether the anchor belongs to this window. Edges count: with the toolbar hidden the popup
+    /// hangs from the page's top edge, which is the window's own top edge, and NSRect.contains
+    /// leaves that edge out (the popup then stayed unframed, without a way to close it).
+    static func window(_ frame: NSRect, holds anchor: NSPoint) -> Bool {
+        frame.insetBy(dx: -1, dy: -1).contains(anchor)
+    }
 }

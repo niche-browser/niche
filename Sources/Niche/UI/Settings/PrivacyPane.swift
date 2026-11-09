@@ -1,12 +1,6 @@
 import SwiftUI
 
-/// Dia's Privacy pane: a "Content blocking" card of switch rows with coloured glyphs
-/// (Block ads / Block cookie banners / Block trackers) and a "Data" card. Niche ships one
-/// ad-and-tracker domain list, so it has one switch and no usage-data row; "Connections"
-/// is Chrome's "Always use secure connections". "Data" holds Arc's Clear Browsing Data (Arc keeps
-/// it in Settings ▸ Profiles and opens Chrome's Privacy and security page; Niche opens Chrome's
-/// Delete browsing data dialog itself, the step after). "Connections" also holds Chromium's
-/// secure DNS setting, which Arc and Dia leave to chrome://settings/security (#133).
+/// Content blocking, connections (HTTPS-only and secure DNS) and the profile's browsing data.
 struct PrivacyPane: View {
     @Environment(SidebarStore.self) private var store
     let actions: SettingsActions
@@ -14,61 +8,46 @@ struct PrivacyPane: View {
     var body: some View {
         @Bindable var store = store
         SettingsCardPane {
-            SettingsHeader("Content blocking")
-            SettingsCard {
+            SettingsSection(title: "Content blocking") {
                 SettingsCardRow {
-                    HStack(spacing: 5.5) {
-                        SettingsGlyph(symbol: "hand.raised.fill", color: Color(nsColor: .systemRed))
-                        Text("Block ads and trackers").font(.system(size: 13))
-                    }
+                    SettingsIconLabel(title: "Block ads and trackers",
+                                      detail: "Known ad and tracker requests are cancelled unless they come from the page’s own site.",
+                                      symbol: "hand.raised.fill", color: .red)
                 } trailing: {
-                    Toggle("Block ads and trackers", isOn: $store.settings.blockAdsAndTrackers)
-                        .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                    SettingsSwitch(title: "Block ads and trackers", isOn: $store.settings.blockAdsAndTrackers)
                 }
-                SettingsCardDivider()
-                // Arc: Settings ▸ General "Block Cookie Banners", off by default.
+                SettingsCardDivider(inset: 54)
                 SettingsCardRow {
-                    HStack(spacing: 5.5) {
-                        SettingsGlyph(symbol: "eye.slash.fill", color: Color(nsColor: .systemOrange))
-                        Text("Block cookie banners").font(.system(size: 13))
-                    }
+                    SettingsIconLabel(title: "Block cookie banners", symbol: "eye.slash.fill", color: .orange)
                 } trailing: {
-                    Toggle("Block cookie banners", isOn: $store.settings.blockCookieBanners)
-                        .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                    SettingsSwitch(title: "Block cookie banners", isOn: $store.settings.blockCookieBanners)
                 }
             }
-            SettingsFootnote("Known ad and tracker requests are cancelled unless they come from the page’s own site.")
-
-            SettingsHeader("Connections").padding(.top, 20)
-            SettingsCard {
-                SettingsCardRow {
-                    HStack(spacing: 5.5) {
-                        SettingsGlyph(symbol: "lock.fill", color: Color(nsColor: .systemGreen))
-                        Text("Always use secure connections").font(.system(size: 13))
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsHeader("Connections")
+                SettingsCard {
+                    SettingsCardRow {
+                        SettingsIconLabel(title: "Always use secure connections",
+                                          detail: "Niche warns you before opening a site that doesn’t support HTTPS.",
+                                          symbol: "lock.fill", color: .green)
+                    } trailing: {
+                        SettingsSwitch(title: "Always use secure connections", isOn: $store.settings.httpsOnly)
                     }
-                } trailing: {
-                    Toggle("Always use secure connections", isOn: $store.settings.httpsOnly)
-                        .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                    SettingsCardDivider(inset: 54)
+                    SecureDNSRows(error: $dnsError)
                 }
-                SettingsCardDivider()
-                SecureDNSRows(error: $dnsError)
+                if let line = dnsFootnote { SettingsFootnote(line) }
+                if let dnsError { SettingsFootnote(dnsError).foregroundStyle(.red) }
             }
-            SettingsFootnote("Niche warns you before opening a site that doesn’t support HTTPS.")
-            if let line = dnsFootnote { SettingsFootnote(line) }
-            if let dnsError { SettingsFootnote(dnsError).foregroundStyle(.red) }
-
-            SettingsHeader("Data").padding(.top, 20)
-            SettingsCard {
+            .padding(.bottom, Design.Space.section)
+            SettingsSection(title: "Data") {
                 SettingsCardRow {
-                    HStack(spacing: 5.5) {
-                        SettingsGlyph(symbol: "trash.fill", color: Color(nsColor: .systemGray))
-                        Text("Browsing data").font(.system(size: 13))
-                    }
+                    SettingsIconLabel(title: "Browsing data", detail: "History, cookies and cached files for the current space’s profile.",
+                                      symbol: "trash.fill", color: .gray)
                 } trailing: {
-                    Button("Clear Browsing Data…") { actions.openURL(BrowsingDataClear.pageURL) }
+                    Button("Clear…") { actions.openURL(BrowsingDataClear.pageURL) }
                 }
             }
-            SettingsFootnote("History, cookies and cached files for the current space’s profile.")
         }
     }
 
@@ -91,10 +70,7 @@ private struct SecureDNSRows: View {
 
     var body: some View {
         SettingsCardRow {
-            HStack(spacing: 5.5) {
-                SettingsGlyph(symbol: "network.badge.shield.half.filled", color: Color(nsColor: .systemBlue))
-                Text("Secure DNS").font(.system(size: 13))
-            }
+            SettingsIconLabel(title: "Secure DNS", symbol: "network.badge.shield.half.filled", color: .blue)
         } trailing: {
             Picker("Secure DNS", selection: choice) {
                 Text("Automatic").tag(SecureDNSChoice.automatic)
@@ -104,19 +80,15 @@ private struct SecureDNSRows: View {
                 Divider()
                 Text("Custom…").tag(SecureDNSChoice.custom)
             }
-            .labelsHidden()
-            .fixedSize()
+            .settingsMenu()
             .disabled(dns.prefs == nil || dns.isManaged)
             .onAppear { dns.refresh() }
             .onChange(of: liveCustom, initial: true) { if let liveCustom { customText = liveCustom } }
         }
         if showsCustom {
-            SettingsCardDivider()
+            SettingsCardDivider(inset: 54)
             SettingsCardRow {
-                TextField("Custom provider", text: $customText, prompt: Text("https://dns.example/dns-query{?dns}"))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
-                    .onSubmit(saveCustom)
+                SettingsTextField(placeholder: "https://dns.example/dns-query{?dns}", text: $customText, onSubmit: saveCustom)
                     .disabled(dns.isManaged)
             } trailing: {
                 Button("Use", action: saveCustom)

@@ -49,7 +49,7 @@ struct PerformancePane: View {
                     Text("Record performance").font(.system(size: 13))
                 }
             } trailing: {
-                Toggle("Record performance", isOn: recording).toggleStyle(.switch).labelsHidden().controlSize(.small)
+                Toggle("Record performance", isOn: recording).toggleStyle(.switch).labelsHidden()
             }
         }
         SettingsFootnote("Freezes, CPU, memory and tab timings, measured on this Mac. Nothing leaves it unless you export.")
@@ -188,7 +188,7 @@ struct PerformancePane: View {
             SettingsCardRow {
                 Text("Hide site names").font(.system(size: 13))
             } trailing: {
-                Toggle("Hide site names", isOn: hideSites).toggleStyle(.switch).labelsHidden().controlSize(.small)
+                Toggle("Hide site names", isOn: hideSites).toggleStyle(.switch).labelsHidden()
             }
         }
         SettingsFootnote("Sites become site-1, site-2… in every exported file. Off keeps host names, never full addresses.")

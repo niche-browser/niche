@@ -45,7 +45,7 @@ enum DialogTests {
         expect(abs(face.redComponent - referenceFace.redComponent) < 0.025 && abs(face.blueComponent - referenceFace.blueComponent) < 0.025,
                "the parent window's dim must not change the card's colors")
         reference.close()
-        let buttonPoint = blueButtonCenter(in: acknowledgementBitmap, view: acknowledgementView)
+        let buttonPoint = accentButtonCenter(in: acknowledgementBitmap, view: acknowledgementView)
         let hit = acknowledgementView.hitTest(buttonPoint)
         expect(hit != nil, "the sheet content receives pointer events")
         acknowledgementWindow.close()
@@ -187,17 +187,18 @@ enum DialogTests {
     }
 
     @MainActor
-    private static func blueButtonCenter(in bitmap: NSBitmapImageRep, view: NSView) -> NSPoint {
+    private static func accentButtonCenter(in bitmap: NSBitmapImageRep, view: NSView) -> NSPoint {
         var minX = bitmap.pixelsWide, maxX = 0, minY = bitmap.pixelsHigh, maxY = 0
         for y in 0..<bitmap.pixelsHigh {
             for x in 0..<bitmap.pixelsWide {
                 guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
-                      color.blueComponent > 0.8, color.redComponent < 0.4, color.greenComponent < 0.4 else { continue }
+                      color.redComponent > 0.8, color.greenComponent > 0.2, color.greenComponent < 0.5,
+                      color.blueComponent < 0.3 else { continue }
                 minX = min(minX, x); maxX = max(maxX, x)
                 minY = min(minY, y); maxY = max(maxY, y)
             }
         }
-        guard minX < maxX, minY < maxY else { fatalError("The acknowledgement button must remain bright blue above the dim") }
+        guard minX < maxX, minY < maxY else { fatalError("The acknowledgement button must remain the bright accent orange above the dim") }
         let x = CGFloat(minX + maxX) / 2 * view.bounds.width / CGFloat(bitmap.pixelsWide)
         let y = CGFloat(minY + maxY) / 2 * view.bounds.height / CGFloat(bitmap.pixelsHigh)
         return NSPoint(x: x, y: view.isFlipped ? y : view.bounds.height - y)

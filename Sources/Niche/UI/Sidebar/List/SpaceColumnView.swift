@@ -140,7 +140,11 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
     private var collapsed = false
     private var colors = SidebarColors()
     private var syncQueued = false
-    /// The column lays out again when Arc's single-space mode hides or shows the header.
+    private var newSymbol: String?
+    private var symbolColored = false
+    private var shownSymbol: String?
+    private var didFirstSync = false
+    /// The column lays out again when single-space mode hides or shows the header.
     var onHiddenChange: (() -> Void)?
 
     init(spaceID: UUID, store: SidebarStore, ui: SidebarUIState, actions: SidebarActions) {
@@ -196,7 +200,10 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
         withObservationTracking {
             guard let space = store.space(spaceID) else { return }
             emoji.stringValue = space.emoji
-            symbol.image = space.symbol.flatMap { SidebarSymbols.image($0, size: 13, weight: .medium) }
+            let picture = space.symbol.map { SpaceIconCatalog.image($0, size: 13) }
+            symbol.image = picture?.image
+            symbolColored = picture?.colored ?? false
+            newSymbol = space.symbol
             title.stringValue = space.title
             blank = space.standaloneWindowID != nil
             colors = SidebarColors(space.theme.palette)
@@ -210,6 +217,12 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
             }
         }
         if collapsed != wasCollapsed { turnChevron() }
+        // A freshly picked icon greets you with a bounce; the first sync only draws it.
+        if newSymbol != shownSymbol {
+            if shownSymbol != nil || didFirstSync, newSymbol != nil { symbol.addSymbolEffect(.bounce, options: .nonRepeating) }
+            shownSymbol = newSymbol
+        }
+        didFirstSync = true
         refresh()
         if hide != isHidden {
             isHidden = hide
@@ -219,8 +232,8 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
 
     private func refresh() {
         let lit = hovering || menuOpen || renameField != nil
-        // Arc's dark header title is dimmer than its other secondary text (white 0.45, 1 Nov).
-        title.textColor = colors.isDark ? NSColor.white.withAlphaComponent(0.45) : colors.textSecondary
+        // The space's name leads its column: near the primary ink, a step under the selected tab.
+        title.textColor = colors.isDark ? NSColor.white.withAlphaComponent(0.8) : colors.textPrimary.withAlphaComponent(0.85)
         done.textColor = colors.textTertiary
         chevron.contentTintColor = colors.textSecondary
         more.tint = colors.textSecondary
@@ -229,7 +242,8 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
         chevron.alphaValue = showsChevron ? 1 : 0
         emoji.alphaValue = showsChevron ? 0 : 1
         symbol.alphaValue = showsChevron ? 0 : 1
-        symbol.contentTintColor = colors.textSecondary
+        // A vibe keeps its own colours; other symbols take the space's ink.
+        symbol.contentTintColor = symbolColored ? nil : colors.textSecondary
         more.colors = colors
         more.isHidden = !lit || renameField != nil || blank
         done.isHidden = renameField == nil
@@ -931,15 +945,12 @@ final class FavoritesDropStrip: FavoritesDropTarget {
     }
 }
 
-/// Arc's empty Favorites (Arc 1.171, live, 3 Nov, #157): a card where the tiles go, a star badge,
-/// "Drag to add Favorites" and a line on what they are, in the space's own ink. It takes a dragged
-/// tab, and its × (sidebarFavoritesEmptyStateDismissButton) closes it for good. Measured at 2x:
-/// the fill sits where the first tile would (8 pt in, 12 pt corners) and is 93.5 pt tall; a 1 pt
-/// dashed line (5.5 on, 4.5 off) runs just outside it (in Niche, on its edge: see layout); the header goes 4 pt further down than
-/// under a row of tiles. No hover state; a tab dragged over it makes the line solid, lightens the
-/// fill and dims the rest to half.
+/// The empty Favorites hint: a compact soft card where the tiles go, a star badge, "Drag to add
+/// Favorites" and one line on what they are, in the space's own ink. It takes a dragged tab, and
+/// its × closes it for good. No border at rest; a tab dragged over it draws a solid line, lightens
+/// the fill and dims the text.
 final class FavoritesEmptyCard: FavoritesDropTarget {
-    static let fillHeight: CGFloat = 93.5
+    static let fillHeight: CGFloat = 58
     /// Where the header is placed from, like the tiles' bottom.
     static let height: CGFloat = fillHeight + 4
     var onDismiss: () -> Void = {}
@@ -966,9 +977,11 @@ final class FavoritesEmptyCard: FavoritesDropTarget {
         badge.wantsLayer = true
         badge.shadow = NSShadow()
         title.stringValue = "Drag to add Favorites"
-        title.alignment = .center
+        title.alignment = .left
+        title.lineBreakMode = .byTruncatingTail
         subtitle.font = .systemFont(ofSize: 11)
-        subtitle.maximumNumberOfLines = 2
+        subtitle.maximumNumberOfLines = 1
+        subtitle.lineBreakMode = .byTruncatingTail
         close.onPress = { [weak self] in self?.onDismiss() }
         for v in [badge, title, subtitle, close] { content.addSubview(v) }
         addSubview(content)
@@ -983,15 +996,15 @@ final class FavoritesEmptyCard: FavoritesDropTarget {
     override func refresh() {
         guard let p = palette else { return }
         let dark = p.isDark
-        // Arc's badge is the darkest ink on a light theme (the toolbar's shade) and the brightest on
-        // a dark one; the star inside takes the other end, with a glow of its colour on dark themes.
+        // The badge is the darkest ink on a light theme (the toolbar's shade) and the brightest on a
+        // dark one; the star inside takes the other end, with a glow of its colour on dark themes.
         let ink = NSColor(dark ? p.textPrimary : p.toolbarFill)
         let star = NSColor(dark ? p.toolbarFill : p.folderFill)
         let text = dark ? NSColor.white.withAlphaComponent(0.85) : NSColor(p.textPrimary)
-        let lighter = targeted ? 0.32 : 0.14
-        fill.fillColor = (dark ? NSColor.black.withAlphaComponent(targeted ? 0 : 0.135) : NSColor.white.withAlphaComponent(lighter)).cgColor
-        border.strokeColor = ink.withAlphaComponent(0.3).cgColor
-        border.lineDashPattern = targeted ? nil : [5.5, 4.5]
+        let lighter = targeted ? 0.32 : 0.16
+        fill.fillColor = (dark ? NSColor.white.withAlphaComponent(targeted ? 0.1 : 0.045) : NSColor.white.withAlphaComponent(lighter)).cgColor
+        border.strokeColor = targeted ? ink.withAlphaComponent(0.45).cgColor : NSColor.clear.cgColor
+        border.lineDashPattern = nil
         content.alphaValue = targeted ? 0.5 : 1
         badge.image = NSImage(systemSymbolName: "star.circle.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
@@ -1000,10 +1013,9 @@ final class FavoritesEmptyCard: FavoritesDropTarget {
         badge.shadow?.shadowBlurRadius = 6
         title.textColor = text
         let para = NSMutableParagraphStyle()
-        para.alignment = .center
-        para.minimumLineHeight = 15
-        para.maximumLineHeight = 15
-        subtitle.attributedStringValue = NSAttributedString(string: "Favorites keep your most used sites and apps close",
+        para.alignment = .left
+        para.lineBreakMode = .byTruncatingTail
+        subtitle.attributedStringValue = NSAttributedString(string: "Top sites, one click away",
                                                             attributes: [.font: NSFont.systemFont(ofSize: 11), .paragraphStyle: para,
                                                                          .foregroundColor: text.withAlphaComponent(text.alphaComponent * 0.7)])
         close.color = text.withAlphaComponent(text.alphaComponent * 0.7)
@@ -1017,23 +1029,24 @@ final class FavoritesEmptyCard: FavoritesDropTarget {
         fill.frame = bounds
         border.frame = bounds
         fill.path = CGPath(roundedRect: card, cornerWidth: 12, cornerHeight: 12, transform: nil)
-        // Arc's line runs just outside the fill, but the card sits at the top of the space pager,
-        // which clips its pages for swipes, so a line outside the fill loses its top edge. It runs
-        // on the fill's outer point instead, 1 pt in from Arc's.
+        // The card sits at the top of the space pager, which clips its pages for swipes, so the
+        // drop line runs on the fill's edge rather than outside it.
         border.path = CGPath(roundedRect: card.insetBy(dx: 0.5, dy: 0.5), cornerWidth: 11.5, cornerHeight: 11.5, transform: nil)
         content.frame = card
-        // Arc's centres and frames, from the fill's top-left: badge centre 19.75 pt down, title 33.5–49.5,
-        // subtitle 53–83 (two 15 pt lines, 150 pt wide), × centred 15 pt in from the top-right corner.
+        // Badge on the left, title over one line of detail beside it, × on the right, all centred
+        // on the card's height.
+        let h = Self.fillHeight
         let b = badge.image?.size ?? NSSize(width: 16, height: 16)
-        badge.frame = NSRect(x: ((w - b.width) / 2).rounded(.down), y: (19.75 - b.height / 2).rounded(), width: b.width, height: b.height)
-        title.frame = NSRect(x: 10, y: 33.5, width: max(0, w - 20), height: 16)
-        let sw = min(150, max(0, w - 20))
-        subtitle.frame = NSRect(x: ((w - sw) / 2).rounded(), y: 53, width: sw, height: 30)
-        close.frame = NSRect(x: w - 15 - 7, y: 15 - 7, width: 14, height: 14)
+        badge.frame = NSRect(x: 14, y: ((h - b.height) / 2).rounded(), width: b.width, height: b.height)
+        let textX = badge.frame.maxX + 10
+        let textW = max(0, w - textX - 30)
+        title.frame = NSRect(x: textX, y: (h / 2 - 16).rounded(), width: textW, height: 16)
+        subtitle.frame = NSRect(x: textX, y: (h / 2 + 1).rounded(), width: textW, height: 15)
+        close.frame = NSRect(x: w - 14 - 10, y: ((h - 14) / 2).rounded(), width: 14, height: 14)
     }
 }
 
-/// The card's ×: a plain glyph in the subtitle's tone, no hover fill (Arc).
+/// The card's ×: a plain glyph in the subtitle's tone, no hover fill.
 final class FavoritesEmptyCardClose: NSView {
     var onPress: () -> Void = {}
     var color: NSColor = .labelColor { didSet { glyph.contentTintColor = color } }

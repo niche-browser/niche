@@ -184,8 +184,8 @@ private struct AppDialogView: View {
                     .focused($inputFocused)
                     .padding(.horizontal, 12)
                     .frame(height: 37)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: "#383E4F")))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(hex: "#737884"), lineWidth: 1))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: "#2B2D33")))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(hex: "#4A4D55"), lineWidth: 1))
                     .padding(.top, 18)
             }
             if let title = dialog.suppressionTitle {

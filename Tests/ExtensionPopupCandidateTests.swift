@@ -58,6 +58,11 @@ enum ExtensionPopupCandidateTests {
             window.parent?.removeChildWindow(window)
             window.close()
         }
+        // With the toolbar hidden the popup hangs from the window's own top edge.
+        let window = NSRect(x: 0, y: 39, width: 2056, height: 1216)
+        check(ExtensionPopupCandidate.window(window, holds: NSPoint(x: 2048, y: window.maxY)), "the window's top edge holds an anchor")
+        check(ExtensionPopupCandidate.window(window, holds: NSPoint(x: 600, y: 700)), "a point inside holds an anchor")
+        check(!ExtensionPopupCandidate.window(window, holds: NSPoint(x: 2100, y: 700)), "a point beside the window does not")
         print("Extension popup native ownership: \(checks) checks passed")
     }
 }

@@ -107,7 +107,7 @@ final class ExtensionActions {
         let popup = NSApp.windows.first(where: { candidate in
             guard !before.visible.contains(ObjectIdentifier(candidate)),
                   let owner = sourceHost?.parent ?? candidate.parent?.parent,
-                  owner.frame.contains(anchor) else { return false }
+                  ExtensionPopupCandidate.window(owner.frame, holds: anchor) else { return false }
             return ExtensionPopupCandidate.matches(candidate, owner: owner, sourceHost: sourceHost,
                                                    isPageHost: NicheCEFRuntime.isPageWindow)
         })

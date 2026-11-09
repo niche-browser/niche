@@ -146,6 +146,7 @@ private final class SpaceManagerCard: NSView {
     private let background: PaletteBackgroundView
     private let emoji = NSTextField.sidebarLabel(size: 14.5)
     private let symbol = NSImageView()
+    private var symbolColored = false
     private let title = NSTextField.sidebarLabel(size: 13, weight: .semibold)
     private let list: SpaceListView
     private lazy var brush = SidebarGlyphButton(symbol: "paintbrush.pointed.fill", size: 26, iconSize: 13, help: "Edit Theme Color",
@@ -191,7 +192,9 @@ private final class SpaceManagerCard: NSView {
         withObservationTracking {
             guard let s = store.space(spaceID) else { return }
             emoji.stringValue = s.emoji
-            symbol.image = s.symbol.flatMap { SidebarSymbols.image($0, size: 13, weight: .medium) }
+            let picture = s.symbol.map { SpaceIconCatalog.image($0, size: 13) }
+            symbol.image = picture?.image
+            symbolColored = picture?.colored ?? false
             title.stringValue = s.title
             background.palette = s.theme.palette
             colors = SidebarColors(s.theme.palette)
@@ -199,7 +202,7 @@ private final class SpaceManagerCard: NSView {
             Task { @MainActor in self?.sync() }
         }
         title.textColor = colors.textSecondary
-        symbol.contentTintColor = colors.textSecondary
+        symbol.contentTintColor = symbolColored ? nil : colors.textSecondary
         for b in [brush, more] { b.colors = colors }
         move.tint = colors.isDark ? NSColor.white.withAlphaComponent(0.55) : colors.glyph
         needsLayout = true

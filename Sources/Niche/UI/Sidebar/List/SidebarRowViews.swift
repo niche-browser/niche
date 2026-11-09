@@ -2254,7 +2254,8 @@ final class DividerRowView: SidebarRowView {
         line.layer?.backgroundColor = colors.separator.cgColor
         squiggle.strokeColor = colors.separator.cgColor
         // The squiggle stands in for the line while Tidy works.
-        line.alphaValue = hasToday && !squiggle.isShowing ? 1 : 0
+        // A soft rule: it separates, it doesn't cut across the column.
+        line.alphaValue = hasToday && !squiggle.isShowing ? 0.55 : 0
         let show = (isHovered || tidy == .running) && hasToday
         if show, clear == nil, let list {
             let b = ClearButton(colors: colors) { [weak list] in
