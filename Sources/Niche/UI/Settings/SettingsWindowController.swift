@@ -14,16 +14,18 @@ struct SettingsActions {
 
 /// The Settings panes, in sidebar order. Intelligence holds the features that run on the Mac's
 /// own Apple Intelligence model (the raw value stays `max` so saved links keep working).
+/// Performance is reached from Advanced ▸ Troubleshooting, not the sidebar.
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, tabs, max, privacy, profiles, extensions, shortcuts, performance, advanced
+    case general, appearance, tabs, shortcuts, privacy, profiles, extensions, max, advanced, performance
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: return "General"
-        case .tabs: return "Tabs"
+        case .appearance: return "Appearance"
+        case .tabs: return "Tabs & Spaces"
         case .max: return "Intelligence"
-        case .privacy: return "Privacy"
+        case .privacy: return "Privacy & Security"
         case .profiles: return "Profiles"
         case .extensions: return "Extensions"
         case .shortcuts: return "Shortcuts"
@@ -33,13 +35,17 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     }
 
     /// The sidebar's groups: the browser itself, what it does with pages, and the machinery.
-    var group: Group {
+    var group: Group? {
         switch self {
-        case .general, .tabs, .shortcuts: return .browser
+        case .general, .appearance, .tabs, .shortcuts: return .browser
         case .privacy, .profiles, .extensions: return .browsing
-        case .max, .performance, .advanced: return .system
+        case .max, .advanced: return .system
+        case .performance: return nil
         }
     }
+
+    /// The pane a page outside the sidebar belongs under, highlighted while it shows.
+    var parent: SettingsPane? { self == .performance ? .advanced : nil }
 
     enum Group: String, CaseIterable {
         case browser = "Browser", browsing = "Browsing", system = "System"
@@ -49,15 +55,16 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "gearshape"
+        case .appearance: return "paintbrush"
         case .tabs: return "square.on.square"
         // macOS 15.1 added Apple's mark; before it, sparkles.
         case .max: return NSImage(systemSymbolName: "apple.intelligence", accessibilityDescription: nil) != nil ? "apple.intelligence" : "sparkles"
         case .privacy: return "hand.raised"
-        case .profiles: return "person"
+        case .profiles: return "person.crop.circle"
         case .extensions: return "puzzlepiece.extension"
-        case .shortcuts: return "keyboard"
+        case .shortcuts: return "command"
         case .performance: return "gauge.with.dots.needle.67percent"
-        case .advanced: return "gearshape.2"
+        case .advanced: return "slider.horizontal.3"
         }
     }
 }
@@ -85,11 +92,16 @@ final class SettingsWindowController: NSWindowController, NSToolbarDelegate {
     private let nav = SettingsNavigation()
 
     func show(_ pane: SettingsPane) { nav.show(pane) }
-    func didShow() { nav.didShow() }
+    func didShow() {
+        nav.didShow()
+        // No field starts with the keyboard: a search field holding it looked stuck in focus.
+        DispatchQueue.main.async { [weak self] in self?.window?.makeFirstResponder(nil) }
+    }
 
     init(store: SidebarStore, bindings: KeyBindingRegistry, actions: SettingsActions) {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: SettingsMetrics.windowSize),
-                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
         super.init(window: window)
         window.title = "Settings"
         window.titleVisibility = .hidden
@@ -99,14 +111,20 @@ final class SettingsWindowController: NSWindowController, NSToolbarDelegate {
         window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
 
+        window.contentMinSize = SettingsMetrics.minimumSize
+
         let split = NSSplitViewController()
-        let sidebar = NSSplitViewItem(sidebarWithViewController: NSHostingController(rootView: SettingsSidebar(nav: nav)))
+        let sidebarHost = NSHostingController(rootView: SettingsSidebar(nav: nav))
+        // The window keeps its size: a pane's content (the long shortcut list) never resizes it.
+        sidebarHost.sizingOptions = []
+        let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarHost)
         // macOS 26 insets the sidebar panel 8 pt.
         sidebar.minimumThickness = SettingsMetrics.sidebarWidth - 8
         sidebar.maximumThickness = SettingsMetrics.sidebarWidth - 8
         sidebar.canCollapse = false
         let content = NSHostingController(rootView: SettingsContent(nav: nav, actions: actions)
             .environment(store).environment(bindings))
+        content.sizingOptions = []
         let contentItem = NSSplitViewItem(viewController: content)
         split.addSplitViewItem(sidebar)
         split.addSplitViewItem(contentItem)
@@ -119,9 +137,14 @@ final class SettingsWindowController: NSWindowController, NSToolbarDelegate {
         toolbar.allowsUserCustomization = false
         toolbar.showsBaselineSeparator = false
         window.toolbar = toolbar
-        // Size last: the toolbar and full-size content change how the frame is derived.
-        window.setFrame(NSRect(origin: .zero, size: SettingsMetrics.windowSize), display: false)
-        window.center()
+        // Size last: the toolbar and full-size content change how the frame is derived. A size
+        // the user chose comes back from the autosaved frame.
+        if !window.setFrameUsingName(Self.frameName) {
+            window.setFrame(NSRect(origin: .zero, size: SettingsMetrics.windowSize), display: false)
+            window.center()
+        }
+        // Saved only from here on: setting the content above shrinks the window to its minimum.
+        window.setFrameAutosaveName(Self.frameName)
         // On screen: shown and not entirely covered (the window needn't be key).
         for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.willCloseNotification] {
             NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [nav] note in
@@ -136,6 +159,8 @@ final class SettingsWindowController: NSWindowController, NSToolbarDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    private static let frameName = "NicheSettingsWindow"
+
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.sidebarTrackingSeparator]
     }
@@ -149,14 +174,32 @@ final class SettingsWindowController: NSWindowController, NSToolbarDelegate {
     }
 }
 
-/// The title over the pane, aligned with the cards below it.
+/// The title over the pane, aligned with the cards below it. A page reached from another pane
+/// (Performance, from Advanced) gets a way back.
 struct SettingsToolbarRow: View {
     let nav: SettingsNavigation
     var body: some View {
-        Text(nav.pane.title).font(Design.Font.paneTitle)
-            .padding(.leading, Design.Space.pane + Design.Space.rowInset)
-            .padding(.top, 10)
-            .frame(maxWidth: .infinity, minHeight: SettingsMetrics.toolbarHeight, alignment: .leading)
+        HStack(spacing: 8) {
+            if let parent = nav.pane.parent {
+                Button { nav.show(parent) } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Back to \(parent.title)")
+                .accessibilityLabel("Back to \(parent.title)")
+            }
+            Text(nav.pane.title).font(Design.Font.paneTitle)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, nav.pane.parent == nil ? Design.Space.rowInset : 0)
+        .frame(maxWidth: SettingsMetrics.contentWidth, alignment: .leading)
+        .padding(.horizontal, Design.Space.pane)
+        .padding(.top, 14)
+        .frame(maxWidth: .infinity, minHeight: SettingsMetrics.toolbarHeight)
     }
 }
 
@@ -166,13 +209,13 @@ struct SettingsSidebar: View {
     let nav: SettingsNavigation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             ForEach(SettingsPane.Group.allCases, id: \.self) { group in
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(group.rawValue)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
-                        .padding(.leading, 12)
+                        .padding(.leading, 10)
                         .padding(.bottom, 4)
                     ForEach(group.panes) { row($0) }
                 }
@@ -180,12 +223,12 @@ struct SettingsSidebar: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.top, 48)
+        .padding(.top, 52)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private func row(_ p: SettingsPane) -> some View {
-        SettingsSidebarRow(pane: p, selected: nav.pane == p) { nav.show(p) }
+        SettingsSidebarRow(pane: p, selected: nav.pane == p || nav.pane.parent == p) { nav.show(p) }
     }
 }
 
@@ -197,18 +240,19 @@ private struct SettingsSidebarRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: 10) {
                 Image(systemName: pane.symbol)
-                    .font(.system(size: 13, weight: .regular))
-                    .frame(width: 18, height: 18)
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 20, height: 20)
                     .foregroundStyle(selected ? Design.accent : Color.secondary)
                 Text(pane.title)
-                    .font(.system(size: 13, weight: selected ? .medium : .regular))
+                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.leading, 10)
-            .frame(height: 30)
+            .frame(height: 32)
             .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
                 .fill(selected ? Design.rowSelected : (hovered ? Design.rowHover : .clear)))
             .contentShape(Rectangle())
@@ -228,7 +272,8 @@ struct SettingsContent: View {
             SettingsToolbarRow(nav: nav)
             Group {
                 switch nav.pane {
-                case .general: GeneralPane()
+                case .general: GeneralPane(actions: actions)
+                case .appearance: AppearancePane()
                 case .tabs: TabsPane()
                 case .max: MaxPane()
                 case .privacy: PrivacyPane(actions: actions)
@@ -236,12 +281,13 @@ struct SettingsContent: View {
                 case .extensions: ExtensionsPane(actions: actions)
                 case .shortcuts: ShortcutsPane()
                 case .performance: PerformancePane(nav: nav, actions: actions)
-                case .advanced: AdvancedPane(actions: actions)
+                case .advanced: AdvancedPane(nav: nav, actions: actions)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .ignoresSafeArea(.container, edges: .top)
+        .buttonStyle(.settings)
         .tint(Design.accent)
     }
 }

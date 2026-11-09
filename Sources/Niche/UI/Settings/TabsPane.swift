@@ -13,40 +13,24 @@ struct TabsPane: View {
                 SettingsCardDivider()
                 SettingsToggleRow(title: "Show the New Tab button above tabs", isOn: $store.settings.newTabButtonAtTop)
                 SettingsCardDivider()
-                SettingsToggleRow(title: "Haptic feedback when reordering", isOn: $store.settings.hapticFeedbackOnReorder)
-                SettingsCardDivider()
                 SettingsToggleRow(title: "Preview a folder’s tabs on hover", isOn: $store.settings.folderPreviews)
                 SettingsCardDivider()
-                // Arc: Settings ▸ General ▸ Previews (Gmail's unread mail on its favorite).
                 SettingsToggleRow(title: "Preview unread Gmail on its favorite", isOn: $store.settings.favoritePreviews)
                 SettingsCardDivider()
                 SettingsToggleRow(title: "Picture in Picture when you leave a video", isOn: $store.settings.autoPictureInPicture)
             }
-            SettingsSection(title: "Window") {
-                SettingsToggleRow(title: "Show the toolbar above the page", isOn: $store.settings.showToolbar)
-                SettingsCardDivider()
-                SettingsToggleRow(title: "Pages fill the window edge to edge", isOn: $store.settings.edgeToEdgeContent)
-            }
-            // Arc's single-space mode ("Hide Space Header" on the space's menu), for people who
-            // don't use spaces.
             SettingsSection(title: "Spaces") {
-                SettingsToggleRow(title: "Show the space header with one space",
-                                  detail: "Off hides the space’s name and icon while you have a single space.",
-                                  isOn: $store.settings.showSpaceHeaderOnSingleSpace)
-                SettingsCardDivider()
-                // #154: Arc's favorites, one set per profile.
+                // #154: one set of Favorites per profile.
                 SettingsToggleRow(title: "Share Favorites across a profile’s spaces",
                                   detail: "Turning it on combines their Favorites; off gives each space its own copy.",
                                   isOn: Binding(get: { store.settings.sharedFavorites }, set: { store.setFavoritesShared($0) }))
             }
-            // Arc's Links pane: the Little Arc switch and Air Traffic Control.
             SettingsSection(title: "Links") {
                 SettingsToggleRow(title: "Links from other apps open in a Little Window", isOn: $store.settings.openExternalLinksInLittleWindow)
                 SettingsCardDivider()
-                // Arc's "Open Little Arc when I press ⌥⌘N" (#195): New Little Window's shortcut from any app.
+                // #195: New Little Window's shortcut from any app.
                 SettingsToggleRow(title: "\(littleWindowKey) opens a Little Window from any app", isOn: $store.settings.littleWindowShortcutEverywhere)
                 SettingsCardDivider()
-                // Arc: "Archive Little Arcs after:" 1 hour, 6 hours (default), 12 hours.
                 SettingsPickerRow(title: "Archive Little Windows after", selection: $store.settings.littleWindowArchiveAfter) {
                     ForEach(LittleWindowArchive.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
@@ -58,7 +42,7 @@ struct TabsPane: View {
                 SettingsCardDivider()
                 SettingsToggleRow(title: "Peek links clicked with Shift held", isOn: $store.settings.peekOnShiftClick)
                 SettingsCardDivider()
-                // GitHub #183, Chrome's way and not Arc's: the page stays in front.
+                // GitHub #183: the page stays in front.
                 SettingsToggleRow(title: "Open new tabs in the background",
                                   detail: "The page you’re reading stays in front. ⇧⌘-click still switches.",
                                   isOn: $store.settings.openLinksInBackground)
@@ -66,7 +50,7 @@ struct TabsPane: View {
                 SettingsCardRow {
                     SettingsLabel(title: "Air Traffic Control", detail: "Choose which space links from other apps open in.")
                 } trailing: {
-                    if !routesSummary.isEmpty { Text(routesSummary).foregroundStyle(.secondary) }
+                    if !routesSummary.isEmpty { Text(routesSummary).font(Design.Font.detail).foregroundStyle(.secondary) }
                     Button("Edit Routes…") { showsAirTrafficControl = true }
                 }
             }
@@ -78,7 +62,7 @@ struct TabsPane: View {
                 }
                 .disabled(!store.settings.autoArchiveEnabled)
                 SettingsCardDivider()
-                // Tab sleeping (GitHub #153): Arc's 4 hours and nothing more unless you ask.
+                // Tab sleeping (GitHub #153).
                 SettingsToggleRow(title: "Put idle tabs to sleep", isOn: $store.settings.tabSleepTimerEnabled)
                 SettingsCardDivider()
                 SettingsPickerRow(title: "Sleep after", selection: $store.settings.tabSleepAfter) {

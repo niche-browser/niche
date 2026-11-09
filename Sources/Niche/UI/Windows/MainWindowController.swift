@@ -2669,7 +2669,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
             ?? shell.convert(shell.contentContainer.frame, to: nil)
         let onScreen = window.convertToScreen(card)
         let bar = shell.focusedCard?.toolbarHeight ?? NicheMetrics.toolbarHeight
-        return (onScreen.maxY - (shell.panesShowBars ? bar : 0), onScreen.maxX)
+        // Without bars, a little below the page's top edge, so a popup hangs inside the window.
+        return (onScreen.maxY - (shell.panesShowBars ? bar : 8), onScreen.maxX)
     }
 
     /// Where a popup from a URL-bar button hangs: under the toolbar, or, with the toolbar
@@ -3284,6 +3285,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         // The panel keeps no appearance of its own, so it follows macOS like the menus, sheets and
         // popovers (#171): Arc's bar is dark over a light space while the Mac runs dark (#187).
         positionCommandPanel()
+        showCommandDim(over: window)
         if commandPanel.parent == nil { window.addChildWindow(commandPanel, ordered: .above) }
         commandBarOpenedAt = Date()
         if !HitchMonitor.background { NSApp.activate(ignoringOtherApps: true) }
@@ -3318,9 +3320,65 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         // shorter list while typing doesn't move what you type into.
         let top = wf.midY + CommandBarView.height(forRows: SuggestionEngine.maxRows) / 2 + 40
         commandPanel.setFrame(NSRect(x: wf.midX - w / 2, y: top - h, width: w, height: h), display: true)
+        if commandDim.parent != nil, commandDim.frame != wf { commandDim.setFrame(wf, display: false) }
+    }
+
+    /// A soft shade over the window while the command bar is open, so the bar is the one thing
+    /// in focus. It lets clicks through: a click on the page closes the bar as before.
+    private lazy var commandDim: NSWindow = {
+        let w = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: true)
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.hasShadow = false
+        w.ignoresMouseEvents = true
+        w.isReleasedWhenClosed = false
+        w.animationBehavior = .none
+        w.collectionBehavior = [.fullScreenAuxiliary]
+        let shade = NSView()
+        shade.wantsLayer = true
+        shade.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.2).cgColor
+        shade.layer?.cornerRadius = Self.windowCornerRadius
+        shade.layer?.cornerCurve = .continuous
+        w.contentView = shade
+        return w
+    }()
+
+    /// macOS 26's corner for a window without a toolbar, which the shade follows.
+    private static let windowCornerRadius: CGFloat = 16
+
+    private func showCommandDim(over window: NSWindow) {
+        let dim = commandDim
+        dim.setFrame(window.frame, display: false)
+        // Full screen has square corners.
+        dim.contentView?.layer?.cornerRadius = window.styleMask.contains(.fullScreen) ? 0 : Self.windowCornerRadius
+        if dim.parent == nil {
+            dim.alphaValue = 0
+            window.addChildWindow(dim, ordered: .above)
+        }
+        dim.orderFront(nil)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.16
+            dim.animator().alphaValue = 1
+        }
+    }
+
+    private func hideCommandDim() {
+        let dim = commandDim
+        guard dim.parent != nil else { return }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.12
+            dim.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.commandBar.isOpen else { return }
+                dim.parent?.removeChildWindow(dim)
+                dim.orderOut(nil)
+            }
+        })
     }
 
     private func hideCommandPanel() {
+        hideCommandDim()
         sidebarUI.newTabPlaceholderActive = false
         if commandPanel.parent != nil { window?.removeChildWindow(commandPanel) }
         let panel = commandPanel!
@@ -3552,7 +3610,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
 
     func showSpaceEditor(space: Space?) {
         guard let window else { return }
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 651, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: SpaceEditorView.width, height: 620), styleMask: [.titled], backing: .buffered, defer: false)
         // Arc's New Space starts on the profile of the space it was opened from.
         let initialProfile = space == nil && !isStandalone ? SpaceProfiles.forNewSpace(from: store.focusedSpace, profiles: store.profiles) : nil
         let store = self.store

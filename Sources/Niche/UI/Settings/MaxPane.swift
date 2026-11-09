@@ -1,10 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Arc's Max pane (Arc 1.171, Settings ▸ Max): one card, a row per feature with a picture in a
-/// white frame, its name, what it does and a switch, and a line under the card about where the
-/// data goes. Niche's features run on the Mac's own Apple Intelligence model, so that line says
-/// nothing leaves the Mac, or, while Apple Intelligence can't run, why and how to turn it on.
+/// Intelligence: one card, a row per feature with a picture, its name, what it does and a switch,
+/// and a line under the card about where the data goes. The features run on the Mac's own Apple
+/// Intelligence model, so that line says nothing leaves the Mac, or, while Apple Intelligence
+/// can't run, why and how to turn it on.
 struct MaxPane: View {
     @Environment(SidebarStore.self) private var store
     private var service: TidyTabsService { TidyTabsService.shared }
@@ -13,27 +13,28 @@ struct MaxPane: View {
         @Bindable var store = store
         let available = service.status == .available
         SettingsCardPane {
-            MaxCard {
+            SettingsHeader("Features")
+            SettingsCard {
                 MaxFeatureRow(title: "Tidy Tabs", isOn: $store.settings.tidyTabs, enabled: available) {
                     TidyTabsPicture()
                 } description: {
-                    Text("Press the \(Image(nsImage: BroomGlyph.image).renderingMode(.template)) icon to let your Sidebar organize itself whenever you have six or more Today Tabs.")
+                    Text("Press \(Image(nsImage: BroomGlyph.image).renderingMode(.template)) to let the sidebar sort itself once you have six or more tabs today.")
                 }
-                SettingsCardDivider()
+                SettingsCardDivider(inset: 124)
                 MaxFeatureRow(title: "Tidy Tab Titles", isOn: $store.settings.tidyTabTitles, enabled: available) {
                     TidyTabTitlesPicture()
                 } description: {
-                    Text("Have your tabs automatically renamed with tidier, shorter titles when you Pin them.")
+                    Text("Pinned tabs get shorter, tidier titles.")
                 }
-                SettingsCardDivider()
+                SettingsCardDivider(inset: 124)
                 MaxFeatureRow(title: "Tidy Downloads", isOn: $store.settings.tidyDownloads, enabled: available) {
                     TidyDownloadsPicture()
                 } description: {
-                    Text("Keep your many files more organized with smartly renamed downloads — and make them a little easier to find later.")
+                    Text("Downloads get clear names, so they’re easier to find later.")
                 }
             }
             MaxFooter(status: service.status) { service.openSystemSettings() }
-                .padding(.top, 14)
+                .padding(.top, 10)
         }
         // Coming back from System Settings brings Niche to the front, which reads the status again;
         // a model still downloading gets there without that.
@@ -46,22 +47,7 @@ struct MaxPane: View {
     }
 }
 
-/// The card around Max's rows: a hairline border on a lighter fill, rows split by hairlines.
-struct MaxCard<Content: View>: View {
-    @ViewBuilder let content: Content
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        VStack(spacing: 0) { content }
-            .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous)
-                .fill(scheme == .dark ? Color.white.opacity(0.04) : Color.white.opacity(0.6)))
-            .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
-    }
-}
-
-/// One Max feature: picture, name over description, switch. Off while Apple Intelligence can't run.
+/// One feature: picture, name over description, switch. Off while Apple Intelligence can't run.
 struct MaxFeatureRow<Picture: View, Description: View>: View {
     let title: String
     @Binding var isOn: Bool
@@ -72,58 +58,55 @@ struct MaxFeatureRow<Picture: View, Description: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             MaxPictureFrame { picture }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: 14))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(Design.Font.body)
                 description
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(Design.Font.detail).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 8)
-            Toggle(title, isOn: Binding(get: { isOn && enabled }, set: { isOn = $0 }))
-                .toggleStyle(.switch).labelsHidden().controlSize(.small)
+            Spacer(minLength: 12)
+            SettingsSwitch(title: title, isOn: Binding(get: { isOn && enabled }, set: { isOn = $0 }))
                 .disabled(!enabled)
         }
-        .padding(10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
     }
 }
 
-/// Arc frames each picture in white: 3 pt round a tile with 6 pt corners.
+/// Each picture on a rounded tile with a hairline edge.
 private struct MaxPictureFrame<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
         content
             .frame(width: 88, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .padding(3)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Design.hairline))
             .accessibilityHidden(true)
     }
 }
 
-/// Under the card, where Arc says Max sends data to its AI partners: what runs where, or why it
-/// can't and the way to System Settings ▸ Apple Intelligence & Siri.
+/// Under the card: what runs where, or why it can't and the way to System Settings ▸ Apple
+/// Intelligence & Siri.
 private struct MaxFooter: View {
     let status: TidyTabsService.Status
     let openSettings: () -> Void
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(status.explanation)
-                .font(.system(size: 12)).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .font(Design.Font.detail).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if status.canOpenSettings {
-                Button(action: openSettings) {
-                    Text("Turn on Apple Intelligence in System Settings").font(.system(size: 12)).underline()
-                }
-                .buttonStyle(.link)
+                Button("Turn on Apple Intelligence in System Settings", action: openSettings)
+                    .buttonStyle(.link)
+                    .font(Design.Font.detail)
             }
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, Design.Space.rowInset)
     }
 }
 
-/// Arc's Tidy Downloads picture: the "Download renamed to:" card on blue.
+/// Tidy Downloads' picture: the "Download renamed to:" card on blue.
 private struct TidyDownloadsPicture: View {
     private let grey = Color(white: 0.55)
     var body: some View {
@@ -146,8 +129,8 @@ private struct TidyDownloadsPicture: View {
     }
 }
 
-/// Arc's Tidy Tab Titles picture: a renamed tab, "Double-click to rename" under it, sparkles round
-/// it, on mauve.
+/// Tidy Tab Titles' picture: a renamed tab, "Double-click to rename" under it, sparkles round it,
+/// on mauve.
 private struct TidyTabTitlesPicture: View {
     private let ink = Color(red: 0.42, green: 0.27, blue: 0.62)
     var body: some View {
@@ -174,7 +157,7 @@ private struct TidyTabTitlesPicture: View {
     }
 }
 
-/// Arc's Tidy Tabs picture: the squiggle, the broom and a ✕ on lavender.
+/// Tidy Tabs' picture: the squiggle, the broom and a ✕ on lavender.
 private struct TidyTabsPicture: View {
     private let ink = Color(red: 0.55, green: 0.52, blue: 0.72)
     var body: some View {

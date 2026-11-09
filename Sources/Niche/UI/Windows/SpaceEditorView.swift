@@ -6,10 +6,13 @@ enum SpaceProfileChoice: Hashable {
     case new
 }
 
-/// Create or edit a space: name, icon, profile and, beside them, Arc's theme editor (the same
-/// card Edit Theme Color… opens: pad, presets, intensity, grain, Auto / Light / Dark). An existing
-/// space shows each change at once (`onPreview`); Cancel puts its theme back, Save writes it.
+/// Create or edit a space: a preview, name, icon gallery and profile, and beside them the theme
+/// editor (the same card Edit Theme Color… opens: pad, presets, intensity, grain, Auto / Light /
+/// Dark). An existing space shows each change at once (`onPreview`); Cancel puts its theme back,
+/// Save writes it.
 struct SpaceEditorView: View {
+    static let width: CGFloat = 24 + SpaceIconPicker.size.width + 20 + 355 + 24
+
     let existing: Space?
     let profiles: [BrowserProfile]
     /// Title, icon, theme, profile; a new profile comes with its name.
@@ -20,15 +23,11 @@ struct SpaceEditorView: View {
     @State private var title: String
     /// Saved as it is: an untouched symbol or empty icon stays what it was (#205).
     @State private var icon: SpaceIcon
-    @State private var pickingIcon = false
     @State private var theme: SpaceTheme
     @State private var profile: SpaceProfileChoice
     @State private var newProfileName = ""
 
-    private static let emojis = ["🌱", "💼", "🏠", "🎨", "🧪", "📚", "🎮", "🎵", "🛒", "✈️", "💡", "🔥", "🌊", "🍕", "🐦", "🧑‍💻",
-                                 "📈", "🧠", "❤️", "⭐️", "🌙", "☕️", "🏃", "📷", "🎬", "🧩", "🪴", "🏔️", "🛠️", "💰", "📝", "🎯"]
-
-    /// `initialProfile` is a new space's starting profile (Arc: the focused space's).
+    /// `initialProfile` is a new space's starting profile (the focused space's).
     init(existing: Space?, profiles: [BrowserProfile], initialProfile: UUID? = nil,
          onSave: @escaping (String, SpaceIcon, SpaceTheme, SpaceProfileChoice, String) -> Void, onCancel: @escaping () -> Void,
          onPreview: @escaping (SpaceTheme) -> Void = { _ in }) {
@@ -44,44 +43,46 @@ struct SpaceEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text(existing == nil ? "New Space" : "Edit Space").font(.system(size: 16, weight: .semibold))
-            HStack(alignment: .top, spacing: 16) {
+        VStack(spacing: 18) {
+            Text(existing == nil ? "New Space" : "Edit Space").font(.system(size: 17, weight: .semibold))
+            HStack(alignment: .top, spacing: 20) {
                 VStack(alignment: .leading, spacing: 12) {
                     preview
-                    HStack(spacing: 6) {
-                        iconButton
-                        TextField("Name", text: $title).textFieldStyle(.roundedBorder)
+                    HStack(spacing: 8) {
+                        iconTile
+                        SettingsTextField(placeholder: "Name", text: $title)
                     }
-                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(28), spacing: 4), count: 8), spacing: 4) {
-                        ForEach(Self.emojis, id: \.self) { e in
-                            Text(e).font(.system(size: 16)).frame(width: 28, height: 28)
-                                .background(RoundedRectangle(cornerRadius: 6).fill(icon == .emoji(e) ? Color.accentColor.opacity(0.25) : .clear))
-                                .onTapGesture { icon = .emoji(e) }
-                        }
-                    }
-                    Divider()
+                    SpaceIconPicker(current: icon.emoji, currentSymbol: icon.symbol,
+                                    onPick: { icon = .emoji($0) },
+                                    onPickSymbol: { icon = .symbol($0) },
+                                    onRemove: { icon = .none },
+                                    height: 250)
+                        .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(Design.surface))
+                        .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Design.hairline))
                     profileSection
-                    Spacer(minLength: 0)
                 }
-                .frame(width: 260)
+                .frame(width: SpaceIconPicker.size.width)
                 SpaceStyleEditor(theme: theme) { t in
                     theme = t
                     onPreview(t)
                 }
             }
             HStack {
-                Button("Cancel") { onCancel() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { onCancel() }
+                    .buttonStyle(.settings)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(existing == nil ? "Create Space" : "Save") {
                     onSave(title.isEmpty ? "Space" : title, icon, theme, profile, trimmedProfileName)
                 }
+                .buttonStyle(.settingsProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled((title.trimmingCharacters(in: .whitespaces).isEmpty && existing == nil) || (profile == .new && trimmedProfileName.isEmpty))
             }
         }
-        .padding(20)
-        .frame(width: 651)
+        .padding(24)
+        .frame(width: Self.width)
+        .tint(Design.accent)
     }
 
     /// The space as the sidebar draws it, with the theme being edited.
@@ -94,39 +95,29 @@ struct SpaceEditorView: View {
                     Text(title.isEmpty ? "Space" : title).font(.system(size: 13, weight: .semibold)).foregroundStyle(theme.palette.textPrimary)
                     Spacer(minLength: 0)
                 }
-                RoundedRectangle(cornerRadius: 6).fill(theme.palette.selectedFill).frame(height: 24)
-                RoundedRectangle(cornerRadius: 6).fill(theme.palette.hoverFill).frame(height: 24)
+                RoundedRectangle(cornerRadius: 6).fill(theme.palette.selectedFill).frame(height: 22)
+                RoundedRectangle(cornerRadius: 6).fill(theme.palette.hoverFill).frame(height: 22)
             }
             .padding(12)
         }
-        .frame(width: 260, height: 104)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(height: 96)
+        .clipShape(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Design.hairline))
     }
 
-    /// Arc's icon picker (Emoji / Icon / Remove Icon) in a popover, as Change Space Icon… opens
-    /// it; the grid below keeps a few emoji one click away.
-    private var iconButton: some View {
-        Button { pickingIcon = true } label: {
-            Group {
-                if icon == .none {
-                    Image(systemName: "face.dashed").font(.system(size: 14)).foregroundStyle(.secondary)
-                } else {
-                    glyph(size: 16, color: .primary)
-                }
+    /// The chosen icon in front of the name, as the sidebar will show it.
+    private var iconTile: some View {
+        Group {
+            if icon == .none {
+                Image(systemName: "face.dashed").font(.system(size: 14)).foregroundStyle(.tertiary)
+            } else {
+                glyph(size: 17, color: .primary)
             }
-            .frame(width: 28, height: 22)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(pickingIcon ? 0.14 : 0.07)))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .help("Change Icon")
-        .accessibilityLabel("Change Icon")
-        .popover(isPresented: $pickingIcon, arrowEdge: .bottom) {
-            SpaceIconPicker(current: icon.emoji, currentSymbol: icon.symbol,
-                            onPick: { icon = .emoji($0); pickingIcon = false },
-                            onPickSymbol: { icon = .symbol($0); pickingIcon = false },
-                            onRemove: { icon = .none; pickingIcon = false })
-        }
+        .frame(width: 32, height: 32)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Design.hairline))
+        .accessibilityLabel("Space icon")
     }
 
     /// The icon as the sidebar draws it: an emoji, or a symbol in the space's text colour.
@@ -141,22 +132,23 @@ struct SpaceEditorView: View {
 
     private var trimmedProfileName: String { newProfileName.trimmingCharacters(in: .whitespaces) }
 
-    /// Arc's copy: "Profiles make your Spaces truly separate…" and, when an existing space
-    /// changes profile, "Each Profile has different browser data…".
     private var profileSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Profile").font(Design.Font.body)
+                Spacer()
                 Picker("Profile", selection: $profile) {
                     Text("Default").tag(SpaceProfileChoice.existing(nil))
                     ForEach(profiles) { p in Text(p.name).tag(SpaceProfileChoice.existing(p.id)) }
                     Divider()
                     Text("New Profile…").tag(SpaceProfileChoice.new)
                 }
-                if profile == .new {
-                    TextField("Profile name", text: $newProfileName).textFieldStyle(.roundedBorder)
-                }
+                .settingsMenu()
             }
-            Text(profileNote).font(.system(size: 11)).foregroundStyle(.secondary)
+            if profile == .new {
+                SettingsTextField(placeholder: "Profile name", text: $newProfileName)
+            }
+            Text(profileNote).font(Design.Font.detail).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,12 +156,12 @@ struct SpaceEditorView: View {
 
     private var profileNote: String {
         if let existing, profile != .existing(existing.profileID) {
-            return "Each Profile has different browser data, so you might get logged out of some websites or need to re-install extensions. Open tabs in this space reload."
+            return "Each profile has its own browser data, so you may be signed out of some websites or need to reinstall extensions. Open tabs in this space reload."
         }
         if profile == .new {
-            return "This Space will start fresh in your brand new Profile, signed out of every website."
+            return "This space starts fresh in a new profile, signed out of every website."
         }
-        return "Profiles make your Spaces truly separate with their own logins, cookies and site data. Spaces with the same Profile share them."
+        return "Profiles keep spaces separate, with their own logins, cookies and site data. Spaces on the same profile share them."
     }
 }
 

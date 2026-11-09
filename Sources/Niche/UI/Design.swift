@@ -34,19 +34,21 @@ enum Design {
     // MARK: Space
 
     enum Space {
-        static let rowInset: CGFloat = 14     // text inset inside a card row
-        static let rowHeight: CGFloat = 44    // minimum card row
-        static let section: CGFloat = 26      // between one card group and the next header
-        static let pane: CGFloat = 28         // pane content from the window's edges
+        static let rowInset: CGFloat = 16     // text inset inside a card row
+        static let rowHeight: CGFloat = 52    // minimum card row
+        static let section: CGFloat = 28      // between one card group and the next header
+        static let pane: CGFloat = 32         // pane content from the window's edges
+        static let control: CGFloat = 28      // buttons, menus and fields in a row
     }
 
     // MARK: Type
 
     enum Font {
-        static let paneTitle = SwiftUI.Font.system(size: 20, weight: .semibold)
+        static let paneTitle = SwiftUI.Font.system(size: 22, weight: .semibold)
         static let section = SwiftUI.Font.system(size: 13, weight: .semibold)
         static let body = SwiftUI.Font.system(size: 13)
-        static let detail = SwiftUI.Font.system(size: 11.5)
+        static let control = SwiftUI.Font.system(size: 13, weight: .medium)
+        static let detail = SwiftUI.Font.system(size: 12)
     }
 }
 

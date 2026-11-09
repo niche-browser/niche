@@ -135,7 +135,8 @@ final class CommandBarView: NSView {
         // colour of its rows.
         let highlight: NSColor
         if case .site(let site) = scope, let hex = site.color { highlight = NSColor(hex: hex) } else { highlight = NSColor(c.highlight) }
-        info.isHidden = !c.query.isEmpty || scope != nil
+        // The hints live in the footer; an unexplained ⓘ in the field only added noise.
+        info.isHidden = true
         divider.isHidden = items.isEmpty
         footer.isHidden = items.isEmpty
         footerDivider.isHidden = items.isEmpty
@@ -496,11 +497,11 @@ final class CommandBarRowView: NSView {
     private static func detail(_ s: Suggestion) -> String {
         switch s.kind {
         case .switchToTab, .search, .command, .switchSpace, .moveToSpace, .moveToFolder: return ""
-        case .archived: return s.subtitle.isEmpty ? "" : " — \(s.subtitle)"
+        case .archived: return s.subtitle.isEmpty ? "" : "  ·  \(s.subtitle)"
         default:
             guard let url = s.url else { return "" }
             let human = SuggestionEngine.humanURL(url)
-            return human.lowercased() == s.title.lowercased() ? "" : " — \(human)"
+            return human.lowercased() == s.title.lowercased() ? "" : "  ·  \(human)"
         }
     }
 

@@ -12,6 +12,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only unless a job asks for more: the build job runs pull requests' code.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Tests

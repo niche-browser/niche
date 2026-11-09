@@ -3102,6 +3102,12 @@ static id NicheTopLevelWindow(id element) {
 // Cmd-Q, the Dock, logout: give the delegate a say, then tear Chromium down
 // in order (browsers first, then the message loop, then CefShutdown in main).
 - (void)terminate:(id)sender {
+    // A quit already under way: Chromium asks again once the last browser has closed. The
+    // delegate already agreed (and may have asked the user), so it isn't asked twice.
+    if (g_quitting) {
+        [NicheCEFRuntime closeAllBrowsersAndQuit];
+        return;
+    }
     id<NSApplicationDelegate> delegate = self.delegate;
     if ([delegate respondsToSelector:@selector(applicationShouldTerminate:)]) {
         NSApplicationTerminateReply reply = [delegate applicationShouldTerminate:self];
