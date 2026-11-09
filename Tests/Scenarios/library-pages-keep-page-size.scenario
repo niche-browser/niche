@@ -1,0 +1,41 @@
+# Moving between the Library's pages never lays the page out again. The Spaces page widens the
+# sidebar to fit every space's card; going to it and back (Spaces, then Boosts) grew the page by
+# the difference for one frame and shrank it back, so it visibly zoomed in and out (9 Nov 2026).
+# With the sidebar hidden the Library brings it out over the page, which keeps its full size too.
+# The page counts its resize events.
+budget rss=800 stalls50=10
+niche://open?url=${PAGE}?n=held
+expect-log loaded 127\.0\.0\.1 \(HTTP 200\)
+wait 2
+niche://debug?cdp=Runtime.evaluate&params={"expression":"window.__rs=0;addEventListener('resize',()=>__rs++);'counting'"}
+expect-log Niche cdp Runtime.evaluate .*"value":"counting"
+niche://action/openLibrary
+wait 1
+niche://action/manageSpaces
+wait 1
+niche://action/viewBoosts
+wait 1
+niche://action/manageSpaces
+wait 1
+niche://action/viewMedia
+wait 1
+niche://action/openLibrary
+wait 1
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'resizes='+__rs"}
+expect-log Niche cdp Runtime.evaluate .*"value":"resizes=0"
+
+# Sidebar hidden: one resize for hiding it, then none while the Library comes and goes.
+niche://action/toggleSidebar
+wait 1
+niche://debug?cdp=Runtime.evaluate&params={"expression":"__rs=0;'hidden'"}
+expect-log Niche cdp Runtime.evaluate .*"value":"hidden"
+niche://action/openLibrary
+wait 1
+niche://action/manageSpaces
+wait 1
+niche://action/viewBoosts
+wait 1
+niche://action/openLibrary
+wait 1
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'hidden resizes='+__rs"}
+expect-log Niche cdp Runtime.evaluate .*"value":"hidden resizes=0"

@@ -34,6 +34,74 @@ struct WebStoreBrandingTests {
         #expect(failure == nil)
     }
 
+    /// A small DOM in JavaScriptCore with what the script touches: elements, `document.open()`
+    /// (a new <html>, the document's event listeners gone), and MutationObservers that hear a
+    /// change only below the node they observe while that node is still in the document.
+    private static let fakeDocument = #"""
+    var window = this; window.top = window;
+    var location = { hostname: 'chromewebstore.google.com' };
+    var frames = [], listeners = [], observers = [];
+    function requestAnimationFrame(f) { frames.push(f); }
+    function addEventListener(type, f) { listeners.push({ type, f }); }
+    function flush() { while (frames.length) frames.shift()(); }
+    function fire(type) { listeners.filter(l => l.type === type).forEach(l => l.f()); }
+    class El {
+      constructor(tag, text) { this.tagName = tag; this.kids = []; this.parentElement = null; this.attrs = {}; this.own = text || '';
+        this.style = { setProperty: (k, v) => { this.style[k] = v; } }; }
+      get textContent() { return this.own + this.kids.map(k => k.textContent).join(''); }
+      set textContent(v) { this.own = v; this.kids = []; changed(this); }
+      get childElementCount() { return this.kids.length; }
+      get isConnected() { let e = this; while (e.parentElement) e = e.parentElement; return e === document.documentElement; }
+      appendChild(c) { c.parentElement = this; this.kids.push(c); changed(this); return c; }
+      getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+      setAttribute(k, v) { this.attrs[k] = v; }
+      querySelectorAll(sel) { const out = []; const walk = n => n.kids.forEach(k => { if (k.tagName === sel.toUpperCase()) out.push(k); walk(k); }); walk(this); return out; }
+    }
+    function changed(node) {
+      for (const o of observers) {
+        let e = node; while (e && e !== o.target) e = e.parentElement;
+        const inside = o.target === document || (e === o.target && o.target.isConnected);
+        if (inside) o.f([]);
+      }
+    }
+    class MutationObserver { constructor(f) { this.f = f; } observe(target) { observers.push({ target, f: this.f }); } }
+    var document = {
+      readyState: 'loading', documentElement: new El('html'),
+      get head() { return this.documentElement.kids.find(k => k.tagName === 'HEAD') || null; },
+      get body() { return this.documentElement.kids.find(k => k.tagName === 'BODY') || null; },
+      createElement: tag => new El(tag.toUpperCase()),
+      querySelectorAll(sel) { return this.documentElement.querySelectorAll(sel); },
+      open() { listeners = []; this.documentElement = new El('html'); changed(this); },
+    };
+    function page() {
+      document.documentElement.appendChild(new El('HEAD'));
+      const body = document.documentElement.appendChild(new El('BODY'));
+      const button = body.appendChild(new El('BUTTON'));
+      button.appendChild(new El('SPAN', 'Add to Chrome'));
+      return button;
+    }
+    """#
+
+    @Test func theStoreStaysRewrittenWhenItReplacesItsDocument() throws {
+        // A store tab a page opened (the Extensions page's "Chrome Web Store" link) ran the script
+        // while the document was still empty; the store then wrote a new document, which dropped
+        // the script's DOMContentLoaded listener, its style and the body it would have watched.
+        // The tab said "Add to Chrome" and showed "Switch to Chrome?" until Niche restarted.
+        let js = try #require(JSContext())
+        var failure: String?
+        js.exceptionHandler = { _, e in failure = e?.toString() }
+        js.evaluateScript(Self.fakeDocument)
+        js.evaluateScript(WebStoreBranding.script(appName: "Niche"))
+        js.evaluateScript("document.open(); var button = page(); document.readyState = 'complete'; fire('DOMContentLoaded'); flush();")
+        #expect(failure == nil)
+        #expect(js.evaluateScript("button.textContent").toString() == "Add to Niche")
+        // The rule hiding the "Switch to Chrome?" card is in the document that shows.
+        #expect(js.evaluateScript("document.querySelectorAll('style').some(s => s.textContent.includes('promo-header'))").toBool())
+        // The store redraws the button later (another item): still Niche's name.
+        js.evaluateScript("button.kids[0].textContent = 'Add to Chrome'; flush();")
+        #expect(js.evaluateScript("button.textContent").toString() == "Add to Niche")
+    }
+
     @Test func theNameIsQuotedForTheScript() {
         #expect(WebStoreBranding.script(appName: "Ni\"che").contains(#""Ni\"che""#))
     }
