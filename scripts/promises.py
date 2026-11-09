@@ -133,7 +133,9 @@ def promises(rev=None):
                 found.append((issue, rel, digest(body)))
             continue
         for m in marks:
-            fn = re.compile(r"(?:\s*(?://[^\n]*|@\w+(?:\([^)]*\))?))*\s*(?:(?:private|fileprivate|static|public|internal|nonisolated)\s+)*func\s+(\w+)").match(s, m.end())
+            # One way to match each character (no nested `\s*`, comments run to the line's end), so a
+            # long run of blank lines or comments can't backtrack exponentially (CodeQL py/redos).
+            fn = re.compile(r"(?:\s|//[^\n]*(?![^\n])|@\w+(?:\([^)]*\))?)*(?:(?:private|fileprivate|static|public|internal|nonisolated)\s+)*func\s+(\w+)").match(s, m.end())
             if not fn:
                 sys.exit(f"promises: {rel}: a `// promise:` line with no func right below it")
             body_end = balanced(s, s.index("{", fn.end()), "{", "}")
