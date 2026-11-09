@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         installURLEventHandler()
         PerfCEF.install(app: self)
         NicheCEFRuntime.setChromeHosting(store.settings.chromeEngine)
-        NicheCEFRuntime.setDocumentStartScript(PageScript.mainWorld, isolatedScript: PageScript.isolatedWorld, world: PageScript.world)
+        NicheCEFRuntime.setDocumentStartScript(PageScript.mainWorld, isolatedScript: PageScript.isolatedWorld + WebStoreBranding.script(appName: "Niche"), world: PageScript.world)
         startContentBlocking()
         observeGlobalShortcut()
         observeMenuBarMode()

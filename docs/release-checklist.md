@@ -122,6 +122,9 @@ built release app with a test profile. Note anything that fails in the release's
   Store, then remove it with the store's Remove from Chrome: "… has been added" and "Remove …?"
   both open whole at the page's top right (niche.log: `bubble … placed`), and "Add …?" stays
   centred.
+- Open an extension's page on the Chrome Web Store: the button says "Add to Niche" (and "Remove
+  from Niche" once installed), with no "Switch to Chrome?" card and no "Switch to Chrome to
+  install" banner. Google renames its page's parts now and then; this is where it shows.
 - In the Library, drag the sidebar's edge: it widens and narrows (never below the tab sidebar),
   the page under it doesn't reflow, and the width is the same after closing and reopening it.
 - **#43:** Load unpacked in `chrome://extensions`. The extension shows in the open Extensions
