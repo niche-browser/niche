@@ -56,3 +56,24 @@ behind a glass command bar.
 
 `brand/README.md` has the construction. In SwiftUI, draw it with `BrandGlyph` (vector, ink plus
 orange dot) or `BrandMark` (the rendered app tile).
+
+## Cards and empty states
+
+No decorative gradients: a card is one flat fill (`Color.primary` at 4–7 %, or the banner's white
+over the space) with a hairline, and its one action is `Design.accent`. Empty states and opt-ins
+sit inside their column, never over a neighbour, and follow the sidebar's light or dark look.
+Numbers that count (download progress) keep a fixed format and monospaced digits so they don't
+change width, and redraw in steps, not per event.
+
+## Library
+
+A 74 pt rail of 64 × 56 buttons stacked under the traffic lights, a 32 pt search field. Opening
+it widens the sidebar by 40 pt over the page, or as far as its edge was last dragged
+(`LibraryWidth`, never narrower than the tab sidebar): pages keep the size they have beside the plain
+sidebar (`ShellView.pageSidebarWidth`), so the Library never makes Chromium lay a page out again.
+
+## Boost editor
+
+A 248 pt glass panel (`NSVisualEffectView`, popover material, 16 pt corners) at the window's right
+edge under the toolbar, in the window's own appearance. Labelled buttons, the selected font and
+active tools in the accent; Code widens it to 480 pt.

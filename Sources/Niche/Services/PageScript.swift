@@ -18,6 +18,8 @@ import Foundation
 /// - `drm`: the page asked for Widevine (navigator.requestMediaKeySystemAccess): the Site Control
 ///   Center then offers to play the site in Safari's engine (docs/protected-media.md). A wrapper in
 ///   the page's world tells this world through the same per-launch event name.
+/// - On the Chrome Web Store only, `WebStoreBranding` (NicheCore): "Add to Niche" on the install
+///   button and no "Switch to Chrome" card or banner.
 /// - `lt`: the top frame's long tasks (50 ms or more) for the performance recorder (GitHub #91):
 ///   a count, the total and the last 100 durations, which Niche reads and resets for the visible
 ///   tab every few seconds. No attribution, no addresses; the observer only runs when a long

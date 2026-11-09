@@ -1,14 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// Arc's Boost editor (Arc 1.172.1, captured 7 Nov 2026; docs/screenshots/arc-boost-*.png): a
-/// 183 × 588 pt floating panel 10 pt in from the window's right edge and 215 pt down. Header: a grey
-/// ✕ (Done), "My Boost ⌄" (Rename this Boost…, Shuffle, Reset all Edits, Delete this Boost, All
-/// Boosts…), Undo. Then a 147 pt colour wheel, three 42 × 38 buttons (Invert lightness, Advanced
-/// colour controls: Contrast, Brightness, Original Saturation; Reset to original colours), a white
-/// card of 20 "Aa" fonts, Size and Case, Zap ⚡ and Code {} (which widens the panel to 480 pt with a
-/// CSS / JS switch; under the code, the eyedropper (Show Selector Picker), the hammer (Show
-/// Developer Tools) and, for JavaScript, Refresh this Page). Every change shows on the page at once.
+/// The Boost editor: a glass panel at the window's right edge, under the toolbar, that changes
+/// the page beside it as you edit. It began as Arc 1.172.1's (a 183 pt column, captured 7 Nov 2026;
+/// docs/screenshots/arc-boost-*.png) and keeps its parts and motion (BoostEditorMotion): Done, the
+/// Boost's menu (rename, shuffle, reset, delete, all Boosts) and Undo; the colour wheel with Invert,
+/// Adjust (contrast, brightness, saturation) and Reset; 20 fonts; text size and case; Zap, and Code,
+/// which widens the panel to a CSS / JavaScript editor with the selector picker and DevTools under it.
+/// Since 0.1.3 it is 248 pt wide, follows the window's light or dark look, and labels its buttons.
 @MainActor
 final class BoostEditorController {
     static let shared = BoostEditorController()
@@ -40,14 +39,38 @@ final class BoostEditorController {
         p.becomesKeyOnlyIfNeeded = true
         let host = FirstClickHostingView(rootView: BoostEditorView(model: m))
         host.sizingOptions = []
-        p.contentView = host
+        // Glass under the controls, rounded by its mask so the window's shadow follows the corners.
+        let glass = NSVisualEffectView()
+        glass.material = .popover
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.maskImage = Self.roundedMask(radius: BoostEditorLayout.radius)
+        host.autoresizingMask = [.width, .height]
+        glass.addSubview(host)
+        p.contentView = glass
+        host.frame = glass.bounds
         let f = window.frame
-        p.setFrame(NSRect(x: f.maxX - 10 - 183, y: f.maxY - 215 - 588, width: 183, height: 588), display: false)
+        let w = BoostEditorLayout.width, h = min(BoostEditorLayout.height, f.height - 80)
+        // Under the toolbar at the window's right edge (`h` leaves it inside the window).
+        let top = f.maxY - 64
+        p.setFrame(NSRect(x: f.maxX - 12 - w, y: top - h, width: w, height: h), display: false)
         window.addChildWindow(p, ordered: .above)
         p.orderFront(nil)
         panel = p
         model = m
-        growIn(p, host)
+        growIn(p, glass)
+    }
+
+    private static func roundedMask(radius: CGFloat) -> NSImage {
+        let edge = 2 * radius + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { r in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 
     private static var easeOut: CAMediaTimingFunction {
@@ -69,7 +92,7 @@ final class BoostEditorController {
         t = CATransform3DScale(t, s, s, 1)
         t = CATransform3DTranslate(t, -dx, -dy, 0)
         panel.hasShadow = false
-        layer.shadowPath = CGPath(roundedRect: b, cornerWidth: 12, cornerHeight: 12, transform: nil)
+        layer.shadowPath = CGPath(roundedRect: b, cornerWidth: BoostEditorLayout.radius, cornerHeight: BoostEditorLayout.radius, transform: nil)
         layer.shadowColor = NSColor.black.cgColor
         layer.shadowOpacity = 0.25
         layer.shadowRadius = 10
@@ -194,15 +217,27 @@ final class BoostEditorModel {
     func setCode(_ on: Bool) {
         if !on { finishPicking() }
         showingCode = on
-        onWidth(on ? 480 : 183)
+        onWidth(on ? BoostEditorLayout.codeWidth : BoostEditorLayout.width)
     }
 }
+/// The editor's measures (Niche 0.1.3; Arc's was a 183 pt column of 147 pt controls).
+enum BoostEditorLayout {
+    static let width: CGFloat = 248
+    static let codeWidth: CGFloat = 480
+    static let height: CGFloat = 572
+    static let inset: CGFloat = 14
+    static var column: CGFloat { width - 2 * inset }
+    static let radius: CGFloat = 16
+    static let control: CGFloat = 32
+}
 
+/// Colours that follow the panel's appearance: ink on a translucent plate, the accent for what is on.
 private enum BoostStyle {
-    static let panel = Color(red: 0.976, green: 0.976, blue: 0.984)
-    static let button = Color(red: 0.91, green: 0.91, blue: 0.925)
-    static let ink = Color(white: 0.2)
-    static let secondary = Color(white: 0.55)
+    static let plate = Color.primary.opacity(0.06)
+    static let plateHover = Color.primary.opacity(0.1)
+    static let hairline = Color.primary.opacity(0.1)
+    static let secondary = Color.secondary
+    static let label = Font.system(size: 11, weight: .semibold)
 }
 
 private struct BoostEditorView: View {
@@ -212,36 +247,36 @@ private struct BoostEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().opacity(0.4)
+            Rectangle().fill(BoostStyle.hairline).frame(height: 1)
             if model.showingCode { code } else { controls }
         }
-        // Arc lays the panel out at its final width and keeps it centred while the window
-        // widens or narrows, so both sides are clipped meanwhile.
-        .frame(width: model.showingCode ? 480 : 183)
+        // Laid out at its final width and kept centred while the panel widens or narrows.
+        .frame(width: model.showingCode ? BoostEditorLayout.codeWidth : BoostEditorLayout.width)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(BoostStyle.panel))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .environment(\.colorScheme, .light)
+        .overlay(RoundedRectangle(cornerRadius: BoostEditorLayout.radius, style: .continuous)
+            .strokeBorder(BoostStyle.hairline, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: BoostEditorLayout.radius, style: .continuous))
     }
 
-    /// The code panel's header is only Back and the CSS / JS switch, centred (Arc 1.172.1).
     @ViewBuilder private var header: some View {
         if model.showingCode {
             ZStack {
                 Picker("", selection: $model.codeIsJS) {
                     Text("CSS").tag(false)
-                    Text("JS").tag(true)
+                    Text("JavaScript").tag(true)
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 92)
+                .pickerStyle(.segmented).labelsHidden().frame(width: 170)
                 HStack {
                     Button { model.setCode(false) } label: {
-                        Label("Back", systemImage: "arrow.left").font(.system(size: 13, weight: .semibold))
+                        Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 10).frame(height: 28)
+                            .background(Capsule().fill(BoostStyle.plate))
                     }
-                    .buttonStyle(.plain).foregroundStyle(BoostStyle.ink).padding(.leading, 10)
+                    .buttonStyle(.plain).padding(.leading, 10)
                     Spacer()
                 }
             }
-            .frame(height: 40)
+            .frame(height: 48)
         } else {
             boostHeader
         }
@@ -249,150 +284,246 @@ private struct BoostEditorView: View {
 
     private var boostHeader: some View {
         HStack(spacing: 0) {
-            Button { model.onClose() } label: {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(Color(white: 0.6))
-                    .frame(width: 40, height: 40)
-            }
-            .buttonStyle(.plain).help("Done")
-            Spacer(minLength: 0)
+            iconButton("xmark", help: "Done") { model.onClose() }
+            Spacer(minLength: 4)
             Menu {
                 Button("Rename this Boost…") { rename() }
                 Button("Shuffle") { model.shuffle() }
                 Button("Reset all Edits") { model.resetAll() }
-                Button("Delete this Boost") { delete() }
+                Divider()
+                Button("Delete this Boost", role: .destructive) { delete() }
                 Divider()
                 Button("All Boosts…") { NotificationCenter.default.post(name: .nicheShowBoostsLibrary, object: nil) }
             } label: {
-                HStack(spacing: 4) {
-                    Text(model.boost.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(BoostStyle.ink).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(BoostStyle.ink)
+                VStack(spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(model.boost.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                    }
+                    Text(model.boost.host).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
                 }
+                .frame(maxWidth: 150)
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            Spacer(minLength: 0)
-            Button { model.undo() } label: {
-                Image(systemName: "arrow.counterclockwise").font(.system(size: 14, weight: .semibold)).frame(width: 40, height: 40)
-            }
-            .buttonStyle(.plain).foregroundStyle(model.history.isEmpty ? Color(white: 0.75) : BoostStyle.ink).disabled(model.history.isEmpty).help("Undo")
+            Spacer(minLength: 4)
+            iconButton("arrow.uturn.backward", help: "Undo") { model.undo() }
+                .disabled(model.history.isEmpty).opacity(model.history.isEmpty ? 0.35 : 1)
         }
-        .frame(height: 40)
+        .padding(.horizontal, 10)
+        .frame(height: 48)
     }
 
-    private var controls: some View {
-        VStack(spacing: 14) {
-            ColorWheel(hue: model.boost.hue, strength: model.boost.strength) { h, s in
-                model.change { $0.hue = h; $0.strength = s }
-            }
-            .frame(width: 147, height: 147)
-            .padding(.top, 18)
-            HStack(spacing: 10) {
-                square("lightbulb", on: model.boost.invert, help: "Invert lightness") { model.change { $0.invert.toggle() } }
-                square("slider.horizontal.3", on: showColors, help: "Advanced color controls") { showColors.toggle() }
-                    .popover(isPresented: $showColors, arrowEdge: .leading) { advanced }
-                square("nosign", on: false, help: "Reset to original colors") {
-                    model.change { $0.hue = 0; $0.strength = 0; $0.invert = false; $0.contrast = 50; $0.brightness = 50; $0.saturation = 50 }
-                }
-                .opacity(model.boost.colorsUntouched ? 0.45 : 1)
-            }
-            fonts
-            HStack(spacing: 9) {
-                Menu {
-                    ForEach([0.8, 0.9, 1, 1.1, 1.25, 1.5], id: \.self) { s in
-                        Button(s == 1 ? "Original" : "\(Int(s * 100)) %") { model.change { $0.textScale = s } }
-                    }
-                } label: { wide("Size", trailing: nil) }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).help("Change text size")
-                Menu {
-                    ForEach(Boost.TextCase.allCases, id: \.self) { c in Button(c.title) { model.change { $0.textCase = c } } }
-                } label: { wide("Case", trailing: nil) }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).help("Change text case")
-            }
-            .frame(width: 147)
-            Button { model.toggleZap() } label: { wide("Zap", trailing: "bolt.fill", on: model.zapping) }.buttonStyle(.plain)
-                .help("Click things on the page to hide them")
-            Button { model.setCode(true) } label: { wide("Code", trailing: "curlybraces") }.buttonStyle(.plain)
-            Spacer(minLength: 0)
-        }
-        .frame(width: 183)
-    }
-
-    private var advanced: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            slider("Contrast", \.contrast)
-            slider("Brightness", \.brightness)
-            slider("Original Saturation", \.saturation)
-        }
-        .padding(18)
-        .frame(width: 250)
-    }
-
-    private func slider(_ title: String, _ key: WritableKeyPath<Boost, Double>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13, weight: .medium))
-            Slider(value: Binding(get: { model.boost[keyPath: key] }, set: { v in model.change { $0[keyPath: key] = v } }), in: 0...100)
-        }
-    }
-
-    private var fonts: some View {
-        let columns = Array(repeating: GridItem(.fixed(26), spacing: 1.5), count: 5)
-        return LazyVGrid(columns: columns, spacing: 0) {
-            ForEach(Boost.fonts.indices, id: \.self) { i in
-                Button { model.change { $0.font = $0.font == i ? nil : i } } label: {
-                    Text("Aa").font(.custom(Boost.fonts[i] == "-apple-system" ? "Helvetica Neue" : Boost.fonts[i], size: 13))
-                        .foregroundStyle(model.boost.font == i ? Color.accentColor : BoostStyle.secondary)
-                        .frame(width: 26, height: 26)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.vertical, 8).padding(.horizontal, 5)
-        .frame(width: 147)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white).shadow(color: .black.opacity(0.08), radius: 4, y: 1))
-    }
-
-    private func square(_ symbol: String, on: Bool, help: String, size: CGFloat = 42, _ action: @escaping () -> Void) -> some View {
+    private func iconButton(_ symbol: String, help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 15))
-                .foregroundStyle(on ? .white : BoostStyle.ink)
-                .frame(width: size, height: 38)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(on ? BoostStyle.ink : BoostStyle.button))
+            Image(systemName: symbol).font(.system(size: 11, weight: .bold))
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(BoostStyle.plate))
         }
         .buttonStyle(.plain).help(help).accessibilityLabel(help)
     }
 
-    private func wide(_ title: String, trailing: String?, on: Bool = false) -> some View {
-        HStack {
-            Text(title).font(.system(size: 14, weight: .semibold))
-            if let trailing { Spacer(); Image(systemName: trailing).font(.system(size: 13, weight: .semibold)) }
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ColorWheel(hue: model.boost.hue, strength: model.boost.strength) { h, s in
+                model.change { $0.hue = h; $0.strength = s }
+            }
+            .frame(width: BoostEditorLayout.column, height: 168)
+            .padding(.top, BoostEditorLayout.inset)
+            HStack(spacing: 6) {
+                chip("circle.lefthalf.filled", "Invert", on: model.boost.invert, help: "Invert lightness") { model.change { $0.invert.toggle() } }
+                chip("slider.horizontal.3", "Adjust", on: showColors, help: "Contrast, brightness and saturation") { showColors.toggle() }
+                    .popover(isPresented: $showColors, arrowEdge: .leading) { advanced }
+                chip("arrow.counterclockwise", "Reset", on: false, help: "Back to the site's own colours") {
+                    model.change { $0.hue = 0; $0.strength = 0; $0.invert = false; $0.contrast = 50; $0.brightness = 50; $0.saturation = 50 }
+                }
+                .disabled(model.boost.colorsUntouched).opacity(model.boost.colorsUntouched ? 0.4 : 1)
+            }
+            .padding(.top, 10)
+            sectionLabel("Font").padding(.top, 16)
+            fonts.padding(.top, 6)
+            HStack(spacing: 6) {
+                sizeControl
+                caseMenu
+            }
+            .padding(.top, 10)
+            HStack(spacing: 6) {
+                action("Zap", symbol: "bolt.fill", on: model.zapping, help: "Click things on the page to hide them") { model.toggleZap() }
+                action("Code", symbol: "curlybraces", on: false, help: "Your own CSS and JavaScript") { model.setCode(true) }
+            }
+            .padding(.top, 14)
+            Spacer(minLength: 0)
         }
-        .foregroundStyle(on ? .white : BoostStyle.ink)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: trailing == nil ? .infinity : 147, minHeight: 38)
-        .frame(width: trailing == nil ? nil : 147)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(on ? BoostStyle.ink : BoostStyle.button))
+        .frame(width: BoostEditorLayout.column)
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased()).font(BoostStyle.label).kerning(0.6).foregroundStyle(.secondary)
+    }
+
+    private var advanced: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            slider("Contrast", \.contrast)
+            slider("Brightness", \.brightness)
+            slider("Saturation", \.saturation)
+        }
+        .padding(16)
+        .frame(width: 240)
+    }
+
+    private func slider(_ title: String, _ key: WritableKeyPath<Boost, Double>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text("\(Int(model.boost[keyPath: key] - 50))").font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+            }
+            Slider(value: Binding(get: { model.boost[keyPath: key] }, set: { v in model.change { $0[keyPath: key] = v } }), in: 0...100)
+                .controlSize(.small).tint(Design.accent)
+        }
+    }
+
+    /// A preview of `Boost.fonts[i]`; the CSS generic families map onto SwiftUI's designs.
+    private static func previewFont(_ i: Int, size: CGFloat) -> Font {
+        switch Boost.fonts[i] {
+        case "-apple-system": .system(size: size)
+        case "ui-rounded": .system(size: size, design: .rounded)
+        case "ui-serif": .system(size: size, design: .serif)
+        case "ui-monospace": .system(size: size, design: .monospaced)
+        case let name: .custom(name, size: size)
+        }
+    }
+
+    private static func fontName(_ i: Int) -> String {
+        switch Boost.fonts[i] {
+        case "-apple-system": "System"
+        case "ui-rounded": "Rounded"
+        case "ui-serif": "Serif"
+        case "ui-monospace": "Monospaced"
+        case let name: name
+        }
+    }
+
+    private var fonts: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 5)
+        return LazyVGrid(columns: columns, spacing: 5) {
+            ForEach(Boost.fonts.indices, id: \.self) { i in
+                let on = model.boost.font == i
+                Button { model.change { $0.font = $0.font == i ? nil : i } } label: {
+                    Text("Aa").font(Self.previewFont(i, size: 15))
+                        .foregroundStyle(on ? Design.accent : Color.primary.opacity(0.75))
+                        .frame(maxWidth: .infinity).frame(height: 34)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(on ? Design.accent.opacity(0.14) : BoostStyle.plate))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(on ? Design.accent.opacity(0.7) : .clear, lineWidth: 1.5))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help(Self.fontName(i)).accessibilityLabel(Self.fontName(i))
+            }
+        }
+    }
+
+    private static let sizes: [Double] = [0.8, 0.9, 1, 1.1, 1.25, 1.5]
+
+    /// Smaller / the size / larger, one step through `sizes` per click.
+    private var sizeControl: some View {
+        let scale = model.boost.textScale
+        let i = Self.sizes.firstIndex(where: { abs($0 - scale) < 0.001 }) ?? 2
+        return HStack(spacing: 0) {
+            stepButton("textformat.size.smaller", help: "Smaller text", enabled: i > 0) { model.change { $0.textScale = Self.sizes[i - 1] } }
+            Text(scale == 1 ? "100%" : "\(Int((scale * 100).rounded()))%")
+                .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                .frame(maxWidth: .infinity)
+            stepButton("textformat.size.larger", help: "Larger text", enabled: i < Self.sizes.count - 1) { model.change { $0.textScale = Self.sizes[i + 1] } }
+        }
+        .frame(height: BoostEditorLayout.control)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(BoostStyle.plate))
+    }
+
+    private func stepButton(_ symbol: String, help: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+                .frame(width: 30, height: BoostEditorLayout.control).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.35).help(help).accessibilityLabel(help)
+    }
+
+    private var caseMenu: some View {
+        Menu {
+            Picker("Text Case", selection: Binding(get: { model.boost.textCase }, set: { c in model.change { $0.textCase = c } })) {
+                ForEach(Boost.TextCase.allCases, id: \.self) { c in Text(c.title).tag(c) }
+            }
+            .pickerStyle(.inline).labelsHidden()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "textformat").font(.system(size: 11, weight: .semibold))
+                Text(model.boost.textCase.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: BoostEditorLayout.control)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(BoostStyle.plate))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).help("Text case")
+    }
+
+    private func chip(_ symbol: String, _ title: String, on: Bool, help: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
+                Text(title).font(.system(size: 11.5, weight: .semibold))
+            }
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(on ? Design.accent : BoostStyle.plate))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(help).accessibilityLabel(help)
+    }
+
+    private func action(_ title: String, symbol: String, on: Bool, help: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+                Text(on ? "Zapping…" : title).font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(on ? Design.accent : BoostStyle.plate))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(BoostStyle.hairline, lineWidth: on ? 0 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(help).accessibilityLabel(help)
     }
 
     private var code: some View {
         VStack(spacing: 0) {
             CodeEditor(text: Binding(get: { model.codeIsJS ? model.boost.js : model.boost.css },
                                      set: { v in if model.codeIsJS { model.boost.js = v } else { model.boost.css = v } }))
-            // Arc: 38 pt squares 15 pt in, in a 69 pt strip under the 479 pt editor.
-            HStack(spacing: 10) {
-                square("eyedropper", on: model.picking, help: model.picking ? "Hide Selector Picker" : "Show Selector Picker", size: 38) {
+                .overlay(alignment: .topLeading) {
+                    if (model.codeIsJS ? model.boost.js : model.boost.css).isEmpty {
+                        Text(model.codeIsJS ? "// Runs on every page of \(model.boost.host)" : "/* Applies to every page of \(model.boost.host) */")
+                            .font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.white.opacity(0.35))
+                            .padding(.leading, 15).padding(.top, 10).allowsHitTesting(false)
+                    }
+                }
+            HStack(spacing: 6) {
+                chip("eyedropper", "Pick", on: model.picking, help: model.picking ? "Hide Selector Picker" : "Show Selector Picker") {
                     model.togglePicker()
                 }
-                square("hammer", on: model.devToolsOpen, help: model.devToolsOpen ? "Hide Developer Tools" : "Show Developer Tools", size: 38) {
+                .frame(width: 84)
+                chip("hammer", "DevTools", on: model.devToolsOpen, help: model.devToolsOpen ? "Hide Developer Tools" : "Show Developer Tools") {
                     model.toggleDevTools()
                 }
+                .frame(width: 104)
                 if model.codeIsJS {
-                    square("arrow.clockwise", on: false, help: "Refresh this Page", size: 38) { model.page.reload() }
+                    chip("arrow.clockwise", "Reload", on: false, help: "Refresh this Page") { model.page.reload() }.frame(width: 90)
                 }
                 Spacer()
             }
-            .padding(.horizontal, 15)
-            .frame(height: 69).background(BoostStyle.panel)
+            .padding(.horizontal, BoostEditorLayout.inset)
+            .frame(height: 56)
         }
-        .frame(width: 480)
+        .frame(width: BoostEditorLayout.codeWidth)
     }
 
     private func rename() {
@@ -419,8 +550,8 @@ private struct BoostEditorView: View {
     }
 }
 
-/// Arc's colour wheel: a rounded square in a grey gradient frame, dotted inside; the big handle is
-/// the tint (hue round the middle, strength out from it), the small one sits at the middle.
+/// The colour wheel: a rounded square framed by the hue circle, dotted inside. The handle is the
+/// tint: its hue round the middle, its strength out from it. In the middle, the site's own colours.
 private struct ColorWheel: View {
     let hue: Double
     let strength: Double
@@ -428,38 +559,49 @@ private struct ColorWheel: View {
 
     var body: some View {
         GeometryReader { geo in
-            let size = geo.size.width, inner = size - 14, c = size / 2
-            let angle = hue * 2 * .pi, r = strength * (inner / 2 - 18)
-            let handle = CGPoint(x: c + cos(angle) * r, y: c - sin(angle) * r)
+            let w = geo.size.width, h = geo.size.height
+            let c = CGPoint(x: w / 2, y: h / 2)
+            let reach = min(w, h) / 2 - 22
+            let angle = hue * 2 * .pi, r = strength * reach
+            let handle = CGPoint(x: c.x + cos(angle) * r, y: c.y - sin(angle) * r)
+            let tint = Color(hue: hue, saturation: 0.65, brightness: 0.9)
             ZStack {
-                // Arc's frame: brushed metal, dark at the top left and right, light at the bottom.
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(AngularGradient(colors: [Color(white: 0.55), Color(white: 0.25), Color(white: 0.45), Color(white: 0.85),
-                                                   Color(white: 0.95), Color(white: 0.7), Color(white: 0.55)], center: .center, angle: .degrees(180)))
-                    .overlay(strength > 0 ? RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .fill(Color(hue: hue, saturation: 0.5, brightness: 0.8).opacity(0.35)) : nil)
-                RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.white).padding(7)
+                // The frame: every hue, faint, so the wheel says what it picks before it is touched.
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(AngularGradient(colors: (0...12).map { Color(hue: Double($0) / 12, saturation: 0.75, brightness: 0.95) },
+                                          center: .center, angle: .degrees(0)))
+                    .opacity(0.55)
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .padding(6)
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .fill(RadialGradient(colors: [tint.opacity(strength * 0.35), .clear], center: UnitPoint(x: handle.x / w, y: handle.y / h),
+                                         startRadius: 0, endRadius: reach))
+                    .padding(6)
                 Canvas { ctx, s in
-                    for x in stride(from: 12.0, to: s.width - 12, by: 6) {
-                        for y in stride(from: 12.0, to: s.height - 12, by: 6) {
-                            ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1, height: 1)), with: .color(.black.opacity(0.12)))
+                    for x in stride(from: 14.0, to: s.width - 13, by: 7) {
+                        for y in stride(from: 14.0, to: s.height - 13, by: 7) {
+                            ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.2, height: 1.2)), with: .color(.primary.opacity(0.13)))
                         }
                     }
                 }
-                // Arc's second, smaller handle: the darker end of the tint, between the middle and the big one.
-                Circle().fill(Color(white: 0.17)).frame(width: 22, height: 22).overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 1.5)
-                    .position(x: c + (handle.x - c) * 0.55 - 8, y: c + (handle.y - c) * 0.55 + 22)
-                Circle().fill(strength > 0 ? Color(hue: hue, saturation: 0.6, brightness: 0.8) : Color(white: 0.45))
-                    .frame(width: 32, height: 32).overlay(Circle().stroke(.white, lineWidth: 3)).shadow(radius: 2)
+                Circle().fill(Color.primary.opacity(0.25)).frame(width: 6, height: 6).position(c)
+                Circle().fill(strength > 0 ? tint : Color(white: 0.55))
+                    .frame(width: 28, height: 28)
+                    .overlay(Circle().strokeBorder(.white, lineWidth: 3))
+                    .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
                     .position(handle)
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { g in
-                let dx = g.location.x - c, dy = c - g.location.y
+                let dx = g.location.x - c.x, dy = c.y - g.location.y
                 var a = atan2(dy, dx) / (2 * .pi)
                 if a < 0 { a += 1 }
-                set(a, min(1, hypot(dx, dy) / (inner / 2 - 18)))
+                set(a, min(1, hypot(dx, dy) / reach))
             })
+            .accessibilityElement()
+            .accessibilityLabel("Colour")
+            .accessibilityValue(strength == 0 ? "Original" : "Hue \(Int(hue * 360)) degrees, strength \(Int(strength * 100)) percent")
         }
     }
 }

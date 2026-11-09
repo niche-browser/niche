@@ -145,8 +145,9 @@ struct BannerPalette {
             v = lo
         }
         let white = NSColor.white
-        fill = dark ? (white.withAlphaComponent(0.12), white.withAlphaComponent(0.07)) : (white.withAlphaComponent(0.94), white.withAlphaComponent(0.58))
-        hoverFill = dark ? (white.withAlphaComponent(0.16), white.withAlphaComponent(0.11)) : (white.withAlphaComponent(0.96), white.withAlphaComponent(0.66))
+        // One flat fill (Arc's faded from 94 % at the top left to 58 %).
+        fill = dark ? (white.withAlphaComponent(0.09), white.withAlphaComponent(0.09)) : (white.withAlphaComponent(0.82), white.withAlphaComponent(0.82))
+        hoverFill = dark ? (white.withAlphaComponent(0.13), white.withAlphaComponent(0.13)) : (white.withAlphaComponent(0.92), white.withAlphaComponent(0.92))
         let ink = hsb(s * 1.2, 0.216)
         title = dark ? colors.textPrimary : ink
         secondary = dark ? colors.textSecondary : ink.withAlphaComponent(0.7)

@@ -190,14 +190,22 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         }
 
         wireActions()
+        // In the Library the edge sets how much wider than the tab sidebar it is (LibraryWidth);
+        // the pages under it keep their size, so the drag never lays a page out again.
         shell.resizeHandle.onDrag = { [weak self] dx in
             guard let self else { return }
-            let w = min(max(NicheMetrics.sidebarMinWidth, shell.sidebarWidth + dx), NicheMetrics.sidebarMaxWidth)
+            let w = sidebarUI.libraryPage != nil
+                ? CGFloat(LibraryWidth.clamp(Double(shell.sidebarWidth + dx), sidebar: store.prefs.sidebarWidth))
+                : min(max(NicheMetrics.sidebarMinWidth, shell.sidebarWidth + dx), NicheMetrics.sidebarMaxWidth)
             shell.sidebarWidth = w
             shell.layoutSubtreeIfNeeded()
         }
         shell.resizeHandle.onEnd = { [weak self] in
             guard let self else { return }
+            if sidebarUI.libraryPage != nil {
+                store.prefs.libraryExtraWidth = LibraryWidth.extra(forDragged: Double(shell.sidebarWidth.rounded()), sidebar: store.prefs.sidebarWidth)
+                return
+            }
             store.prefs.sidebarWidth = Double(shell.sidebarWidth)
             lastSidebarWidth = shell.sidebarWidth
         }
@@ -2125,6 +2133,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         let opening = sidebarUI.libraryPage == nil
         let resize = !opening && sidebarUI.libraryPage.map(libraryWidth) != libraryWidth(page)
         withAnimation(.easeOut(duration: 0.05)) { sidebarUI.libraryPage = page }
+        // The Spaces page sizes itself to its cards; every other page can be dragged wider.
+        shell.sidebarResizable = page != .spaces
         if resize {
             shell.sidebarWidth = libraryWidth(page)
             shell.animateSidebar(visible: true, floating: false, fullscreen: shell.contentFullscreen, width: shell.sidebarWidth, duration: 0.1)
@@ -2132,9 +2142,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         guard opening else { return }
         sidebarUI.downloadsListOpen = false
         commandBar.close()
-        shell.sidebarResizable = false
         let width = libraryWidth(page)
         if sidebarVisible {
+            shell.pageSidebarWidth = CGFloat(store.prefs.sidebarWidth)
             shell.sidebarWidth = width
             shell.animateSidebar(visible: true, floating: false, fullscreen: shell.contentFullscreen, width: width)
         } else {
@@ -2146,11 +2156,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         window?.makeKey()
     }
 
-    /// The sidebar's width with the Library in it: 70 pt wider for the rail, or on the Spaces page
-    /// wide enough for every space's card, leaving the page 56 pt (Arc 1.171; the cards scroll
-    /// sideways when they don't fit).
+    /// The sidebar's width with the Library in it: the tab sidebar's plus what the user dragged it
+    /// to (LibraryWidth, 40 pt untouched), or on the Spaces page wide enough for every space's
+    /// card, leaving the page 56 pt (Arc 1.171; the cards scroll sideways when they don't fit).
     private func libraryWidth(_ page: LibraryPage) -> CGFloat {
-        let base = CGFloat(store.prefs.sidebarWidth) + LibraryMetrics.extraWidth
+        let base = CGFloat(LibraryWidth.width(sidebar: store.prefs.sidebarWidth, extra: store.prefs.libraryExtraWidth))
         guard page == .spaces else { return base }
         let n = store.orderedSpaces.filter { !store.isIncognito(space: $0.id) }.count
         let room = (window?.frame.width ?? 1280) - SpacesManagerMetrics.pageRoom
@@ -2162,6 +2172,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         withAnimation(.easeOut(duration: 0.1)) { sidebarUI.libraryPage = nil }
         shell.sidebarResizable = true
         let width = CGFloat(store.prefs.sidebarWidth)
+        shell.pageSidebarWidth = nil
         shell.sidebarWidth = width
         if libraryShowedSidebar {
             libraryShowedSidebar = false
@@ -2421,7 +2432,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// Library's, so the Library lands at its width with nothing left to resize.
     private func setLibraryReveal(_ r: CGFloat) {
         // Embedded pages keep their size under their cards until the swipe lands.
-        if sidebarUI.libraryReveal == nil, EmbeddedPages.isEnabled { shell.freezePages() }
+        // Pages the Library held (open before this swipe) stay at that size.
+        if sidebarUI.libraryReveal == nil, EmbeddedPages.isEnabled {
+            shell.freezePages()
+            shell.pageSidebarWidth = nil
+        }
         sidebarUI.libraryReveal = r
         shell.sidebarWidth = LibrarySwipe.sidebarWidth(reveal: r, base: sidebarUI.libraryRevealBase, library: sidebarUI.libraryRevealWidth)
     }
@@ -2504,12 +2519,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
                 sidebarUI.lastLibraryPage = page
                 sidebarUI.downloadsListOpen = false
                 commandBar.close()
-                shell.sidebarResizable = false
+                shell.sidebarResizable = page != .spaces
                 withTransaction(instant) { sidebarUI.libraryPage = page }
                 window?.makeKey()
             }
             width = libraryWidth(page)
+            shell.pageSidebarWidth = sidebarUI.libraryRevealBase
         } else {
+            shell.pageSidebarWidth = nil
             if sidebarUI.libraryPage != nil {
                 withTransaction(instant) { sidebarUI.libraryPage = nil }
                 shell.sidebarResizable = true
