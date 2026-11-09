@@ -512,6 +512,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
             // Anchoring while the sidebar floats: bring it home first so it slides from there.
             if lastSidebarVisible { floatingSidebar?.prepareForAnchoring() }
             shell.animateSidebar(visible: lastSidebarVisible, floating: false, fullscreen: shell.contentFullscreen, width: shell.sidebarWidth)
+            if !lastSidebarVisible {
+                shell.pageSidebarWidth = nil
+                shell.sidebarWidth = CGFloat(store.prefs.sidebarWidth)
+            }
         }
         if CGFloat(store.prefs.sidebarWidth) != lastSidebarWidth {
             lastSidebarWidth = CGFloat(store.prefs.sidebarWidth)
@@ -2100,10 +2104,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
 
     func toggleSidebar() {
         if sidebarUI.libraryPage != nil {
-            // The Library brought the sidebar out: leaving it hides the sidebar again.
-            let showed = libraryShowedSidebar
-            closeLibrary()
-            if showed { return }
+            // ⌘S in the Library leaves it and hides the sidebar in one move, straight from the
+            // Library's width (going back to the tab sidebar's first moved the page twice).
+            closeLibrary(hidingSidebar: true)
+            return
         }
         sidebarVisible.toggle()
         if !sidebarVisible { setFloatingSidebar(false) }
@@ -2150,6 +2154,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         } else {
             setFloatingSidebar(false)
             libraryShowedSidebar = true
+            // The Library comes out over the page, which keeps the size it has without a sidebar.
+            shell.pageSidebarWidth = shell.contentInset
             shell.sidebarWidth = width
             sidebarVisible = true
         }
@@ -2167,17 +2173,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         return max(base, min(SpacesManagerMetrics.width(spaces: n), room))
     }
 
-    func closeLibrary() {
+    func closeLibrary(hidingSidebar: Bool = false) {
         guard sidebarUI.libraryPage != nil else { return }
         withAnimation(.easeOut(duration: 0.1)) { sidebarUI.libraryPage = nil }
         shell.sidebarResizable = true
         let width = CGFloat(store.prefs.sidebarWidth)
-        shell.pageSidebarWidth = nil
-        shell.sidebarWidth = width
-        if libraryShowedSidebar {
+        if libraryShowedSidebar || hidingSidebar {
+            // The sidebar slides out at the Library's width and the pages keep their size until it
+            // starts to (syncShell then sets both back).
             libraryShowedSidebar = false
             sidebarVisible = false
         } else {
+            shell.sidebarWidth = width
+            shell.pageSidebarWidth = nil
             shell.animateSidebar(visible: shell.sidebarVisible, floating: false, fullscreen: shell.contentFullscreen, width: width, duration: 0.1)
         }
         currentBrowser?.setFocused(true)

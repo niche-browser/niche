@@ -8,7 +8,9 @@ import Foundation
 /// - hides the "Switch to Chrome?" card (a dialog holding `#promo-header`, or a link to
 ///   google.com/chrome) and the "Switch to Chrome to install extensions and themes" banner (the
 ///   block around its Install Chrome button);
-/// and does both again whenever the store redraws.
+/// and does both again whenever the store redraws. It watches the document itself, not its body,
+/// and needs no load event: the store can write a new document over the one the script started
+/// in (a tab another page opened), which takes the old body, the style and the listeners with it.
 public enum WebStoreBranding {
     public static let host = "chromewebstore.google.com"
 
@@ -26,7 +28,6 @@ public enum WebStoreBranding {
           const relabel = \(relabel);
           const style = document.createElement('style');
           style.textContent = 'div[role="dialog"]:has(#promo-header), div[role="dialog"]:has(a[href*="google.com/chrome/"]) { display: none !important; }';
-          (document.head || document.documentElement).appendChild(style);
           const hideBanner = button => {
             let e = button;
             while (e.parentElement && !/Switch to Chrome to install/.test(e.textContent)) e = e.parentElement;
@@ -35,6 +36,7 @@ public enum WebStoreBranding {
             if (e !== document.body && e !== document.documentElement) e.style.setProperty('display', 'none', 'important');
           };
           const fix = () => {
+            if (!style.isConnected && document.documentElement) (document.head || document.documentElement).appendChild(style);
             for (const b of document.querySelectorAll('button')) {
               const label = b.getAttribute('aria-label') || '';
               if (/^Switch to Chrome/.test(label) || b.textContent.trim() === 'Install Chrome') { hideBanner(b); continue; }
@@ -47,16 +49,8 @@ public enum WebStoreBranding {
               }
             }
           };
-          let queued = false;
-          const start = () => {
-            fix();
-            new MutationObserver(() => {
-              if (queued) return;
-              queued = true;
-              requestAnimationFrame(() => { queued = false; fix(); });
-            }).observe(document.body, { childList: true, subtree: true, characterData: true });
-          };
-          if (document.body) start(); else addEventListener('DOMContentLoaded', start, { once: true });
+          new MutationObserver(fix).observe(document, { childList: true, subtree: true, characterData: true });
+          fix();
         })();
         """
     }

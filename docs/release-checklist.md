@@ -124,9 +124,14 @@ built release app with a test profile. Note anything that fails in the release's
   centred.
 - Open an extension's page on the Chrome Web Store: the button says "Add to Niche" (and "Remove
   from Niche" once installed), with no "Switch to Chrome?" card and no "Switch to Chrome to
-  install" banner. Google renames its page's parts now and then; this is where it shows.
+  install" banner. Google renames its page's parts now and then; this is where it shows. Do it
+  three ways: a tab you type the address into, the "Chrome Web Store" link on
+  `chrome://extensions` (the store writes a new document over the first one there), and another
+  item clicked inside the store.
 - In the Library, drag the sidebar's edge: it widens and narrows (never below the tab sidebar),
   the page under it doesn't reflow, and the width is the same after closing and reopening it.
+  With several spaces, go Spaces, Boosts, Spaces, Media: the page never zooms in or out
+  (scenario `library-pages-keep-page-size` counts its resizes; this is the eye check).
 - **#43:** Load unpacked in `chrome://extensions`. The extension shows in the open Extensions
   popover within about 1 s, and so does an on/off switch.
 - **#41:** on a test copy, `Extensions.triggerAction` on a turned-off extension answers "No

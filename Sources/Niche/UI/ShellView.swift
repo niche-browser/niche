@@ -121,6 +121,10 @@ final class ShellView: NSView {
     /// and closing the Library never makes Chromium lay a page out again (the page jumped, as if
     /// zoomed, once the sidebar settled).
     var pageSidebarWidth: CGFloat? { didSet { if pageSidebarWidth != oldValue { needsLayout = true } } }
+
+    /// The card's margin from the window: with the sidebar hidden the page is the window less this
+    /// on each side, which is also its size beside a "sidebar" this wide (`pageSidebarWidth`).
+    var contentInset: CGFloat { edgeToEdge ? 0 : NicheMetrics.contentInset }
     /// Off while the Library has the sidebar: its width is not the user's to drag.
     var sidebarResizable = true { didSet { needsLayout = true } }
     var sidebarVisible = true { didSet { needsLayout = true } }
@@ -634,7 +638,7 @@ final class ShellView: NSView {
         }
         // Edge to edge the card fills what the sidebar leaves, square; the window's own
         // corners round it where they meet.
-        let inset = edgeToEdge ? 0 : NicheMetrics.contentInset
+        let inset = contentInset
         let radius = edgeToEdge ? 0 : NicheMetrics.contentCornerRadius
         if sidebarVisible {
             let content = NSRect(x: width, y: inset, width: max(0, b.width - width - inset), height: max(0, b.height - 2 * inset))
@@ -717,7 +721,7 @@ final class ShellView: NSView {
         updateFocusRings()
         let toolbarVisible = panesShowBars
         let layout = paneLayout(in: cb)
-        let held = animatingFrames || animatingPanes ? nil : heldPageLayout(in: cb)
+        let held = animatingFrames || animatingPanes ? nil : heldPageLayout()
         if let held {
             for c in paneCards where c.tabID != ShellView.noTabID {
                 guard let f = held.frames[c.tabID] else { continue }
@@ -804,13 +808,14 @@ final class ShellView: NSView {
 
     /// The pane layout the pages keep while the Library widens the sidebar (`pageSidebarWidth`),
     /// nil when they follow their cards. Pages in their own windows (DevTools open, or embedding
-    /// off) can't be clipped by a card, so those follow it.
-    private func heldPageLayout(in cb: NSRect) -> SplitPaneLayout.Result? {
+    /// off) can't be clipped by a card, so those follow it. The size comes from the window, not the
+    /// card: while the sidebar animates to another Library page's width the card is still at the
+    /// old one, and the card's width plus the new extra grew the page for a frame (Spaces ↔ Boosts).
+    private func heldPageLayout() -> SplitPaneLayout.Result? {
         guard let base = pageSidebarWidth, EmbeddedPages.isEnabled, sidebarVisible, !floatingSidebar,
-              !contentFullscreen, !devToolsVisible else { return nil }
-        let extra = sidebarWidth - base
-        guard extra > 0 else { return nil }
-        return paneLayout(in: NSRect(x: 0, y: 0, width: cb.width + extra, height: cb.height))
+              !contentFullscreen, !devToolsVisible, sidebarWidth > base else { return nil }
+        let content = frames(sidebarVisible: true, floating: false, fullscreen: false, width: base).content
+        return paneLayout(in: NSRect(origin: .zero, size: content.size))
     }
 
     private func layoutSidePanel(in cb: NSRect) {
