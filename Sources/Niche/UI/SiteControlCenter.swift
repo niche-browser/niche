@@ -747,7 +747,9 @@ final class SiteControlCenterPopover: NSObject, NSPopoverDelegate {
         if let popover, popover.isShown { popover.performClose(nil) }
         let p = NSPopover()
         p.behavior = .transient
-        p.animates = true
+        // No system pop: AppKit's popover grows in with an overshoot and shrinks out, which read
+        // as a bounce on every open. It is simply there, like the menus beside it.
+        p.animates = false
         p.delegate = self
         p.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         var acts = actions

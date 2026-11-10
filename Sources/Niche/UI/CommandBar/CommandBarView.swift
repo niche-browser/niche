@@ -120,7 +120,7 @@ final class CommandBarView: NSView {
         // Closest AppKit materials to SwiftUI's .ultraThinMaterial under the bar's tint (dark: compared
         // pixel for pixel over the same page).
         material.material = dark ? .hudWindow : .popover
-        tint.layer?.backgroundColor = (dark ? NSColor(hex: "#16181b").withAlphaComponent(0.78) : NSColor.white.withAlphaComponent(0.76)).cgColor
+        tint.layer?.backgroundColor = (dark ? NSColor(Design.graphite).withAlphaComponent(0.78) : NSColor.white.withAlphaComponent(0.76)).cgColor
         border.strokeColor = NSColor.labelColor.withAlphaComponent(dark ? 0.14 : 0.1).cgColor
         divider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.07).cgColor
         footerDivider.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
@@ -366,19 +366,10 @@ final class CommandBarView: NSView {
 
     /// UnevenRoundedRectangle: smaller top corners while the bar hangs from the toolbar.
     private static func path(_ r: CGRect, top: CGFloat, bottom: CGFloat) -> CGPath {
-        let p = CGMutablePath()
-        // Flipped view: minY is the top edge.
-        p.move(to: CGPoint(x: r.minX + top, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX - top, y: r.minY))
-        p.addArc(tangent1End: CGPoint(x: r.maxX, y: r.minY), tangent2End: CGPoint(x: r.maxX, y: r.minY + top), radius: top)
-        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - bottom))
-        p.addArc(tangent1End: CGPoint(x: r.maxX, y: r.maxY), tangent2End: CGPoint(x: r.maxX - bottom, y: r.maxY), radius: bottom)
-        p.addLine(to: CGPoint(x: r.minX + bottom, y: r.maxY))
-        p.addArc(tangent1End: CGPoint(x: r.minX, y: r.maxY), tangent2End: CGPoint(x: r.minX, y: r.maxY - bottom), radius: bottom)
-        p.addLine(to: CGPoint(x: r.minX, y: r.minY + top))
-        p.addArc(tangent1End: CGPoint(x: r.minX, y: r.minY), tangent2End: CGPoint(x: r.minX + top, y: r.minY), radius: top)
-        p.closeSubpath()
-        return p
+        // Continuous corners, like every other surface (docs/design.md, Shape). The view is flipped
+        // and so is SwiftUI's space: minY is the top edge in both.
+        UnevenRoundedRectangle(cornerRadii: .init(topLeading: top, bottomLeading: bottom, bottomTrailing: bottom, topTrailing: top),
+                               style: .continuous).path(in: r).cgPath
     }
 }
 

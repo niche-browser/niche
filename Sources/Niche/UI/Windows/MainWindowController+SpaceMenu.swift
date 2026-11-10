@@ -6,6 +6,7 @@ extension MainWindowController {
     /// Change Space Icon…: the icon picker in a popover pointing up at the header's icon.
     func showSpaceIconPicker(space: Space, anchor: NSView) {
         let popover = NSPopover()
+        popover.animates = false   // no system pop (SiteControlCenter.show)
         popover.behavior = .transient
         let id = space.id, store = self.store
         let set: (String, String?) -> Void = { [weak popover] emoji, symbol in
@@ -115,6 +116,8 @@ final class StyleEditorPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         isReleasedWhenClosed = false
+        // AppKit zooms a panel in and out by default: the editor bounced each time it opened.
+        animationBehavior = .none
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] e in
             guard let self else { return e }
             if e.type == .keyDown {

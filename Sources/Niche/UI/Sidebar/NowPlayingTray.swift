@@ -30,7 +30,8 @@ enum NowPlayingMetrics {
     static let restingCards = 3
     static let ghostLift: CGFloat = 7.25
     static let ghostAlpha: CGFloat = 0.15
-    static let corner: CGFloat = 6
+    /// The rows' corner, so the card reads as one of the sidebar's plates (Arc: 6).
+    static let corner: CGFloat = NicheMetrics.rowCorner
     static let closeCentreFromRight: CGFloat = 21.75
     static let pipCentreFromRight: CGFloat = 45.5
     static let titleCentreFromTop: CGFloat = 16.25

@@ -24,13 +24,24 @@ bar). Always `.continuous` corners.
 
 ## Space
 
-Card rows are at least 44 pt tall with 14 pt text insets. 26 pt between one card group and the
-next header; panes sit 28 pt from the window's edges.
+`Design.Space`: card rows are at least 52 pt tall with 16 pt text insets. 28 pt between one card
+group and the next header; panes sit 32 pt from the window's edges.
 
 ## Type
 
-SF Pro only; no serif. Pane titles 20 semibold, section headers 13 semibold, body 13, details
-11.5 secondary. Onboarding headlines are semibold with tight tracking (−1.4 at 42 pt).
+SF Pro only; no serif. Pane titles 22 semibold, section headers 13 semibold, body 13, details
+12 secondary (`Design.Font`). Onboarding headlines are semibold with tight tracking (−1.4 at 42 pt).
+
+## Motion
+
+`Design.Motion`: `fast` (0.12 s) for what the pointer causes, `standard` (0.22 s) on `curve` for a
+view arriving or a list changing. A hover or selection fill shows at once and fades out in `fast`
+(`CALayer.fadeOutFill`); a pressed row or tile sinks to 97.5 % and comes back on release
+(`NSView.setPressedLook`); the command bar fades in over `fast` while it settles from 98 %, and
+fades out in 0.09 s after the page has the keys back. Check `Design.Motion.reduced` (Reduce
+motion) before anything travels: the change still happens, it doesn't move. Motions measured from
+Arc (the sidebar slide, a row's bounce, the Library's 0.05 s) keep their numbers beside the
+measurement.
 
 ## Settings
 

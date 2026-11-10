@@ -133,7 +133,9 @@ final class SidebarView: NSView {
             bannerHost.colors = colors
             let shown = space.theme.shown
             bannerHost.themeColor = shown.accent ?? shown.colors.first
-            player.setTheme(shown.accent ?? shown.colors.first, dark: palette.isDark)
+            // A dark card takes the sidebar's own colour: an accent of another hue made a
+            // teal-black card on a slate sidebar (Nov 2026). Light cards keep Arc's accent tint.
+            player.setTheme(palette.isDark ? (shown.colors.first ?? shown.accent) : (shown.accent ?? shown.colors.first), dark: palette.isDark)
             libraryHost?.palette = palette
         }
         self.bannerHeight = bannerHeight
@@ -322,6 +324,9 @@ final class SidebarTopBarView: NSView {
     private var rowButtons: [SidebarGlyphButton] = []
     private var chevron: NSView?
     private let pill = SidebarURLPill()
+    /// The space's name by the traffic lights, a menu of the spaces, while the toolbar carries the
+    /// sidebar toggle and this row would otherwise be empty.
+    private var switcher: SidebarSpaceSwitcher?
 
     /// Where the URL field's sliders button is or appears on hover (screen rect): its last
     /// accessory, 28 pt ending 5 pt in. nil while the field isn't shown (the toolbar has it).
@@ -400,10 +405,28 @@ final class SidebarTopBarView: NSView {
         let active = ui.appActive
         let reloadSymbol = ui.isLoading ? "xmark" : "arrow.clockwise"
         fullscreen = ui.windowFullscreen
-        // Arc 1.171: the header always carries the sidebar toggle; the toolbar has one only while the
-        // sidebar is hidden (PaneToolbarView), so a floating sidebar shows both.
+        // The toolbar carries the sidebar toggle while it can (ToolbarComposition.barCarriesToggle);
+        // the header has it otherwise: no toolbar, a split's bars, an empty pane, developer mode.
         let help = store.window(ui.windowID).sidebarVisible ? "Hide Sidebar (⌘S)" : "Show Sidebar (⌘S)"
-        var shown = [button("toggle", symbol: "sidebar.left", help: help, size: 32, height: 32, iconSize: 15.5, active: active) { [weak self] in self?.actions.toggleSidebar() }]
+        let barKind: ToolbarComposition.Kind = tab == nil ? .noTab : (tab?.isEmptyTab == true ? .emptyPane : (devNav ? .developer : .normal))
+        var shown: [SidebarGlyphButton] = []
+        let headerHasToggle = ToolbarComposition.sidebarHeaderHasToggle(toolbarShown: !compact, kind: barKind, inSplit: ui.splitPaneIDs.count > 1)
+        if headerHasToggle {
+            shown.append(button("toggle", symbol: "sidebar.left", help: help, size: 32, height: 32, iconSize: 15.5, active: active) { [weak self] in self?.actions.toggleSidebar() })
+        }
+        // An incognito or Blank Window has one space of its own: nothing to switch to.
+        if !headerHasToggle, !store.isStandalone(window: ui.windowID) {
+            let sw = switcher ?? {
+                let v = SidebarSpaceSwitcher(store: store, ui: ui, actions: actions)
+                addSubview(v)
+                switcher = v
+                return v
+            }()
+            sw.show(space: store.focusedSpace(window: ui.windowID), colors: colors, active: active)
+        } else if let sw = switcher {
+            sw.removeFromSuperview()
+            switcher = nil
+        }
         if compact {
             shown.append(button("back", symbol: "arrow.left", help: "Go Back (⌘[)", size: 32, height: 32, iconSize: 15, active: active, enabled: ui.canGoBack) { [weak self] in self?.actions.goBack() })
             shown.append(button("forward", symbol: "arrow.right", help: "Go Forward (⌘])", size: 32, height: 32, iconSize: 15, active: active, enabled: ui.canGoForward) { [weak self] in self?.actions.goForward() })
@@ -456,6 +479,11 @@ final class SidebarTopBarView: NSView {
         // Arc draws it from 20 pt in (glyph 20–38.5 pt); the floating panel draws stand-in lights.
         let lights = !fullscreen || window?.parent != nil
         if let t = rowButtons.first { t.frame = NSRect(x: lights ? 6 + 71 + 2 : 13, y: NicheMetrics.titleRowCenter - 17, width: 32, height: 32) }
+        if let sw = switcher {
+            let x: CGFloat = lights ? 6 + 71 + 2 : 13
+            sw.frame = NSRect(x: x, y: NicheMetrics.titleRowCenter - SidebarSpaceSwitcher.height / 2,
+                              width: min(sw.idealWidth, max(0, w - x - 8)), height: SidebarSpaceSwitcher.height)
+        }
         if compact {
             // ← → ↻ 2 pt apart, 6 pt from the edge.
             let y = NicheMetrics.titleRowCenter - 17
@@ -502,6 +530,117 @@ final class SidebarTopBarView: NSView {
     }
     override func mouseEntered(with event: NSEvent) { hoverHeader = true }
     override func mouseExited(with event: NSEvent) { hoverHeader = false }
+}
+
+/// The window's space by the traffic lights: its name and a small chevron on a plate that shows on
+/// hover, and a menu of the spaces under it (the one shown ticked, then New Space…). There while
+/// the toolbar carries the sidebar toggle (`ToolbarComposition.sidebarHeaderHasToggle`).
+final class SidebarSpaceSwitcher: NSView {
+    static let height: CGFloat = 26
+    private let store: SidebarStore
+    private let ui: SidebarUIState
+    private let actions: SidebarActions
+    private let label = NSTextField.sidebarLabel(size: 13, weight: .semibold)
+    private let chevron = NSImageView()
+    private var colors = SidebarColors()
+    private var hovering = false { didSet { if hovering != oldValue { refreshFill() } } }
+    private var menuOpen = false { didSet { if menuOpen != oldValue { refreshFill() } } }
+
+    init(store: SidebarStore, ui: SidebarUIState, actions: SidebarActions) {
+        self.store = store
+        self.ui = ui
+        self.actions = actions
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.cornerCurve = .continuous
+        chevron.image = SidebarSymbols.image("chevron.down", size: 9, weight: .bold)
+        chevron.imageScaling = .scaleNone
+        addSubview(label)
+        addSubview(chevron)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.popUpButton)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    /// 8 pt in, the name, 5 pt, the chevron, 8 pt.
+    var idealWidth: CGFloat { 8 + ceil(label.intrinsicContentSize.width) + 5 + 10 + 8 }
+
+    func show(space: Space, colors c: SidebarColors, active: Bool) {
+        colors = c
+        if label.stringValue != space.labeled {
+            label.stringValue = space.labeled
+            superview?.needsLayout = true
+        }
+        // Like the header's buttons, the name steps back while Niche is behind another app.
+        label.textColor = c.textPrimary.withAlphaComponent(c.textPrimary.alphaComponent * (active ? 0.9 : 0.5))
+        chevron.contentTintColor = c.textTertiary
+        setAccessibilityLabel("Space")
+        setAccessibilityValue(space.title)
+        refreshFill()
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let h = label.intrinsicContentSize.height
+        let textWidth = max(0, bounds.width - 8 - 5 - 10 - 8)
+        label.frame = NSRect(x: 8 - SidebarText.inset, y: (bounds.height - h) / 2, width: textWidth + 2 * SidebarText.inset, height: h)
+        label.fadeTail(width: 16)
+        chevron.frame = NSRect(x: bounds.width - 8 - 10, y: (bounds.height - 10) / 2 + 0.5, width: 10, height: 10)
+    }
+
+    private func refreshFill() {
+        guard let layer else { return }
+        let fill = hovering || menuOpen ? colors.hoverFill : NSColor.clear
+        let old = layer.presentation()?.backgroundColor ?? layer.backgroundColor
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.backgroundColor = fill.cgColor
+        CATransaction.commit()
+        layer.fadeOutFill(from: old, to: fill)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressedLook(true)
+        openMenu()
+        setPressedLook(false)
+    }
+
+    override func accessibilityPerformPress() -> Bool { openMenu(); return true }
+    override func accessibilityPerformShowMenu() -> Bool { openMenu(); return true }
+
+    /// The spaces in the sidebar's order, the window's ticked, then New Space…; opens under the name.
+    private func openMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let focused = store.focusedSpaceID(window: ui.windowID)
+        for space in store.orderedSpaces {
+            MenuItems.add(menu, space.labeled, on: space.id == focused) { [store, ui] in
+                if space.id != focused { store.focusSpace(space.id, window: ui.windowID) }
+            }
+        }
+        menu.addItem(.separator())
+        MenuItems.add(menu, "New Space…") { [actions] in actions.editSpace(nil) }
+        menuOpen = true
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 4), in: self)
+        menuOpen = false
+        // The pointer may have left while the menu had the mouse.
+        hovering = window.map { bounds.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+    }
 }
 
 /// The ⌄ after the developer-mode nav buttons: page actions in a menu.
@@ -976,7 +1115,8 @@ final class SpaceCellView: NSView, ArcTooltipTarget {
         self.ui = ui
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = Design.Radius.inset
+        layer?.cornerCurve = .continuous
         emojiHolder.wantsLayer = true
         emojiHolder.layerUsesCoreImageFilters = true
         emoji.alignment = .center

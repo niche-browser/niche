@@ -212,6 +212,9 @@ final class SidebarGlyphButton: NSView {
             tip = ArcTooltipAnchorView.attach(to: self, help: help)
             tip?.optionText = optionHelp
         }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(ArcTooltipLabel.split(help).0)
         refresh()
     }
 
@@ -259,6 +262,7 @@ final class SidebarGlyphButton: NSView {
     }
 
     func setHelp(_ help: String) {
+        setAccessibilityLabel(ArcTooltipLabel.split(help).0)
         if let tip { (tip.text, tip.keys) = ArcTooltipLabel.split(help) } else if !help.isEmpty { tip = ArcTooltipAnchorView.attach(to: self, help: help) }
     }
 
@@ -276,7 +280,24 @@ final class SidebarGlyphButton: NSView {
         }
         glyph.contentTintColor = self.tint ?? tint
         mark?.strokeColor = (self.tint ?? tint).cgColor
-        layer?.backgroundColor = ((hovering || highlighted) && enabled ? colors.hoverFill : .clear).cgColor
+        setFill((hovering || highlighted) && enabled ? colors.hoverFill : .clear)
+    }
+
+    /// The hover fill shows at once and fades out (Design.Motion.fast).
+    private func setFill(_ fill: NSColor) {
+        guard let layer else { return }
+        let old = layer.presentation()?.backgroundColor ?? layer.backgroundColor
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.backgroundColor = fill.cgColor
+        CATransaction.commit()
+        layer.fadeOutFill(from: old, to: fill)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard enabled, !isHiddenOrHasHiddenAncestor else { return false }
+        action()
+        return true
     }
 
     override func layout() {
@@ -342,6 +363,15 @@ final class SidebarGlyphButton: NSView {
     override func mouseUp(with event: NSEvent) {
         if turnsOnPress { glyph.pressTurn(false) }
         if enabled, bounds.contains(convert(event.locationInWindow, from: nil)) { action() }
+        // What the click did may move the button out from under a still pointer (the sidebar
+        // sliding away): no mouseExited comes, so look again (ToolbarGlyphButton.syncHover).
+        for delay in [0.05, 0.4] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, let w = self.window else { return }
+                let inside = !self.isHiddenOrHasHiddenAncestor && self.bounds.contains(self.convert(w.mouseLocationOutsideOfEventStream, from: nil))
+                if self.hovering != inside { self.hovering = inside }
+            }
+        }
     }
 }
 
@@ -552,7 +582,30 @@ class SidebarRowView: NSView {
     func refreshBackground() {
         var fill = baseFill()
         if decor.combine != nil { fill = .clear } else if decor.badge != nil, fill == .clear { fill = colors.selectedFill }
+        let old = fillLayer.presentation()?.backgroundColor ?? fillLayer.backgroundColor
         fillLayer.backgroundColor = fill.cgColor
+        // A fill shows at once, as the pointer arrives, and fades out behind it.
+        if window != nil { fillLayer.fadeOutFill(from: old, to: fill) }
+    }
+
+    /// A pressed row sinks a little and comes back on release, so a click is felt before it acts.
+    private func setPressed(_ pressed: Bool) { setPressedLook(pressed) }
+
+    /// VoiceOver's press, and Full Keyboard Access's: the click a pointer would make on the row's middle.
+    override func accessibilityPerformPress() -> Bool {
+        guard isAccessibilityElement() else { return false }
+        let point = NSPoint(x: fillRect.midX, y: fillRect.midY)
+        guard let event = NSEvent.mouseEvent(with: .leftMouseUp, location: convert(point, to: nil), modifierFlags: [],
+                                             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window?.windowNumber ?? 0,
+                                             context: nil, eventNumber: 0, clickCount: 1, pressure: 0) else { return false }
+        click(event, at: point)
+        return true
+    }
+
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard isAccessibilityElement(), let menu = contextMenu(at: NSPoint(x: fillRect.midX, y: fillRect.midY)) else { return false }
+        menu.popUp(positioning: nil, at: NSPoint(x: fillRect.minX, y: fillRect.maxY), in: self)
+        return true
     }
 
     /// Arc's bounce when a close button keeps the item (TabCellView, `deselect`): the row jumps to
@@ -638,6 +691,7 @@ class SidebarRowView: NSView {
     // Clicks act on release (SwiftUI's tap); a press that moves 3 pt starts the row's drag.
     override func mouseDown(with event: NSEvent) {
         press = (event, convert(event.locationInWindow, from: nil))
+        setPressed(true)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -645,12 +699,14 @@ class SidebarRowView: NSView {
         let q = convert(event.locationInWindow, from: nil)
         guard hypot(q.x - p.point.x, q.y - p.point.y) > 3 else { return }
         press = nil
+        setPressed(false)
         if let id = dragItemID(at: p.point) { list?.beginDrag(id, from: self, event: p.event) }
     }
 
     override func mouseUp(with event: NSEvent) {
         guard let p = press else { return }
         press = nil
+        setPressed(false)
         click(event, at: p.point)
     }
 
@@ -795,8 +851,12 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
         slash.color = (colors.isDark ? NSColor.white : .black).withAlphaComponent(0.3)
         titleLabel.stringValue = m.title
         titleLabel.textColor = colors.textPrimary
+        // A title that arrives after the row was laid out (a page's, once it loads) fades too.
+        if renameOld == nil { titleLabel.fadeTail() }
         refreshSubtitle()
         setAccessibilityLabel(m.title)
+        setAccessibilitySelected(m.selected)
+        setAccessibilityValue([m.audible && !m.muted ? "playing" : nil, m.muted ? "muted" : nil, m.unread ? "unread" : nil].compactMap { $0 }.joined(separator: ", "))
         if m.editing != (renameField != nil) { m.editing ? beginRename(m.renameText) : endRename() }
         // The keyboard's ring wins over developer mode's; they differ in tone and dash length.
         let ring: Bool? = m.focusRing ? false : (m.developerMode && m.selected ? true : nil)
@@ -870,6 +930,7 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
         renameSparkles = nil
         titleLabel.layer?.mask = nil
         subtitleLabel.layer?.mask = nil
+        needsLayout = true   // the title's own tail fade comes back
         layer?.zPosition = 0
         renameBright = false
         refreshSubtitle()
@@ -1232,6 +1293,8 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
         } else {
             titleLabel.frame = NSRect(x: x - SidebarText.inset, y: (h - th) / 2, width: textWidth + 2 * SidebarText.inset, height: th)
         }
+        // The rename sweep masks the title itself while it plays.
+        if renameOld == nil { titleLabel.fadeTail() }
         if let f = renameField {
             let fh = f.intrinsicContentSize.height
             f.frame = NSRect(x: x - SidebarText.inset, y: (h - fh) / 2, width: max(0, bounds.width - 6 - x + SidebarText.inset), height: fh)
@@ -1391,6 +1454,7 @@ final class FolderRowView: SidebarRowView, NSTextFieldDelegate {
         titleLabel.stringValue = m.title
         titleLabel.textColor = colors.textPrimary
         setAccessibilityLabel(m.title)
+        setAccessibilityExpanded(m.expanded)
         if m.editing != (renameField != nil) { m.editing ? beginRename(m.renameText) : endRename() }
         rebuildAccessory()
         refreshBackground()
@@ -2762,5 +2826,76 @@ final class PinPlaceholderRowView: SidebarRowView {
         let x = (bounds.width - w) / 2
         icon.frame = NSRect(x: x, y: 0, width: 14, height: bounds.height)
         label.frame = NSRect(x: x + 20, y: (bounds.height - ls.height) / 2, width: ls.width, height: ls.height)
+    }
+}
+
+extension CALayer {
+    /// A fill that leaves fades out over `Design.Motion.fast`; one that arrives or changes shows at
+    /// once. The layer's own colour is set by the caller, with its implicit action off.
+    func fadeOutFill(from old: CGColor?, to fill: NSColor) {
+        guard fill.alphaComponent == 0, let old, old.alpha > 0, !Design.Motion.reduced else {
+            removeAnimation(forKey: "fillFade")
+            return
+        }
+        let fade = CABasicAnimation(keyPath: "backgroundColor")
+        fade.fromValue = old
+        fade.toValue = old.copy(alpha: 0)
+        fade.duration = Design.Motion.fast
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        add(fade, forKey: "fillFade")
+    }
+}
+
+extension NSView {
+    /// The chrome's pressed look: what the view holds sinks to `Design.Motion.pressScale` about its
+    /// middle and comes back on release. Nothing moves under Reduce motion.
+    func setPressedLook(_ pressed: Bool) {
+        guard let layer, !Design.Motion.reduced else { return }
+        let a = layer.anchorPoint
+        let c = CGPoint(x: bounds.width * (0.5 - a.x), y: bounds.height * (0.5 - a.y))
+        var t = CATransform3DMakeTranslation(c.x, c.y, 0)
+        t = CATransform3DScale(t, Design.Motion.pressScale, Design.Motion.pressScale, 1)
+        t = CATransform3DTranslate(t, -c.x, -c.y, 0)
+        let to = pressed ? t : CATransform3DIdentity
+        let anim = CABasicAnimation(keyPath: "sublayerTransform")
+        anim.fromValue = NSValue(caTransform3D: layer.presentation()?.sublayerTransform ?? layer.sublayerTransform)
+        anim.toValue = NSValue(caTransform3D: to)
+        anim.duration = pressed ? 0.08 : Design.Motion.fast
+        anim.timingFunction = Design.Motion.curve
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.sublayerTransform = to
+        CATransaction.commit()
+        layer.add(anim, forKey: "press")
+    }
+}
+
+extension NSTextField {
+    /// A title too long for its row fades out over its last 24 pt instead of ending in "…": the
+    /// row's buttons then appear over a fade, not beside a cut word.
+    func fadeTail(width fade: CGFloat = 24) {
+        if lineBreakMode != .byClipping {
+            lineBreakMode = .byClipping
+            cell?.truncatesLastVisibleLine = false
+        }
+        let w = bounds.width
+        let overflows = w > fade && (cell?.cellSize.width ?? 0) > w + 0.5
+        guard overflows else {
+            if layer?.mask?.name == "tailFade" { layer?.mask = nil }
+            return
+        }
+        wantsLayer = true
+        let mask = (layer?.mask as? CAGradientLayer).flatMap { $0.name == "tailFade" ? $0 : nil } ?? {
+            let g = CAGradientLayer()
+            g.name = "tailFade"
+            g.startPoint = CGPoint(x: 0, y: 0.5)
+            g.endPoint = CGPoint(x: 1, y: 0.5)
+            g.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+            g.actions = ["bounds": NSNull(), "position": NSNull(), "locations": NSNull()]
+            return g
+        }()
+        mask.frame = bounds
+        mask.locations = [0, NSNumber(value: Double((w - fade) / w)), 1]
+        if layer?.mask !== mask { layer?.mask = mask }
     }
 }

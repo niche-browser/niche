@@ -55,8 +55,8 @@ final class PeekBarView: NSView {
         let hex = ToolbarColor.hex(reported: state.themeColor, remembered: nil)
         let light = (hex.flatMap(HexColor.luminance) ?? 1) > 0.6
         let fill = hex.map { NSColor(hex: $0) } ?? .white
-        let fg = light ? NSColor.black.withAlphaComponent(0.8) : NSColor(hex: "#E4E0D4")
-        let fgDim = light ? NSColor.black.withAlphaComponent(0.6) : NSColor(hex: "#F0E6CC").withAlphaComponent(0.9)
+        let fg = Design.barInk(onLight: light)
+        let fgDim = Design.barInkDim(onLight: light)
         let hover = NSColor.white.withAlphaComponent(0.1)
         layer?.backgroundColor = fill.cgColor
         back.configure(symbol: "arrow.left", image: nil, help: "Go Back (⌘[)", enabled: state.canGoBack, width: 37, iconSize: 15, tint: fgDim, hover: hover)

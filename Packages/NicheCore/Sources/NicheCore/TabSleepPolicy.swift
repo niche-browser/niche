@@ -26,6 +26,11 @@ public struct TabSleepPolicy: Equatable, Sendable {
     /// protectedLRUTabCount).
     public static let protectedRecentTabs = 10
 
+    /// How many of the tabs used last are kept from freezing. Arc keeps the same 10 as from
+    /// discarding; a freeze is undone the moment the tab shows, so Niche keeps 3: with 11 pages
+    /// open nothing ever froze and background pages ran for hours (Nov 2026).
+    public static let freezeProtectedTabs = 3
+
     /// "Force tabs out of memory after:". Arc's 4 hours, or longer, keep the 10 tabs used last;
     /// a shorter time is asked for to close those too, since they hold most of the memory.
     public static func timer(_ after: TabSleepThreshold) -> TabSleepPolicy {

@@ -21,6 +21,11 @@ enum Design {
     static let rowHover = Color.primary.opacity(0.05)
     static let rowSelected = Color.primary.opacity(0.085)
 
+    /// Ink on a bar that takes its page's colour (the toolbar, Peek's strip): neutral white or
+    /// black, never tinted. Arc's cream (#E4E0D4, #F0E6CC) read as yellowed glyphs on a dark page.
+    static func barInk(onLight light: Bool) -> NSColor { light ? NSColor.black.withAlphaComponent(0.8) : NSColor.white.withAlphaComponent(0.92) }
+    static func barInkDim(onLight light: Bool) -> NSColor { light ? NSColor.black.withAlphaComponent(0.6) : NSColor.white.withAlphaComponent(0.62) }
+
     // MARK: Shape
 
     enum Radius {
@@ -39,6 +44,26 @@ enum Design {
         static let section: CGFloat = 28      // between one card group and the next header
         static let pane: CGFloat = 32         // pane content from the window's edges
         static let control: CGFloat = 28      // buttons, menus and fields in a row
+    }
+
+    // MARK: Motion
+
+    /// One set of timings for the chrome. A change the pointer causes shows at once and leaves in
+    /// `fast`; a view arriving or a list changing takes `standard` on `curve`. Arc-measured motions
+    /// (the sidebar slide, a row's bounce) keep their own numbers next to their measurement.
+    enum Motion {
+        /// A hover fill leaving, a press, a small fade.
+        static let fast: TimeInterval = 0.12
+        /// A panel arriving, the Library opening, a list changing (SwiftUI's .snappy(duration: 0.22)).
+        static let standard: TimeInterval = 0.22
+        /// Fast out, slow in: quick to answer, soft to settle.
+        static let curve = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
+        /// System Settings ▸ Accessibility ▸ Display ▸ Reduce motion.
+        static var reduced: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+        /// `seconds`, or none under Reduce motion: the change still happens, it just doesn't travel.
+        static func duration(_ seconds: TimeInterval) -> TimeInterval { reduced ? 0 : seconds }
+        /// How far a pressed row or tile sinks.
+        static let pressScale: CGFloat = 0.975
     }
 
     // MARK: Type

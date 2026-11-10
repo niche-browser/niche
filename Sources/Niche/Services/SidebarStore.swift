@@ -411,6 +411,14 @@ final class SidebarStore {
         return allTabs().filter { spaceID(ofItem: $0.id).map { !isStandalone(space: $0) } ?? false }
     }
 
+    /// The open tabs the command bar offers ("Switch to Tab", the recent list): those of the space
+    /// the window shows, its shared favorites among them. Never another space's: a space keeps to
+    /// itself, and picking a site that is open elsewhere opens it here instead of switching away.
+    func commandBarTabs(window id: UUID?) -> [SidebarItem] {
+        let sid = focusedSpaceID(window: id)
+        return profileTabs(window: id).filter { isInSpace($0.id, sid) }
+    }
+
     private func collectSubtree(of space: Space, into ids: inout Set<UUID>) {
         func walk(_ id: UUID) {
             ids.insert(id)

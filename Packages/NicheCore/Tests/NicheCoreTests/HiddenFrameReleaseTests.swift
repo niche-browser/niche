@@ -32,4 +32,14 @@ struct HiddenFrameReleaseTests {
         let hidden = [tab(1, minutesAgo: 20, released: true), tab(2, minutesAgo: 20)]
         #expect(HiddenFrameRelease.due(hidden, visible: 1, now: now) == [hidden[1].id])
     }
+
+    /// A slept tab's page window shrinks to give back its page-sized buffers; an awake page's never
+    /// does (Chromium would lay the page out again), nor one on screen or already small.
+    @Test func onlySleptHiddenWindowsShrink() {
+        #expect(HiddenFrameRelease.shrinks(discarded: true, visible: false, width: 1600, height: 1000))
+        #expect(!HiddenFrameRelease.shrinks(discarded: false, visible: false, width: 1600, height: 1000))
+        #expect(!HiddenFrameRelease.shrinks(discarded: true, visible: true, width: 1600, height: 1000))
+        let side = HiddenFrameRelease.sleptWindowSide
+        #expect(!HiddenFrameRelease.shrinks(discarded: true, visible: false, width: side, height: side))
+    }
 }
