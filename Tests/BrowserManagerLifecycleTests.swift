@@ -100,6 +100,7 @@ enum BrowserManagerLifecycleTests {
         await refusalBackoffCase()
         recentTabsCase()
         freezingVoteCase()
+        chromiumAboutCase()
         await sleepClockCase()
         await pressureSweepCase()
         await discardCase()
@@ -439,6 +440,24 @@ enum BrowserManagerLifecycleTests {
         let probed = runtimes.map { $0.browser.replies.contains { $0.method == isolatedProbe } }
         expect(probed == [true, true, true] + Array(repeating: false, count: 10),
                "the visible tab and the 9 hidden most recently stay awake; only older pages are asked")
+        manager.closeAll()
+    }
+
+    /// Chromium's settings lose their "About Chromium" row and page, which check an updater Niche
+    /// doesn't ship and show its error (Nov 2026). Only a settings page is given the script.
+    @MainActor
+    private static func chromiumAboutCase() {
+        let store = SidebarStore()
+        let manager = BrowserManager(store: store, favicons: FaviconCache(), container: NSView())
+        let settings = store.createTab(url: "chrome://settings/").id
+        let page = store.createTab(url: "https://example.test/about").id
+        let s = manager.ensureRuntime(for: settings)!, p = manager.ensureRuntime(for: page)!
+        manager.browser(s.browser, didFinishLoadingURL: "chrome://settings/", title: "Settings", statusCode: 200)
+        expect(s.browser.replies.last?.method == "Runtime.evaluate" && s.browser.lastParams.contains("about-menu")
+               && s.browser.lastParams.contains("location.replace"),
+               "a settings page hides the About Chromium row and sends its address back to the settings")
+        manager.browser(p.browser, didFinishLoadingURL: "https://example.test/about", title: "About", statusCode: 200)
+        expect(!p.browser.lastParams.contains("about-menu"), "an ordinary page is left alone")
         manager.closeAll()
     }
 
