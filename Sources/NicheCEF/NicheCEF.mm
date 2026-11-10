@@ -1373,7 +1373,15 @@ public:
                  statusCode:httpStatusCode];
         // Ask the page for its theme colour; the answer comes back as "theme:<css colour>".
         RunPageScript(frame, "",
-            "(function(send){function probe(){try{var c='';var ms=document.querySelectorAll('meta[name=\"theme-color\"]');"
+            // What the page paints along its top edge comes first, so the bar and the page read as
+            // one surface: YouTube's theme-color is #212121 over a #0F0F0F page, a seam under the bar.
+            // The first opaque background under a point 2 px down the middle; a page with nothing
+            // there (a hero image, a transparent header) falls back to its theme-color, then its body.
+            "(function(send){function probe(){try{var c='';"
+            "try{var es=document.elementsFromPoint(Math.max(1,innerWidth/2),2);for(var k=0;k<es.length&&!c;k++){"
+            "var t=getComputedStyle(es[k]);var bc=t.backgroundColor;if(t.backgroundImage&&t.backgroundImage!=='none'){break;}"
+            "if(bc&&bc.indexOf('rgb')===0&&bc!=='rgba(0, 0, 0, 0)'){var parts=bc.split(',');if(parts.length<4||parseFloat(parts[3])>0.5){c=bc;}}}}catch(e){}"
+            "var ms=c?[]:document.querySelectorAll('meta[name=\"theme-color\"]');"
             "for(var i=0;i<ms.length;i++){if(!ms[i].getAttribute('media')){c=ms[i].getAttribute('content')||'';if(c)break;}}"
             "if(!c&&document.body){var b=getComputedStyle(document.body).backgroundColor;if(b&&b!=='rgba(0, 0, 0, 0)'&&b!=='transparent'){c=b;}}"
             "if(!c){var h=getComputedStyle(document.documentElement).backgroundColor;if(h&&h!=='rgba(0, 0, 0, 0)'&&h!=='transparent'){c=h;}}"

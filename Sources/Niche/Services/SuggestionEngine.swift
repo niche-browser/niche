@@ -208,7 +208,7 @@ final class SuggestionEngine {
     private var searchIndex: SearchIndex {
         if let index { return index }
         var i = SearchIndex()
-        let tabs = store.profileTabs(window: nil)
+        let tabs = store.commandBarTabs(window: nil)
         i.tabs = tabs.compactMap { tab in tab.tab.map { (tab, Searchable(title: tab.displayTitle, url: $0.url)) } }
         i.openURLs = Set(tabs.compactMap { $0.tab?.url })
         i.archive = store.archive.prefix(400).compactMap { e in e.item.tab.map { (e, Searchable(title: e.item.displayTitle, url: $0.url)) } }
@@ -416,7 +416,7 @@ final class SuggestionEngine {
     }
 
     private func recentSuggestions(excluding current: UUID?) -> [Suggestion] {
-        let tabs = store.profileTabs(window: nil).filter { $0.id != current }
+        let tabs = store.commandBarTabs(window: nil).filter { $0.id != current }
             .sorted { ($0.tab?.timeLastActiveAt ?? .distantPast) > ($1.tab?.timeLastActiveAt ?? .distantPast) }
             .prefix(7)
         var out: [Suggestion] = tabs.map { tab in

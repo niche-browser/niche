@@ -128,7 +128,9 @@ extension SpaceTheme {
             textTertiary: dark ? .white.opacity(0.38) : .black.opacity(0.38),
             // Arc 1.170 live: a hovered row darkens ~4.5% (220/210/171 → 210/200/163), it does not lighten.
             hoverFill: dark ? .white.opacity(0.07) : .black.opacity(0.045),
-            selectedFill: dark ? .white.opacity(0.13) : .white.opacity(0.74),
+            // Dark: Arc's 0.13 sat too near the favourite tiles' 0.08 to read as the open tab; 0.18
+            // is as far above a hovered row (0.07) as light themes' white plate is (Nov 2026).
+            selectedFill: dark ? .white.opacity(0.18) : .white.opacity(0.74),
             separator: dark ? .white.opacity(0.12) : .black.opacity(0.09),
             pillFill: dark ? .white.opacity(0.08) : .black.opacity(0.045),
             // Arc: the toolbar is the first theme color at ~46% (dark) / lightened a touch (dark themes).

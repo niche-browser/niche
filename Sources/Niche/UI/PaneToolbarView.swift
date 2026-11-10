@@ -193,8 +193,8 @@ final class PaneToolbarView: NSView {
         let light = (cardHex.flatMap(HexColor.luminance) ?? 1) > 0.6
         if onCard {
             m.fill = cardHex.map { NSColor(hex: $0) } ?? .white
-            m.fg = light ? NSColor.black.withAlphaComponent(0.8) : NSColor(hex: "#E4E0D4")
-            m.fgDim = light ? NSColor.black.withAlphaComponent(0.6) : NSColor(hex: "#F0E6CC").withAlphaComponent(0.9)
+            m.fg = Design.barInk(onLight: light)
+            m.fgDim = Design.barInkDim(onLight: light)
         } else {
             m.fill = m.kind == .emptyPane ? .clear : (palette.isDark ? NSColor.white.withAlphaComponent(0.025) : NSColor.black.withAlphaComponent(0.03))
             m.fg = NSColor(palette.textSecondary)
@@ -668,8 +668,34 @@ final class ToolbarGlyphButton: NSView {
     }
 
     private func refreshFill() {
-        layer?.backgroundColor = (hovering && enabled ? hover : restFill).cgColor
+        guard let layer else { return }
+        let fill = hovering && enabled ? hover : restFill
+        let old = layer.presentation()?.backgroundColor ?? layer.backgroundColor
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.backgroundColor = fill.cgColor
+        CATransaction.commit()
+        // Shows at once, leaves in Design.Motion.fast, like the sidebar's buttons.
+        if restFill.alphaComponent == 0 { layer.fadeOutFill(from: old, to: fill) }
     }
+
+    /// Hover from where the pointer is, not from the last enter or exit: a button that moves out
+    /// from under a still pointer (the sidebar toggle, as the bar slides; ↻ as the page takes the
+    /// keys) gets no mouseExited and kept its hover plate.
+    private func syncHover() {
+        let inside = window.map { !isHiddenOrHasHiddenAncestor && bounds.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        if hovering != inside { hovering = inside }
+    }
+
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+        if hovering { syncHover() }
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncHover()
+    }
+    override func viewDidHide() { hovering = false }
 
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { takesClickFromChildWindow }
@@ -680,7 +706,12 @@ final class ToolbarGlyphButton: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+        // A new area under the pointer gets no mouseEntered, and without assumeInside no mouseExited either.
+        let inside = window.map { visibleRect.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+        if inside { options.insert(.assumeInside) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil))
+        if hovering != inside { hovering = inside }
     }
 
     override func mouseEntered(with event: NSEvent) { hovering = true }
@@ -696,6 +727,11 @@ final class ToolbarGlyphButton: NSView {
     override func mouseUp(with event: NSEvent) {
         if turnsOnPress { imageView.pressTurn(false) }
         if !contextClick, enabled, bounds.contains(convert(event.locationInWindow, from: nil)) { action() }
+        // What the click did may move the bar or open something over it: look again once it has
+        // started, and once a slide (the sidebar's 0.085 s, a panel's 0.22 s) is over.
+        for delay in [0.05, 0.4] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.syncHover() }
+        }
     }
     override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
 }

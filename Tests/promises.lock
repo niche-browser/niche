@@ -43,8 +43,8 @@
 #49    Packages/NicheCore/Tests/NicheCoreTests/TabSearchScopeTests.swift::nothingTypedListsByRecency  f3fd6f69a998
 #49    Packages/NicheCore/Tests/NicheCoreTests/TabSearchScopeTests.swift::percentAloneOffersTheScope  bb0a267ea1b1
 #49    Packages/NicheCore/Tests/NicheCoreTests/TabSearchScopeTests.swift::typedRanksByMatchThenRecency  412177398256
+#50    Packages/NicheCore/Tests/NicheCoreTests/ToolbarCompositionTests.swift::theBarCarriesTheToggle  515601382769
 #50    Packages/NicheCore/Tests/NicheCoreTests/ToolbarCompositionTests.swift::theFullBar  ee53a160494d
-#50    Packages/NicheCore/Tests/NicheCoreTests/ToolbarCompositionTests.swift::theShownSidebarCarriesTheToggle  ee6aec566ccf
 #50    Tests/CommandBarGlyphTests.swift::leadingGlyph  3e90bfdbd048
 #50    Tests/Scenarios/toolbar-chrome.scenario  7f320ded6e64
 #54    Tests/StoreTests.swift::pinnedURL  83caea3b3e16
@@ -197,7 +197,7 @@
 #135   Tests/PerfTests.swift::workAcrossATimerBoundaryIsOnePass  f398d95a67d4
 #136   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::defaultsAreArcs  53d379878256
 #136   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::fourHoursKeepsTheTenUsedLast  7d12ec7e2662
-#136   Tests/BrowserManagerLifecycleTests.swift::freezingVoteCase  4a421aebf6a8
+#136   Tests/BrowserManagerLifecycleTests.swift::freezingVoteCase  5f8dbeab14d9
 #136   Tests/BrowserManagerLifecycleTests.swift::loadingTabCase  49ae346fce0b
 #136   Tests/BrowserManagerLifecycleTests.swift::recentTabsCase  72d6480042f0
 #136   Tests/StoreTests.swift::tabRestTimes  ca5370f5f3ea

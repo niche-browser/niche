@@ -67,15 +67,32 @@ final class FloatingSidebarController {
         let center = NotificationCenter.default
         activation = [(NSApplication.didBecomeActiveNotification, true), (NSApplication.didResignActiveNotification, false)].map { name, on in
             center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.setPolling(on) }
+                MainActor.assumeIsolated {
+                    self?.appActive = on
+                    self?.refreshPolling()
+                }
             }
         }
-        setPolling(NSApp.isActive)
+        appActive = NSApp.isActive
+        installed = true
+        refreshPolling()
         displayOptions = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshBackdrop() }
         }
+    }
+
+    private var appActive = false
+    private var installed = false
+
+    /// The window's sidebar was pinned or hidden: the pointer is sampled only while there is an
+    /// edge to reveal from or a floating sidebar to put away.
+    func sidebarVisibilityChanged() { refreshPolling() }
+
+    private func refreshPolling() {
+        guard installed else { return }
+        setPolling(appActive && (isShown || sidebarHidden()))
     }
 
     private func setPolling(_ on: Bool) {
@@ -199,6 +216,7 @@ final class FloatingSidebarController {
     func show() {
         guard !isShown, sidebarHidden() else { return }
         isShown = true
+        refreshPolling()
         transitionGeneration &+= 1
         let generation = transitionGeneration
         let p = panel ?? makePanel()
@@ -248,6 +266,7 @@ final class FloatingSidebarController {
         // before a traffic-light action). Repeated animated exits do not restart it.
         guard isShown || (!animated && shell.sidebarDetached), let p = panel else { return }
         isShown = false
+        refreshPolling()
         transitionGeneration &+= 1
         let generation = transitionGeneration
         p.hasShadow = false
@@ -273,6 +292,7 @@ final class FloatingSidebarController {
         // belongs to the panel and must come home before the anchoring animation.
         guard shell.sidebarDetached, let p = panel else { return }
         isShown = false
+        refreshPolling()
         window.removeChildWindow(p)
         p.orderOut(nil)
         reattach(floating: true)

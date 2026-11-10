@@ -558,7 +558,8 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     static let refusalBackoff: TimeInterval = 10 * 60
 
     /// Arc's WebContentLifecycleOptimization freezes a page out of sight for `timeToFreezeTab`
-    /// (30 minutes), unless it is one of the 10 tabs used last or has a media player open, by
+    /// (30 minutes), unless it is one of the tabs used last (Arc 10, Niche
+    /// `TabSleepPolicy.freezeProtectedTabs`) or has a media player open, by
     /// voting for it in Chromium's freezing policy (its freeze token). The policy freezes it only
     /// while nothing it knows forbids that: sound now or lately, capture, a Web Lock or IndexedDB
     /// lock, a device, a WebRTC connection, notification permission. Showing the tab drops the
@@ -566,7 +567,8 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     /// an older CEF answers that the method doesn't exist and nothing freezes (GitHub #136).
     func freezeIdleTabs(hiddenLongerThan seconds: TimeInterval) {
         let cutoff = clock.now.addingTimeInterval(-seconds)
-        let recent = recentlyShown
+        let recent = TabSleepPolicy.recentlyShown(sleepPages, visible: visibleTabIDs,
+                                                  count: min(protectedRecentTabs, TabSleepPolicy.freezeProtectedTabs))
         for (id, rt) in runtimes {
             let b = rt.browser
             let vote = !recent.contains(id) && !rt.discarded && rt.hiddenAt.map { $0 < cutoff } == true && b.isCreated && !b.isClosed
@@ -587,8 +589,8 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
 
     private static var loggedFreezingError = false
 
-    /// Arc never freezes or discards the pages of the 10 tabs used last, however long ago that
-    /// was (TabSleepPolicy.protectedRecentTabs, GitHub #136).
+    /// Arc never discards the pages of the 10 tabs used last, however long ago that was
+    /// (TabSleepPolicy.protectedRecentTabs, GitHub #136). Freezing keeps fewer (`freezeIdleTabs`).
     var protectedRecentTabs = TabSleepPolicy.protectedRecentTabs
 
     private var sleepPages: [TabSleepPolicy.Page] {
@@ -711,6 +713,35 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
         }
     }
 
+    /// Chromium's settings carry an "About Chromium" page that checks Google's updater, which Niche
+    /// doesn't ship: it shows "An error occurred while checking for updates" under Chromium's name
+    /// and version. Niche updates itself (Sparkle; Niche ▸ About Niche has the version), so the
+    /// page's menu row goes and its address shows the settings' first page instead.
+    private func hideChromiumAbout(_ browser: NicheBrowser) {
+        let js = """
+        (() => {
+          if (location.pathname.startsWith('/help')) { location.replace('chrome://settings/'); return; }
+          const find = (root, out = []) => {
+            for (const el of root.querySelectorAll('*')) {
+              if (el.matches('#about-menu, a[href="/help"]')) out.push(el);
+              if (el.shadowRoot) find(el.shadowRoot, out);
+            }
+            return out;
+          };
+          const hide = () => { try { for (const el of find(document)) el.style.display = 'none'; } catch (e) {} };
+          hide(); setTimeout(hide, 300); setTimeout(hide, 1500);
+          if (!window.__nicheAboutWatch) {
+            window.__nicheAboutWatch = true;
+            const back = () => { if (location.pathname.startsWith('/help')) history.replaceState(null, '', '/'), location.replace('chrome://settings/'); };
+            window.addEventListener('popstate', back);
+          }
+        })()
+        """
+        let params: [String: Any] = ["expression": js, "returnByValue": true]
+        let json = String(data: try! JSONSerialization.data(withJSONObject: params), encoding: .utf8)!
+        browser.sendDevToolsMethod("Runtime.evaluate", params: json) { _, _ in }
+    }
+
     // MARK: Picture in Picture
 
     /// Arc: "Enable Picture in Picture when you leave a video tab". The request
@@ -787,6 +818,8 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     func windowVisibilityChanged(covered: Bool) {
         guard covered != windowCovered else { return }
         windowCovered = covered
+        // A breadcrumb: two 550–600 ms stalls came with the app leaving and returning (Nov 2026).
+        HitchMonitor.mark(covered ? "window-covered" : "window-uncovered")
         for id in visibleTabIDs {
             guard let rt = runtimes[id] else { continue }
             if covered {
@@ -1171,7 +1204,10 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
         guard !browser.isIncognito else { return }
         // The profile's extensions are up: imported Web Store copies become store installs (#203).
         ExtensionStore.shared.installFromWebStore(using: browser, profile: store.profileDirectoryName(item: id))
-        if url.hasPrefix("chrome://settings") { watchClearBrowsingData(browser) }
+        if url.hasPrefix("chrome://settings") {
+            watchClearBrowsingData(browser)
+            hideChromiumAbout(browser)
+        }
         store.recordVisit(url: url, title: title.isEmpty ? (store.item(id)?.tab?.savedTitle ?? "") : title)
     }
 

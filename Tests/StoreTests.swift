@@ -25,6 +25,7 @@ enum StoreTests {
         autoArchive()
         tabSleepCadence()
         tabRestTimes()
+        commandBarKeepsToItsSpace()
         integrity()
         liveFolderExpiry()
         liveRepositoryFiltering()
@@ -290,9 +291,28 @@ enum StoreTests {
         expect(clock.pendingCount == 2, "starting again replaces the timers instead of adding to them")
     }
 
+    /// The command bar offers the tabs of the space it is opened in, never another space's: picking
+    /// "YouTube" in a new space switched back to the space that had it open (Nov 2026). Arc offers
+    /// every space's tabs; a Niche space keeps to itself, so the site opens here instead.
+    @MainActor
+    private static func commandBarKeepsToItsSpace() {
+        let store = SidebarStore(clock: ManualScheduler())
+        let home = store.focusedSpaceID
+        let video = store.createTab(url: "https://www.youtube.com/").id
+        let work = store.createSpace(title: "Work", emoji: "💼").id
+        let doc = store.createTab(url: "https://example.test/doc").id
+        expect(store.focusedSpaceID == work && store.spaceID(ofItem: doc) == work && store.spaceID(ofItem: video) == home,
+               "a new space has the focus and its own tab")
+        let offered = Set(store.commandBarTabs(window: nil).map(\.id))
+        expect(offered.contains(doc) && !offered.contains(video), "the bar in Work offers Work's tab, not Home's")
+        store.focusSpace(home)
+        let back = Set(store.commandBarTabs(window: nil).map(\.id))
+        expect(back.contains(video) && !back.contains(doc), "and in Home, Home's")
+    }
+
     // promise: #136
     /// Tabs rest on Arc 1.171's own numbers (#136): a page out of sight 30 minutes is voted to
-    /// freeze, one out of sight 4 hours sleeps, and the 10 tabs used last are never touched.
+    /// freeze, one out of sight 4 hours sleeps, and the 10 tabs used last never sleep (3 never freeze).
     private static func tabRestTimes() {
         expect(AppComposition.tabFreezeAfter == 30 * 60, "a hidden page is voted to freeze after 30 minutes, Arc's timeToFreezeTab")
         expect(TabSleepPolicy.timer(AppSettings().tabSleepAfter).hiddenFor == 4 * 3600 && AppSettings().tabSleepTimerEnabled,

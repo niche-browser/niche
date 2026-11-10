@@ -256,7 +256,9 @@ final class CommandBarPanel: NSPanel {
         hasShadow = true
         hidesOnDeactivate = false
         isMovableByWindowBackground = false
-        animationBehavior = .utilityWindow
+        // The window controller fades the bar in and out itself (Design.Motion); AppKit's own
+        // panel animation on top of that doubled it.
+        animationBehavior = .none
         collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
     }
 }

@@ -352,6 +352,15 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
     private var query = ""
     private var rows: [Row] = []
     private var mediaHiddenObserver: NSObjectProtocol?
+
+    /// A Library is made anew each time it opens; a block observer would outlive each one.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil, let o = mediaHiddenObserver {
+            NotificationCenter.default.removeObserver(o)
+            mediaHiddenObserver = nil
+        }
+    }
     /// The width the grid rows were last sized for.
     private var gridWidth: CGFloat = 0
     private let searchBox = NSView()

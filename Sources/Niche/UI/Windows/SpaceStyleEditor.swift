@@ -134,7 +134,9 @@ struct PadState: Equatable {
 private struct ColorPad: View {
     @Binding var pad: PadState
     @State private var hoveredKnob: Int?
-    @State private var draggingKnob: Int?
+    /// The knob being dragged. Gesture state, so it lets go when the drag ends however it ends:
+    /// a cancelled drag never calls `onEnded`.
+    @GestureState private var draggingKnob: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private static let reach: CGFloat = 153
 
@@ -155,6 +157,16 @@ private struct ColorPad: View {
                 .contentShape(Rectangle())
                 // Arc: pressing anywhere on the pad brings the main colour there, and it follows the drag.
                 .gesture(DragGesture(minimumDistance: 0).onChanged { g in place(handle: 0, at: g.location, centre: centre) })
+                // Under the knobs: a knob resting over a button can still be grabbed and moved away.
+                VStack {
+                    AppearanceToggles(appearance: $pad.appearance).padding(.top, 24)
+                    Spacer()
+                    HStack(spacing: 16) {
+                        padButton("minus", enabled: pad.key.count > 1) { pad.key.removeLast() }
+                        padButton("plus", enabled: !pad.key.isEmpty && pad.key.count < 3) { addColor() }
+                    }
+                    .padding(.bottom, 20)
+                }
                 if pad.key.isEmpty {
                     Text("Tap to pick a color for this space")
                         .font(.system(size: 13, weight: .semibold))
@@ -180,22 +192,12 @@ private struct ColorPad: View {
                         .editorPointer(draggingKnob == i ? .grabbing : .grab)
                         .position(Self.point(for: hex, centre: centre))
                         .gesture(DragGesture(minimumDistance: 0)
+                            .updating($draggingKnob) { _, held, _ in held = i }
                             .onChanged { g in
                                 // SwiftUI re-reads pointer styles on moves, not drags: hold the closed hand.
                                 if #available(macOS 15, *) { NSCursor.closedHand.set() }
-                                draggingKnob = i
                                 place(handle: i, at: g.location, centre: centre)
-                            }
-                            .onEnded { _ in draggingKnob = nil })
-                }
-                VStack {
-                    AppearanceToggles(appearance: $pad.appearance).padding(.top, 24)
-                    Spacer()
-                    HStack(spacing: 16) {
-                        padButton("minus", enabled: pad.key.count > 1) { pad.key.removeLast() }
-                        padButton("plus", enabled: !pad.key.isEmpty && pad.key.count < 3) { addColor() }
-                    }
-                    .padding(.bottom, 20)
+                            })
                 }
             }
         }
@@ -381,13 +383,20 @@ struct SpaceStyleButtonStyle: ButtonStyle {
 enum EditorPointer { case link, grab, grabbing }
 
 extension View {
+    /// One modifier whose value changes, never a different view per pointer. It used to be a
+    /// `switch` with a branch per style: a knob's branch changed as its drag began (grab → grabbing),
+    /// SwiftUI rebuilt the knob under the pointer and cancelled the drag that had just started, so
+    /// a knob grabbed and moved stayed where it was. A cancelled drag ends without `onEnded`, which
+    /// left the knob "held", so the next grab worked and the one after failed again (Nov 2026).
     @ViewBuilder func editorPointer(_ pointer: EditorPointer?) -> some View {
-        if #available(macOS 15, *), let pointer {
-            switch pointer {
-            case .link: self.pointerStyle(.link)
-            case .grab: self.pointerStyle(.grabIdle)
-            case .grabbing: self.pointerStyle(.grabActive)
-            }
+        if #available(macOS 15, *) {
+            self.pointerStyle(pointer.map { p -> PointerStyle in
+                switch p {
+                case .link: return .link
+                case .grab: return .grabIdle
+                case .grabbing: return .grabActive
+                }
+            })
         } else {
             self
         }

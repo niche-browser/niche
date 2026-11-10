@@ -1,8 +1,8 @@
 # promise: #50 #88
-# The toolbar as shipped for #50 and #88, drawn from the running window: with the sidebar shown its
-# header carries the toggle and the bar starts with ← → ↻ (#50); the address shows the host only,
-# with Arc's Copy URL glyph as a button of its own (#88). With the sidebar hidden the toggle comes
-# back first in the bar, 21 pt from the card edge like the first glyph before it (#50).
+# The toolbar as shipped for #50 and #88, drawn from the running window: the bar starts with the
+# sidebar toggle, 21 pt from the card edge, then ← → ↻, with the sidebar shown or hidden (#50 had
+# it in the sidebar's header while the sidebar shows; the product owner moved it to the bar,
+# Nov 2026); the address shows the host only, with Arc's Copy URL glyph as a button of its own (#88).
 budget rss=600 stalls50=10
 seed settings.json {"hasSeenImportPrompt": true, "toolbarDefaultMigrated": true, "showToolbar": true}
 niche://debug?windowSize=1280x800

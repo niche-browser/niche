@@ -83,7 +83,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     var selectedTab: SidebarItem? { store.selectedTab(window: windowID) }
     var sidebarVisible: Bool {
         get { store.window(windowID).sidebarVisible }
-        set { store.updateWindow(windowID) { $0.sidebarVisible = newValue } }
+        set {
+            store.updateWindow(windowID) { $0.sidebarVisible = newValue }
+            floatingSidebar?.sidebarVisibilityChanged()
+        }
     }
 
     init(app: AppDelegate, session: WindowSession) {
@@ -223,21 +226,26 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         }
         shell.onPaneFrames = { [weak self] frames in self?.positionPageWindows(frames) }
         shell.onAnimatePaneFrames = { [weak self] frames, d, timing in self?.animatePageWindows(to: frames, duration: d, timing: timing) }
-        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+        let center = NotificationCenter.default
+        activeObservers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.refreshMaterialActive(); self?.sidebarUI.appActive = true }
-        }
-        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+        })
+        activeObservers.append(center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.refreshMaterialActive(); self?.sidebarUI.appActive = false }
-        }
+        })
         shell.activeAppearance.onChange = { [weak self] in self?.refreshMaterialActive() }
         // Any window: key and main move between this window, its page windows and other windows.
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification,
                      NSWindow.didResignMainNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            activeObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshMaterialActive() }
-            }
+            })
         }
     }
+
+    /// The observers above, removed when the window closes: block observers outlive their owner, so
+    /// every window ever closed kept eight firing on each key and activation change.
+    private var activeObservers: [NSObjectProtocol] = []
 
     /// The sidebar's material follows this window's active state, as AppKit's does for Arc's sidebar
     /// (SidebarBackdrop.windowActive, GitHub #156). Going inactive waits one turn of the run loop: key
@@ -1044,6 +1052,39 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         }
     }
 
+    /// A slept tab's page window still holds its compositor's three page-sized buffers in the GPU
+    /// process (about 90 MB a tab on a large Retina window): ordering a window out suspends its
+    /// compositor, it frees nothing. The page is discarded, so there is no layout to disturb:
+    /// the window shrinks to CEF's starting size and draws once at it (`drawHidden`), and takes its
+    /// pane's size again before it shows (`positionPageWindows`). Awake pages keep their size, so
+    /// Chromium never lays one out again for this.
+    private func shrinkSleptPageWindows(visible: Set<UUID>) {
+        guard let window else { return }
+        for rt in browsers.runtimes.values {
+            guard let w = rt.hostWindow, !w.isVisible, w.parent == nil, !releasingFrames.contains(rt.tabID),
+                  HiddenFrameRelease.shrinks(discarded: rt.discarded, visible: visible.contains(rt.tabID),
+                                             width: w.frame.width, height: w.frame.height) else { continue }
+            let side = HiddenFrameRelease.sleptWindowSide
+            w.setFrame(NSRect(x: w.frame.minX, y: w.frame.minY, width: side, height: side), display: false)
+            drawHidden(rt.tabID, w, below: window)
+        }
+    }
+
+    /// Orders a hidden page window in for a moment, transparent and below this window, so its
+    /// suspended compositor draws: two or three frames to unsuspend, paint and commit.
+    private func drawHidden(_ id: UUID, _ w: NSWindow, below window: NSWindow) {
+        releasingFrames.insert(id)
+        w.alphaValue = 0
+        w.ignoresMouseEvents = true
+        w.order(.below, relativeTo: window.windowNumber)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak w] in
+            guard let self, let w, self.releasingFrames.remove(id) != nil else { return }
+            w.alphaValue = 1
+            w.ignoresMouseEvents = false
+            if !self.browsers.visibleTabIDs.contains(id), w.parent == nil { w.orderOut(nil) }
+        }
+    }
+
     /// Page windows drawing once, hidden, so their last frame lets go of an evicted page (#195).
     private var releasingFrames: Set<UUID> = []
 
@@ -1054,6 +1095,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// window draws a frame without the page and Chromium frees it (HiddenFrameRelease).
     func releaseHiddenFrames(now: Date) {
         let visible = Set(browsers.visibleTabIDs)
+        shrinkSleptPageWindows(visible: visible)
         let hidden = browsers.runtimes.values.compactMap { rt -> HiddenFrameRelease.Tab? in
             guard let at = rt.hiddenAt, rt.hostWindow != nil, !visible.contains(rt.tabID) else { return nil }
             return .init(id: rt.tabID, hiddenAt: at, releasedFor: rt.hiddenFrameReleasedFor)
@@ -1063,17 +1105,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
             guard let rt = browsers.runtime(for: id), let w = rt.hostWindow, !w.isVisible, w.parent == nil,
                   !releasingFrames.contains(id) else { continue }
             rt.hiddenFrameReleasedFor = rt.hiddenAt
-            releasingFrames.insert(id)
-            w.alphaValue = 0
-            w.ignoresMouseEvents = true
-            w.order(.below, relativeTo: window.windowNumber)
-            // Two or three frames: the compositor unsuspends, paints and commits.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak w] in
-                guard let self, let w, self.releasingFrames.remove(id) != nil else { return }
-                w.alphaValue = 1
-                w.ignoresMouseEvents = false
-                if !self.browsers.visibleTabIDs.contains(id), w.parent == nil { w.orderOut(nil) }
-            }
+            drawHidden(id, w, below: window)
         }
     }
 
@@ -3314,8 +3346,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         if commandPanel.parent == nil { window.addChildWindow(commandPanel, ordered: .above) }
         commandBarOpenedAt = Date()
         if !HitchMonitor.background { NSApp.activate(ignoringOtherApps: true) }
-        // Key immediately (typing never waits); CommandBarView fades itself in.
+        // Key immediately (typing never waits); the bar fades in under the first keys.
+        let arriving = !commandPanel.isVisible || commandPanelLeaving
+        commandPanelLeaving = false
+        commandPanel.ignoresMouseEvents = false
         commandPanel.makeKeyAndOrderFront(nil)
+        if arriving { arriveCommandPanel() }
         observeCommandBar()
     }
 
@@ -3405,12 +3441,61 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     private func hideCommandPanel() {
         hideCommandDim()
         sidebarUI.newTabPlaceholderActive = false
-        if commandPanel.parent != nil { window?.removeChildWindow(commandPanel) }
         let panel = commandPanel!
-        // Let CommandBarView's fade-out (0.08 s) play before the panel goes away.
-        panel.orderOut(nil)
+        let take = { [weak self] in
+            if panel.parent != nil { self?.window?.removeChildWindow(panel) }
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+            panel.ignoresMouseEvents = false
+        }
+        // The page has the keys back at once; the bar fades out over it, taking no clicks.
+        if Design.Motion.reduced || !panel.isVisible {
+            take()
+        } else {
+            commandPanelLeaving = true
+            panel.ignoresMouseEvents = true
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Self.commandPanelLeave
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 0
+            }
+            // A timer, as an animation's completion can wait while the window is off screen.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.commandPanelLeave + 0.01) { [weak self] in
+                guard let self, self.commandPanelLeaving else { return }
+                self.commandPanelLeaving = false
+                take()
+            }
+        }
         window?.makeKeyAndOrderFront(nil)
         currentBrowser?.setFocused(true)
+    }
+
+    /// The bar is fading out; opening it again takes it back instead of waiting.
+    private var commandPanelLeaving = false
+    private static let commandPanelLeave: TimeInterval = 0.09
+
+    /// The bar arrives: a short fade while it settles from 98 % (Design.Motion.fast).
+    private func arriveCommandPanel() {
+        guard let panel = commandPanel else { return }
+        guard !Design.Motion.reduced else { panel.alphaValue = 1; return }
+        panel.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Design.Motion.fast
+            ctx.timingFunction = Design.Motion.curve
+            panel.animator().alphaValue = 1
+        }
+        guard let layer = panel.contentView?.layer else { return }
+        let b = layer.bounds, a = layer.anchorPoint
+        let c = CGPoint(x: b.width * (0.5 - a.x), y: b.height * (0.5 - a.y))
+        var t = CATransform3DMakeTranslation(c.x, c.y, 0)
+        t = CATransform3DScale(t, 0.98, 0.98, 1)
+        t = CATransform3DTranslate(t, -c.x, -c.y, 0)
+        let settle = CABasicAnimation(keyPath: "transform")
+        settle.fromValue = NSValue(caTransform3D: t)
+        settle.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        settle.duration = Design.Motion.standard
+        settle.timingFunction = Design.Motion.curve
+        layer.add(settle, forKey: "arrive")
     }
 
     private func handleCommit(_ s: Suggestion?, typed: String, mode: CommandBarMode) {
@@ -3847,6 +3932,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
 
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === window else { return }
+        activeObservers.forEach(NotificationCenter.default.removeObserver)
+        activeObservers = []
         tabSwitcher.cancel()
         app.mainWindowWillClose(self)
     }

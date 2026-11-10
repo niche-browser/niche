@@ -226,6 +226,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Settings ▸ Tabs ▸ Tab Cleanup, read every minute so a change counts from the next pass.
     private func sleepIdleTabs() {
         let settings = store.settings
+        // A breadcrumb: a 951 ms stall had none, and this pass orders windows (Nov 2026).
+        HitchMonitor.mark("tab-pass")
         for w in mainWindows {
             w.browsers.freezeIdleTabs(hiddenLongerThan: freezeAfter)
             w.releaseHiddenFrames(now: composition.clock.now)

@@ -6,8 +6,8 @@ import Foundation
 /// the left and pinned extensions, Extensions, Split View on the right; the developer bar swaps
 /// the navigation for copy · divider · Console, Network, Inspect (Arc's Toggle Console, Toggle
 /// Network Panel and Inspect Element, GitHub #88; Arc's Capture Window and Capture between them
-/// are not in Niche). The toggle is there only while the sidebar is hidden or floating: otherwise
-/// the sidebar's header carries it (Arc 1.171, GitHub #50).
+/// are not in Niche). The toggle is the bar's first button whether the sidebar shows or not
+/// (`barCarriesToggle`); the sidebar's header carries it only when the bar can't.
 ///
 /// A split pane's bar (Arc 1.171, GitHub #178) has no toggle and no Split View button. The
 /// focused pane carries ← → ↻, the address, the pinned extensions, Extensions, the split options
@@ -47,8 +47,7 @@ public struct ToolbarComposition: Equatable, Sendable {
                 canGoForward: Bool, isLoading: Bool, pinnedExtensions: [String]) {
         // Arc's essential controls only: a split pane that neither has the focus nor the pointer.
         let essentialOnly = inSplit && !focusedPane && !hovered
-        // Never in a split pane or an empty one.
-        if !inSplit, !sidebarVisible, kind != .emptyPane { left.append(.toggleSidebar) }
+        if Self.barCarriesToggle(kind: kind, inSplit: inSplit, sidebarVisible: sidebarVisible) { left.append(.toggleSidebar) }
         switch kind {
         case .noTab:
             left += [.back(enabled: false), .forward(enabled: false), .reload(loading: false, enabled: false)]
@@ -72,6 +71,19 @@ public struct ToolbarComposition: Equatable, Sendable {
             if !essentialOnly, kind != .emptyPane { right.append(.splitOptions) }
             right.append(.closePane)
         }
+    }
+
+    /// The toggle is the bar's first button, sidebar shown or hidden, so it never moves between
+    /// the bar and the sidebar's header (Nov 2026; Arc 1.171 keeps it in the header while the
+    /// sidebar shows, #50). Never in a split pane or an empty one, and the developer bar, whose
+    /// left end is the sidebar's, has it only while the sidebar is away.
+    public static func barCarriesToggle(kind: Kind, inSplit: Bool, sidebarVisible: Bool) -> Bool {
+        !inSplit && kind != .emptyPane && (kind != .developer || !sidebarVisible)
+    }
+
+    /// Whether the sidebar's header carries the toggle: whenever the window's bar doesn't.
+    public static func sidebarHeaderHasToggle(toolbarShown: Bool, kind: Kind, inSplit: Bool) -> Bool {
+        !toolbarShown || !barCarriesToggle(kind: kind, inSplit: inSplit, sidebarVisible: true)
     }
 
     /// The sidebar's URL field while the toolbar is hidden, shown on hover over the header: the

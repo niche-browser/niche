@@ -136,7 +136,8 @@ final class SpaceListView: NSView, NSDraggingSource {
         jumpPill.onClick = { [weak self] in self?.scrollToSelected() }
         addSubview(jumpPill)
         for l in [pinnedHighlight, todayHighlight] {
-            l.cornerRadius = 10
+            l.cornerRadius = NicheMetrics.rowCorner
+            l.cornerCurve = .continuous
             l.zPosition = -1
             l.opacity = 0
             document.layer?.addSublayer(l)
@@ -964,12 +965,16 @@ final class SpaceListView: NSView, NSDraggingSource {
         if entered, let data = info.draggingPasteboard.data(forType: .nicheSidebarItem),
            let d = try? JSONDecoder().decode(SidebarDragItem.self, from: data), ui.draggingID != d.id {
             ui.draggingID = d.id
+            adoptedDragID = d.id
         }
         autoscroller.update()
         guard let id = ui.draggingID, store.item(id) != nil else { return [] }
         let drop = resolve(dragged: id, at: document.convert(info.draggingLocation, from: nil))
         if drop != ui.listDrop {
             ui.listDrop = drop
+            // Leaving a folder and coming back starts its 0.6 s again.
+            springLoad?.cancel()
+            springLoad = nil
             // A tick when a row starts offering to combine, so the change of meaning is felt as well as seen.
             switch drop.target {
             case .split?:
@@ -978,10 +983,12 @@ final class SpaceListView: NSView, NSDraggingSource {
             }
             // Spring-loaded folders: hovering a closed folder opens it.
             if case .into(let f)? = drop.target, store.item(f)?.isFolder == true, !store.isExpanded(f) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [ui, store] in
+                let open = DispatchWorkItem { [ui, store] in
                     guard ui.listDrop?.target == .into(f) else { return }
                     store.setExpanded(f, true)
                 }
+                springLoad = open
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: open)
             }
         }
         return info.draggingSourceOperationMask.contains(.move) ? .move : .copy
@@ -989,8 +996,21 @@ final class SpaceListView: NSView, NSDraggingSource {
 
     func dragExited() {
         autoscroller.stop()
+        springLoad?.cancel()
+        springLoad = nil
         if ui.listDrop != nil { ui.listDrop = nil }
+        // A drag that came from another window leaves with what it brought: kept, this window's
+        // folder previews stayed off and its picks uncleared until the next drag of its own.
+        if let adopted = adoptedDragID {
+            adoptedDragID = nil
+            if ui.draggingID == adopted { ui.draggingID = nil }
+        }
     }
+
+    /// The item of a drag from another window, set as this window's `draggingID` while it is over the list.
+    private var adoptedDragID: UUID?
+    /// The pending spring-loaded folder opening.
+    private var springLoad: DispatchWorkItem?
 
     func performDrop(_ info: NSDraggingInfo) -> Bool {
         autoscroller.stop()
@@ -1139,8 +1159,8 @@ enum SidebarListMetrics {
     /// Rows either side of the insertion line ease this far apart.
     static let nudge: CGFloat = 3
     /// SwiftUI's .snappy(duration: 0.22, extraBounce: 0), which the list's changes used.
-    static let duration: TimeInterval = 0.22
-    static let timing = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
+    static let duration = Design.Motion.standard
+    static let timing = Design.Motion.curve
 }
 
 /// The list's scroll view. Space swipes are read by the window controller's scroll monitor,

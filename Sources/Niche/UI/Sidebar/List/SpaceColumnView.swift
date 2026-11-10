@@ -155,6 +155,7 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
         // Pixel-fitted to Arc's 2x capture (chevron.down 12.5 bold, ellipsis 13 semibold; #57).
         chevron.image = SidebarSymbols.image("chevron.down", size: 12.5, weight: .bold)
         chevron.imageScaling = .scaleNone
@@ -168,6 +169,7 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
         moveTo.isHidden = true
         moveToPill.wantsLayer = true
         moveToPill.layer?.cornerRadius = 8
+        moveToPill.layer?.cornerCurve = .continuous
         moveToPill.isHidden = true
         for v in [emoji, symbol, title, chevronBox, more, done, moveToPill, moveTo] { addSubview(v) }
         sync()
@@ -1152,9 +1154,12 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = FavoriteTileMetrics.corner
+        layer?.cornerCurve = .continuous
         shade.cornerRadius = FavoriteTileMetrics.corner
+        shade.cornerCurve = .continuous
         layer?.addSublayer(shade)
         rim.cornerRadius = FavoriteTileMetrics.corner
+        rim.cornerCurve = .continuous
         rim.zPosition = 5
         layer?.addSublayer(rim)
         cutMask.fillRule = .evenOdd
@@ -1205,10 +1210,29 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
         return m.tileColor.flatMap(HexColor.luminance).map { $0 < 0.5 } ?? palette.isDark
     }
 
+    private var shownHover = false
+
     private func refresh() {
         guard let m = model, let palette else { return }
         let dark = tileIsDark
         let colors = SidebarColors(palette)
+        // The hover fill shows at once and eases back to the tile's own (Design.Motion.fast).
+        let left = shownHover && !hovering && window != nil && !Design.Motion.reduced
+        shownHover = hovering
+        let before = (layer?.presentation()?.backgroundColor ?? layer?.backgroundColor, shade.presentation()?.backgroundColor ?? shade.backgroundColor)
+        defer {
+            for (l, old) in [(layer, before.0), (shade as CALayer?, before.1)] {
+                guard let l else { continue }
+                guard left, let old, let new = l.backgroundColor, old != new else { l.removeAnimation(forKey: "fillFade"); continue }
+                let fade = CABasicAnimation(keyPath: "backgroundColor")
+                fade.fromValue = old
+                // Clear is transparent black: fade the old ink out instead of through grey.
+                fade.toValue = new.alpha == 0 ? old.copy(alpha: 0) : new
+                fade.duration = Design.Motion.fast
+                fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                l.add(fade, forKey: "fillFade")
+            }
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         if let hex = m.tileColor {
@@ -1364,11 +1388,13 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
     override func mouseDown(with event: NSEvent) {
         FavoritePreviewCard.shared.cancel(self)
         press = event
+        setPressedLook(true)
     }
     override func mouseDragged(with event: NSEvent) {
         guard let p = press, let grid else { return }
         guard hypot(event.locationInWindow.x - p.locationInWindow.x, event.locationInWindow.y - p.locationInWindow.y) > 3 else { return }
         press = nil
+        setPressedLook(false)
         grid.ui.draggingID = itemID
         let pb = NSPasteboardItem()
         if let data = try? JSONEncoder().encode(SidebarDragItem(id: itemID)) { pb.setData(data, forType: .nicheSidebarItem) }
@@ -1377,6 +1403,7 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
         beginDraggingSession(with: [item], event: p, source: self)
     }
     override func mouseUp(with event: NSEvent) {
+        setPressedLook(false)
         guard let p = press, let grid else { return }
         press = nil
         grid.ui.keyboardFocusID = nil

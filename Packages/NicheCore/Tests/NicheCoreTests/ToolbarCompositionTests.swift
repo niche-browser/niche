@@ -39,13 +39,22 @@ struct ToolbarCompositionTests {
         #expect(T.urlFieldAccessories(pinnedExtensions: ["a", "b", "c", "d", "e"], fieldWidth: 224) == [.copyURL, .extensions])
     }
 
-    /// With the sidebar shown its header carries the toggle and the bar has none (#50).
+    /// The bar carries the toggle whether the sidebar shows or not, and the sidebar's header then has
+    /// none (#50 put it in the header while the sidebar shows, as Arc 1.171 does; the product owner
+    /// moved it to the bar, Nov 2026: one place for it, and the header keeps only the traffic lights).
+    /// The developer bar has no room on its left, so there the header keeps it.
     @Test(.bug("https://github.com/niche-browser/niche/issues/50"))
-    func theShownSidebarCarriesTheToggle() {
-        // Arc 1.171, #50: the sidebar's header has the toggle, the bar none.
-        #expect(bar(.normal, sidebar: true).left == [.back(enabled: false), .forward(enabled: false), .reload(loading: false, enabled: true)])
-        #expect(bar(.noTab, sidebar: true).left.first == .back(enabled: false))
+    func theBarCarriesTheToggle() {
+        #expect(bar(.normal, sidebar: true).left == [.toggleSidebar, .back(enabled: false), .forward(enabled: false), .reload(loading: false, enabled: true)])
+        #expect(bar(.noTab, sidebar: true).left.first == .toggleSidebar)
         #expect(bar(.developer, sidebar: true).left.isEmpty)
+        // The header has it when the bar doesn't: no toolbar, a split's bars, an empty pane, developer mode.
+        #expect(!T.sidebarHeaderHasToggle(toolbarShown: true, kind: .normal, inSplit: false))
+        #expect(!T.sidebarHeaderHasToggle(toolbarShown: true, kind: .noTab, inSplit: false))
+        #expect(T.sidebarHeaderHasToggle(toolbarShown: false, kind: .normal, inSplit: false))
+        #expect(T.sidebarHeaderHasToggle(toolbarShown: true, kind: .normal, inSplit: true))
+        #expect(T.sidebarHeaderHasToggle(toolbarShown: true, kind: .emptyPane, inSplit: false))
+        #expect(T.sidebarHeaderHasToggle(toolbarShown: true, kind: .developer, inSplit: false))
     }
 
     @Test(.bug("https://github.com/niche-browser/niche/issues/178")) func theFocusedPaneHasEverythingButTheToggleAndSplitView() {

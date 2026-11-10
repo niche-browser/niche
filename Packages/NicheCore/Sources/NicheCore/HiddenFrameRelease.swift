@@ -14,6 +14,16 @@ public enum HiddenFrameRelease {
     /// Chromium's culling delay (5 min) plus one timer period: evicted by then whenever it was hidden.
     public static let evictedAfter: TimeInterval = 10 * 60 + 30
 
+    /// The side a slept tab's page window shrinks to: the size CEF makes a page window at.
+    public static let sleptWindowSide: Double = 10
+
+    /// Whether a hidden tab's page window gives its page-sized compositor buffers back by shrinking.
+    /// Only a discarded page's: an awake one would be laid out again at the small size and again
+    /// when shown. A window already that small has nothing to give.
+    public static func shrinks(discarded: Bool, visible: Bool, width: Double, height: Double) -> Bool {
+        discarded && !visible && (width > sleptWindowSide || height > sleptWindowSide)
+    }
+
     public struct Tab: Equatable {
         public var id: UUID
         public var hiddenAt: Date

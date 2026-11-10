@@ -443,8 +443,10 @@ enum BrowserManagerLifecycleTests {
     }
 
     // promise: #136
-    /// Like Arc, a page out of sight past the threshold is voted to freeze unless it is one of
-    /// the 10 tabs used last; showing it drops the vote (#136).
+    /// A page out of sight past the threshold is voted to freeze unless it is one of the 3 tabs
+    /// used last; showing it drops the vote (#136). Arc keeps 10 from freezing; Niche keeps 10 from
+    /// sleeping but only 3 from freezing, which costs nothing to undo: with 11 pages open nothing
+    /// ever froze, and a background page ran at 5 % of a core for hours (Nov 2026).
     @MainActor
     private static func freezingVoteCase() {
         let store = SidebarStore()
@@ -455,11 +457,11 @@ enum BrowserManagerLifecycleTests {
         for (n, rt) in runtimes.dropLast().enumerated() { rt.hiddenAt = Date(timeIntervalSince1970: Double(n)) }
         let votes = { runtimes.map { rt in rt.browser.replies.filter { $0.method == "Niche.setFreezingVote" }.count } }
         manager.freezeIdleTabs(hiddenLongerThan: 60)
-        expect(votes() == [1, 1] + Array(repeating: 0, count: 10) && runtimes[0].freezeVoted && !runtimes[2].freezeVoted,
-               "only pages beyond the 10 tabs used last are voted to freeze")
+        expect(votes() == Array(repeating: 1, count: 9) + [0, 0, 0] && runtimes[0].freezeVoted && runtimes[8].freezeVoted && !runtimes[9].freezeVoted,
+               "only pages beyond the 3 tabs used last are voted to freeze")
         expect(runtimes[0].browser.lastParams.contains("true") || runtimes[1].browser.lastParams.contains("true"), "the vote says true")
         manager.freezeIdleTabs(hiddenLongerThan: 60)
-        expect(votes() == [1, 1] + Array(repeating: 0, count: 10), "a vote already cast is not sent again")
+        expect(votes() == Array(repeating: 1, count: 9) + [0, 0, 0], "a vote already cast is not sent again")
         manager.show(ids[0], focus: false)
         expect(!runtimes[0].freezeVoted && votes()[0] == 2 && runtimes[0].browser.lastParams.contains("false"),
                "showing a frozen tab drops its vote")

@@ -67,6 +67,7 @@ struct FolderIconPicker: View {
     static func show(current: FolderSymbol?, anchor: NSView, rect: NSRect, onPick: @escaping (FolderSymbol?) -> Void) {
         guard let content = anchor.window?.contentView else { return }
         let popover = NSPopover()
+        popover.animates = false   // no system pop (SiteControlCenter.show)
         popover.behavior = .transient
         let picker = FolderIconPicker(current: current) { [weak popover] symbol in
             onPick(symbol)

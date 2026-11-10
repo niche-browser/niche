@@ -91,21 +91,25 @@ final class CapturePanel: NSPanel {
     }
 }
 
-/// Arc's colours for Capture (ARC_Capture.bundle's asset catalog, dark appearance where it has one).
+/// Capture's colours. The geometry and motion are Arc's (measured); the palette is Niche's own
+/// (docs/design.md): graphite surfaces and neutral ink, where Arc uses its navy ring, an indigo
+/// menu and a pink-and-blue hint (ARC_Capture.bundle), which read as another app's inside Niche.
 enum CaptureStyle {
-    /// The ring around what is being captured (measured #161C2F).
-    static let ring = NSColor(srgbRed: 22 / 255, green: 28 / 255, blue: 47 / 255, alpha: 1)
+    /// The ring around what is being captured: graphite (Arc: #161C2F).
+    static let ring = NSColor(Design.graphite)
     /// Greyscale (Rec. 601 luma) under a 25 % black veil: 243 → 181, 255 → 191 (measured).
     static let dim: CGFloat = 0.75
-    /// Arc's OverlayBubbleText, which reads at ~78 % on the white card (measured 93,55,169 at its darkest).
-    static let bubbleText = NSColor(srgbRed: 0.204, green: 0.021, blue: 0.58, alpha: 0.78)
-    static let bubbleBlue = NSColor(srgbRed: 0, green: 0.278, blue: 1, alpha: 0.5)
-    static let bubblePink = NSColor(srgbRed: 1, green: 0.6, blue: 0.6, alpha: 0.5)
-    static let menuFill = NSColor(srgbRed: 0.071, green: 0.059, blue: 0.18, alpha: 1)
+    /// The hint's ink on its white card.
+    static let bubbleText = NSColor.black.withAlphaComponent(0.82)
+    /// The two ends of the hint's rim and glow: one neutral shade (Arc: blue and pink).
+    static let bubbleBlue = NSColor.black.withAlphaComponent(0.5)
+    static let bubblePink = NSColor.black.withAlphaComponent(0.5)
+    static let menuFill = NSColor(Design.graphite)
     static let menuText = NSColor(white: 1, alpha: 0.9)
-    static let menuIcon = NSColor(white: 1, alpha: 0.3)
+    static let menuIcon = NSColor(white: 1, alpha: 0.45)
     static let menuDivider = NSColor(white: 1, alpha: 0.07)
-    static let menuHover = NSColor(srgbRed: 0.161, green: 0.18, blue: 0.757, alpha: 1)
+    /// A neutral plate, as on every other row in Niche (Arc: indigo).
+    static let menuHover = NSColor(white: 1, alpha: 0.12)
     static let menuHoverText = NSColor(white: 1, alpha: 0.95)
 }
 
@@ -706,8 +710,9 @@ final class CaptureBubble: NSView {
         layer?.masksToBounds = false
         // Arc's glow darkens the dimmed page with a tint rather than lighting it (measured beside the
         // card: 163 grey → 155,147,148 on the left, 140,143,156 on the right, gone ~90 pt out).
-        let pink = NSColor(srgbRed: 95 / 255, green: 45 / 255, blue: 50 / 255, alpha: 0.3)
-        let blue = NSColor(srgbRed: 20 / 255, green: 35 / 255, blue: 120 / 255, alpha: 0.34)
+        // Neutral in Niche (CaptureStyle): the same soft shade either side, where Arc tints pink and blue.
+        let pink = NSColor.black.withAlphaComponent(0.26)
+        let blue = NSColor.black.withAlphaComponent(0.26)
         for (g, c) in [(glowPink, pink), (glowBlue, blue)] {
             g.type = .radial
             g.colors = [c.cgColor, c.withAlphaComponent(0).cgColor]
