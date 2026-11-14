@@ -93,9 +93,9 @@ built release app with a test profile. Note anything that fails in the release's
   window leaves its Space first. ⌥⌘N from another app opens a Little Window at once, with the
   Dock icon. Closing it takes the icon away again. New Window in the item's menu brings the
   windows back, and Quit Niche there quits.
-- Sign in to a site in one space, then File ▸ New Space…: the sheet shows Profile "New Profile…"
-  named after the space, and the new space opens that site signed out. Picking the first space's
-  profile in the sheet instead opens it signed in.
+- Sign in to a site in one space, then File ▸ New Space…: "Share data with current space" is
+  off, and the new space opens that site signed out. Make another with the switch on: it opens
+  the site signed in, with its own tabs and favorites.
 - **#172:** with a space on its own profile, a Little Window from that space and a Peek from its
   tab see that profile's cookies. The chip names the profile; switching it reloads the page in
   the other profile.

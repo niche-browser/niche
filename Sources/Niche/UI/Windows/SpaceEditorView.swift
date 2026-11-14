@@ -33,24 +33,19 @@ struct SpaceEditorView: View {
     @State private var icon: SpaceIcon
     @State private var theme: SpaceTheme
     @State private var profile: SpaceProfileChoice
-    /// The new profile's name once typed; until then it follows the space's name.
-    @State private var typedProfileName: String?
+    @State private var newProfileName = ""
+    /// A new space: "Share data with current space" (`SpaceProfiles`), off to start with as in Dia.
+    @State private var sharesData = SpaceProfiles.newSpaceSharesData
+    /// The space a new one is made from, the one it can share data with.
+    let current: Space?
 
-    /// A new space starts on a profile of its own (`SpaceProfiles.forNewSpace`).
-    init(existing: Space?, profiles: [BrowserProfile],
+    init(existing: Space?, profiles: [BrowserProfile], current: Space? = nil,
          onSave: @escaping (String, SpaceIcon, SpaceTheme, SpaceProfileChoice, String) -> Void, onCancel: @escaping () -> Void,
          onPreview: @escaping (SpaceTheme) -> Void = { _ in }) {
         self.existing = existing
         self.profiles = profiles
-        let start: SpaceProfileChoice
-        if let existing {
-            start = .existing(existing.profileID)
-        } else {
-            switch SpaceProfiles.forNewSpace(from: nil, profiles: profiles) {
-            case .ownProfile: start = .new
-            }
-        }
-        _profile = State(initialValue: start)
+        self.current = current
+        _profile = State(initialValue: .existing(existing?.profileID))
         self.onSave = onSave
         self.onCancel = onCancel
         self.onPreview = onPreview
@@ -90,11 +85,19 @@ struct SpaceEditorView: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(existing == nil ? "Create Space" : "Save") {
-                    onSave(title.isEmpty ? "Space" : title, icon, theme, profile, trimmedProfileName)
+                    let name = title.isEmpty ? "Space" : title
+                    guard existing == nil else { return onSave(name, icon, theme, profile, trimmedProfileName) }
+                    switch SpaceProfiles.forNewSpace(sharing: sharesData, from: current, profiles: profiles) {
+                    case .ownProfile:
+                        onSave(name, icon, theme, .new, SpaceProfiles.newProfileName(spaceTitle: name, taken: profiles.map(\.name)))
+                    case .profile(let id):
+                        onSave(name, icon, theme, .existing(id), "")
+                    }
                 }
                 .buttonStyle(.settingsProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled((title.trimmingCharacters(in: .whitespaces).isEmpty && existing == nil) || (profile == .new && trimmedProfileName.isEmpty))
+                .disabled((title.trimmingCharacters(in: .whitespaces).isEmpty && existing == nil)
+                          || (existing != nil && profile == .new && trimmedProfileName.isEmpty))
             }
         }
         .padding(Design.Space.xxxl)
@@ -147,12 +150,35 @@ struct SpaceEditorView: View {
         }
     }
 
-    private var newProfileName: String {
-        typedProfileName ?? SpaceProfiles.newProfileName(spaceTitle: title, taken: profiles.map(\.name))
-    }
     private var trimmedProfileName: String { newProfileName.trimmingCharacters(in: .whitespaces) }
 
-    private var profileSection: some View {
+    /// A new space's data: its own, or the current space's (Dia's Create Profile).
+    private var sharingSection: some View {
+        VStack(alignment: .leading, spacing: Design.Space.m) {
+            HStack {
+                Text("Share data with current space").font(Design.Font.body)
+                Spacer()
+                SettingsSwitch(title: "Share data with current space", isOn: $sharesData)
+            }
+            Text(sharingNote).font(Design.Font.detail).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var sharingNote: String {
+        guard sharesData else {
+            return "This space keeps its own logins, cookies, passwords, extensions and history. It starts signed out of every website."
+        }
+        let name = current.map { "“\($0.title)”" } ?? "the current space"
+        return "This space uses the same logins, cookies, passwords, extensions and history as \(name). Its tabs and favorites stay its own."
+    }
+
+    @ViewBuilder private var profileSection: some View {
+        if existing == nil { sharingSection } else { profilePicker }
+    }
+
+    private var profilePicker: some View {
         VStack(alignment: .leading, spacing: Design.Space.m) {
             HStack {
                 Text("Profile").font(Design.Font.body)
@@ -166,7 +192,7 @@ struct SpaceEditorView: View {
                 .settingsMenu()
             }
             if profile == .new {
-                SettingsTextField(placeholder: "Profile name", text: Binding(get: { newProfileName }, set: { typedProfileName = $0 }))
+                SettingsTextField(placeholder: "Profile name", text: $newProfileName)
             }
             Text(profileNote).font(Design.Font.detail).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -179,9 +205,7 @@ struct SpaceEditorView: View {
             return "Each profile has its own browser data, so you may be signed out of some websites or need to reinstall extensions. Open tabs in this space reload."
         }
         if profile == .new {
-            return existing == nil
-                ? "This space gets its own profile: it starts signed out of every website and shares nothing with your other spaces. To share sign-ins with a space, pick its profile."
-                : "This space starts fresh in a new profile, signed out of every website."
+            return "This space starts fresh in a new profile, signed out of every website."
         }
         return "Profiles keep spaces separate, with their own logins, cookies and site data. Spaces on the same profile share them."
     }
