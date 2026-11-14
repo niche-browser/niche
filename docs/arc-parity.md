@@ -69,6 +69,13 @@ the space's name ("the maintainer ⌃1"); "Hide Sidebar" → "Show/Hide Sidebar"
 "Edit Space…" → "Edit Theme…" and "Rename Space"; Tabs menu "New Folder" → "New Folder…"; File
 gains "New Profile".
 
+Where Niche differs on purpose: a new space follows Dia's Create Profile, not Arc (owner, 13 Nov
+2026). It keeps its own logins, cookies, passwords, extensions and history unless "Share data
+with current space" is turned on in the New Space sheet, off to start with; Arc puts every new
+space on the profile of the space it was made from. Dia 1.57.1's dialog reads "Profiles separate
+your logins, cookies, passwords, extensions, credit cards, history and chat data", with a "Share
+data with current profile" switch, off (`SpaceProfiles`).
+
 ## 3. Right-click menus
 
 | Where | Arc items Niche lacks |

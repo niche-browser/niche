@@ -3765,10 +3765,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     func showSpaceEditor(space: Space?) {
         guard let window else { return }
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: SpaceEditorView.width, height: 620), styleMask: [.titled], backing: .buffered, defer: false)
-        // Arc's New Space starts on the profile of the space it was opened from.
-        let initialProfile = space == nil && !isStandalone ? SpaceProfiles.forNewSpace(from: store.focusedSpace, profiles: store.profiles) : nil
         let store = self.store
-        let view = SpaceEditorView(existing: space, profiles: store.profiles, initialProfile: initialProfile, onSave: { [weak panel] title, icon, theme, profile, newName in
+        // A new space can share the data of the space it is made from; a Blank or incognito
+        // window's space has none to share.
+        let view = SpaceEditorView(existing: space, profiles: store.profiles, current: isStandalone ? nil : store.focusedSpace, onSave: { [weak panel] title, icon, theme, profile, newName in
             let id: UUID
             if let sid = space?.id, var s = store.space(sid) {
                 s.title = title; s.icon = icon; s.theme = theme
