@@ -210,7 +210,7 @@ final class FloatingSidebarController {
         blur.material = pal.isDark ? .underWindowBackground : t.material
         blur.appearance = NSAppearance(named: t.darkBlur ? .darkAqua : .aqua)
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
-        lift.layer?.backgroundColor = NSColor(white: 1, alpha: SidebarBackdrop.floatingLift(dark: pal.isDark, reduceTransparency: reduce, lift: t.liftActive)).cgColor
+        lift.layer?.backgroundColor = NSColor.white.withAlphaComponent(SidebarBackdrop.floatingLift(dark: pal.isDark, reduceTransparency: reduce, lift: t.liftActive)).cgColor
     }
 
     func show() {

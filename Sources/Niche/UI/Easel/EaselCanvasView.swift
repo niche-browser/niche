@@ -1,6 +1,13 @@
 import AppKit
 import UniformTypeIdentifiers
 
+/// The canvas's own colours: it is dark in both appearances.
+enum EaselPalette {
+    /// The veil over the window's backdrop in a tab (Arc's 50 % black), and Peek's ground (#0B0B0B).
+    static let veil = NSColor(white: 0, alpha: 0.5)
+    static let peekGround = NSColor(white: 11.0 / 255, alpha: 1)
+}
+
 /// Arc's Easel canvas (Arc 1.172.1, `easelCanvasView`): as wide as the page area and 2436 pt
 /// tall, scrolling; the title box 894 pt wide, centred, 52 pt down, bold white; the toolbar
 /// (EaselToolbar) centred 20 pt above the bottom. Shapes, arrows and
@@ -22,7 +29,7 @@ final class EaselCanvasView: NSView {
         sheet = EaselSheetView(document: document)
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(white: 0, alpha: 0.5).cgColor
+        layer?.backgroundColor = EaselPalette.veil.cgColor
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -65,7 +72,7 @@ final class EaselCanvasView: NSView {
                              height: Easel.canvasHeight)
         // Centred under the drawing, where both hands find it, rather than in Arc's bottom-left corner.
         let size = toolbar.fittingSize
-        toolbar.frame = NSRect(x: ((bounds.width - size.width) / 2).rounded(), y: bounds.height - 20 - size.height,
+        toolbar.frame = NSRect(x: ((bounds.width - size.width) / 2).rounded(), y: bounds.height - Design.Space.xxl - size.height,
                                width: size.width, height: size.height)
     }
 }
@@ -92,7 +99,9 @@ final class EaselSheetView: NSView, NSTextFieldDelegate {
     private var stroke: [Easel.Point] = []
     private var images: [String: NSImage] = [:]
 
-    static let ink = NSColor(white: 1, alpha: 0.92)
+    static let ink = Design.onDark(.primary)
+    /// A new easel's title, in points, until its pill changes it.
+    private static let titleSize: Double = 34
     static let selection = NSColor(srgbRed: 0.47, green: 0.71, blue: 0.95, alpha: 1)
     static let arcSelection = NSColor(srgbRed: 127 / 255, green: 184 / 255, blue: 214 / 255, alpha: 1)
 
@@ -104,7 +113,7 @@ final class EaselSheetView: NSView, NSTextFieldDelegate {
         title.drawsBackground = false
         title.focusRingType = .none
         title.alignment = .center
-        title.font = Self.font(document.titleStyle, size: document.titleSize ?? 34, title: true)
+        title.font = Self.font(document.titleStyle, size: document.titleSize ?? Self.titleSize, title: true)
         title.textColor = .white
         title.placeholderString = "Untitled Easel"
         title.delegate = self
@@ -164,7 +173,7 @@ final class EaselSheetView: NSView, NSTextFieldDelegate {
             } else {
                 let r = rect(item.frame).insetBy(dx: -4, dy: -4)
                 Self.selection.setStroke()
-                let path = NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6)
+                let path = NSBezierPath(roundedRect: r, xRadius: Design.Radius.inset, yRadius: Design.Radius.inset)
                 path.lineWidth = 2
                 path.stroke()
             }
@@ -177,7 +186,7 @@ final class EaselSheetView: NSView, NSTextFieldDelegate {
         let r = rect(item.frame)
         switch item.kind {
         case .rectangle:
-            let p = NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4); p.lineWidth = 3; p.stroke()
+            let p = NSBezierPath(roundedRect: r, xRadius: Design.Radius.small, yRadius: Design.Radius.small); p.lineWidth = 3; p.stroke()
         case .ellipse:
             let p = NSBezierPath(ovalIn: r); p.lineWidth = 3; p.stroke()
         case .arrow(let a, let b):
@@ -337,7 +346,7 @@ final class EaselSheetView: NSView, NSTextFieldDelegate {
     private func placeSizePill() {
         if titlePicked {
             sizePill.isHidden = false
-            sizePill.frame = NSRect(x: title.frame.minX - 44, y: title.frame.minY, width: 24, height: 72)
+            sizePill.frame = NSRect(origin: NSPoint(x: title.frame.minX - EaselSizePill.gap, y: title.frame.minY), size: EaselSizePill.size)
             return
         }
         guard let id = selected, let item = document.items.first(where: { $0.id == id }), case .text = item.kind else {
@@ -345,7 +354,7 @@ final class EaselSheetView: NSView, NSTextFieldDelegate {
             return
         }
         sizePill.isHidden = false
-        sizePill.frame = NSRect(x: item.frame.x - 44, y: item.frame.y, width: 24, height: 72)
+        sizePill.frame = NSRect(origin: NSPoint(x: item.frame.x - EaselSizePill.gap, y: item.frame.y), size: EaselSizePill.size)
     }
 
     /// Arc's four looks for the Aa button (Easel.FontStyle) in macOS's own designs.
@@ -364,7 +373,7 @@ final class EaselSheetView: NSView, NSTextFieldDelegate {
     private func cycleSelectedStyle() {
         if titlePicked {
             commit { $0.titleStyle = ($0.titleStyle ?? .standard).next }
-            title.font = Self.font(document.titleStyle, size: document.titleSize ?? 34, title: true)
+            title.font = Self.font(document.titleStyle, size: document.titleSize ?? Self.titleSize, title: true)
             return
         }
         guard let id = selected, let i = document.items.firstIndex(where: { $0.id == id }), case .text(_, let size) = document.items[i].kind else { return }
@@ -389,7 +398,7 @@ final class EaselSheetView: NSView, NSTextFieldDelegate {
 
     private func resizeSelectedText(by step: Double) {
         if titlePicked {
-            let new = min(96, max(14, (document.titleSize ?? 34) + step))
+            let new = min(96, max(14, (document.titleSize ?? Self.titleSize) + step))
             commit { $0.titleSize = new }
             title.font = Self.font(document.titleStyle, size: new, title: true)
             return
@@ -491,20 +500,25 @@ final class EaselSizePill: NSView {
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
 
+    /// One button, the three stacked, and how far left of its text box the pill's edge sits.
+    static let button: CGFloat = 24
+    static let size = NSSize(width: button, height: 3 * button)
+    static let gap: CGFloat = 44
+
     override func draw(_ dirtyRect: NSRect) {
         NSColor.black.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
-        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .bold).applying(.init(paletteColors: [.white]))
+        NSBezierPath(roundedRect: bounds, xRadius: Design.Radius.inset, yRadius: Design.Radius.inset).fill()
+        let config = Design.Icon.configuration(Design.Icon.small, weight: .bold).applying(.init(paletteColors: [.white]))
         for (i, name) in ["plus", "textformat", "minus"].enumerated() {
             guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config) else { continue }
-            let r = NSRect(x: 0, y: CGFloat(i) * 24, width: 24, height: 24)
+            let r = NSRect(x: 0, y: CGFloat(i) * Self.button, width: Self.button, height: Self.button)
             img.draw(in: NSRect(x: r.midX - img.size.width / 2, y: r.midY - img.size.height / 2, width: img.size.width, height: img.size.height))
         }
     }
 
     override func mouseDown(with event: NSEvent) {
         let y = convert(event.locationInWindow, from: nil).y
-        switch Int(y / 24) {
+        switch Int(y / Self.button) {
         case 0: onStep(4)
         case 1: onStyle()
         case 2: onStep(-4)
@@ -531,20 +545,20 @@ final class EaselToolbar: NSView, NSViewToolTipOwner {
     private static let names: [Easel.Tool: String] = [
         .pointer: "Select", .image: "Image", .text: "Text", .ellipse: "Ellipse", .rectangle: "Rectangle", .arrow: "Arrow", .freehand: "Draw",
     ]
-    private static let bar = NSColor(srgbRed: 0.09, green: 0.09, blue: 0.1, alpha: 0.92)
-    private static let rim = NSColor(white: 1, alpha: 0.1)
-    private static let picked = NSColor(white: 1, alpha: 0.2)
-    private static let hover = NSColor(white: 1, alpha: 0.08)
-    private static let glyph = NSColor(white: 1, alpha: 0.92)
+    private static let bar = Design.panelDark.withAlphaComponent(0.92)
+    private static let rim = Design.hairlineOnDark
+    private static let picked = Design.fillOnDark(.strong)
+    private static let hover = Design.fillOnDark(.selected)
+    private static let glyph = Design.onDark(.primary)
     private static let button: CGFloat = 36, step: CGFloat = 38, pad: CGFloat = 6, divider: CGFloat = 13
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.35
-        layer?.shadowRadius = 14
-        layer?.shadowOffset = CGSize(width: 0, height: -4)
+        layer?.shadowColor = Design.Shadow.panelColor.cgColor
+        layer?.shadowOpacity = 1
+        layer?.shadowRadius = Design.Shadow.panelRadius
+        layer?.shadowOffset = CGSize(width: 0, height: -Design.Shadow.panelOffset)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -586,7 +600,7 @@ final class EaselToolbar: NSView, NSViewToolTipOwner {
         Self.rim.setStroke()
         capsule.lineWidth = 1
         capsule.stroke()
-        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold).applying(.init(paletteColors: [Self.glyph]))
+        let config = Design.Icon.configuration(Design.Icon.bar, weight: .semibold).applying(.init(paletteColors: [Self.glyph]))
         func plate(_ rect: NSRect, _ color: NSColor) {
             color.setFill()
             NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2).fill()

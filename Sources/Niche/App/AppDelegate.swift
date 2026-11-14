@@ -44,9 +44,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) { bootstrapIfNeeded() }
 
+    /// An installed extension is announced where the user is looking, with a way to pin it: the
+    /// window showed nothing after an install (ExtensionInstallNotice).
+    private func announceInstalledExtensions() {
+        NotificationCenter.default.addObserver(forName: .nicheExtensionAdded, object: nil, queue: .main) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, let main = self.main, let id = note.userInfo?["id"] as? String,
+                      let entry = ExtensionStore.shared.entries.first(where: { $0.extensionID == id }) else { return }
+                let profile = main.profileDirectoryName
+                // Another profile's install shows in that profile's window, not here.
+                guard entry.isInstalled(inProfile: profile) else { return }
+                let pinned = ExtensionStore.shared.isPinned(id, inProfile: profile)
+                main.showToast(ExtensionInstallNotice.message(name: entry.name),
+                               action: pinned ? nil : ShinyToast.Action(title: "Pin") { ExtensionStore.shared.setPinned(id, true, inProfile: profile) })
+            }
+        }
+    }
+
     func bootstrapIfNeeded() {
         guard !bootstrapped else { return }
         bootstrapped = true
+        announceInstalledExtensions()
         NSApp.setActivationPolicy(.regular)
         SystemAppearance.shared.start()
         installURLEventHandler()
@@ -333,7 +351,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return .terminateCancel
         }
         // Dia: Advanced ▸ "Warn before quitting". Engine relaunches skip it.
-        if store.settings.warnBeforeQuitting, !isRelaunching, !confirmQuit() { return .terminateCancel }
+        // Asked once per quit: the Dock's Quit reaches here twice (QuitConfirmation).
+        if quitConfirmation.asks(warnBeforeQuitting: store.settings.warnBeforeQuitting, relaunching: isRelaunching) {
+            quitConfirmation.answered(quit: confirmQuit())
+            if !quitConfirmation.agreed { return .terminateCancel }
+        }
         // Little Windows are not in the sidebar; keep their pages in the Library.
         for w in littleWindows { w.archivePage() }
         for w in mainWindows { w.saveFrameNow() }
@@ -362,10 +384,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return nil
     }
 
+    private var quitConfirmation = QuitConfirmation()
+
     private func confirmQuit() -> Bool {
         let alert = AppDialog(title: "Quit Niche?",
                               actions: [DialogAction("Quit"), .cancel, DialogAction("Quit, and don’t ask again", role: .secondary)],
-                              icon: .application, buttonSpacing: 45.5)
+                              icon: .application)
         switch alert.runModal() {
         case .alertFirstButtonReturn: return true
         case .alertThirdButtonReturn:
@@ -1746,13 +1770,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         appMenu.addItem(withTitle: "About Niche", action: #selector(showAbout), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(item("settings"))
-        let setDefault = item("setDefaultBrowser")
-        if setDefault.keyEquivalent.isEmpty { setDefault.keyEquivalent = "♡"; setDefault.keyEquivalentModifierMask = .command }
-        appMenu.addItem(setDefault)
+        appMenu.addItem(item("setDefaultBrowser"))
         appMenu.addItem(item("clearBrowsingData"))
         appMenu.addItem(.separator())
         appMenu.addItem(item("importData"))
         appMenu.addItem(item("checkForUpdates"))
+        appMenu.addItem(.separator())
+        // Every Mac app's Services submenu: what other apps offer for the selection.
+        let services = NSMenu(title: "Services")
+        let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        servicesItem.submenu = services
+        appMenu.addItem(servicesItem)
+        NSApp.servicesMenu = services
         appMenu.addItem(.separator())
         appMenu.addItem(std("Hide Niche", #selector(NSApplication.hide(_:)), "h"))
         appMenu.addItem(std("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]))
@@ -1838,11 +1867,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         for n in 1...9 { tabs.addItem(item("item\(n)")) }
         menubar.addItem(submenu: tabs, title: "Tabs")
 
-        let archive = NSMenu(title: "Archive")
-        archive.addItem(item("goBack")); archive.addItem(item("goForward"))
-        archive.addItem(.separator())
-        for id in ["viewArchive", "showArchive", "clearArchive"] { archive.addItem(item(id)) }
-        menubar.addItem(submenu: archive, title: "Archive")
+        // Where every Mac browser keeps Back, Forward and what was open before: History. The
+        // archive is Niche's history of closed tabs.
+        let history = NSMenu(title: "History")
+        history.addItem(item("goBack")); history.addItem(item("goForward"))
+        history.addItem(.separator())
+        for id in ["viewArchive", "showArchive", "clearArchive"] { history.addItem(item(id)) }
+        menubar.addItem(submenu: history, title: "History")
 
         // Dia: Extensions sits just before Window.
         menubar.addItem(submenu: extensionsMenu.makeMenu(), title: "Extensions")

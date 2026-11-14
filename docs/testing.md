@@ -97,6 +97,9 @@ a finding fails, and when one loses a finding the baseline comes down
   ([CLAUDE.md](../CLAUDE.md) has the layers).
 - `perf-no-network`: networking under either Perf folder. The performance recorder never sends
   anything ([performance.md](performance.md)).
+- `design-literal`: a literal colour, font size, corner radius or animation time in a view
+  (`Sources/Niche/UI`). Views take them from `Design` ([design.md](design.md)); a component's own
+  value is a named `static let` with a comment.
 - `perf-boundary`: the recorder reached from a file outside its list, or `NicheCEF` imported in
   `Sources/Niche/Perf` anywhere but `PerfCEF.swift`, so it stays removable and testable.
 

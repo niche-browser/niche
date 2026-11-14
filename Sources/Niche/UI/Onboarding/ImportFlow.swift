@@ -163,7 +163,7 @@ final class ImportFlowModel {
 
     func go(_ s: ImportStep) {
         forward = s > step
-        withAnimation(.easeInOut(duration: 0.28)) { step = s }
+        withAnimation(.easeInOut(duration: Design.Motion.duration(Design.Motion.standard))) { step = s }
     }
 
     // MARK: Onboarding steps

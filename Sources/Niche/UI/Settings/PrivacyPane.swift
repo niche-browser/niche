@@ -16,7 +16,7 @@ struct PrivacyPane: View {
                 } trailing: {
                     SettingsSwitch(title: "Block ads and trackers", isOn: $store.settings.blockAdsAndTrackers)
                 }
-                SettingsCardDivider(inset: 54)
+                SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
                     SettingsIconLabel(title: "Block cookie banners", symbol: "eye.slash.fill", color: .orange)
                 } trailing: {
@@ -33,11 +33,11 @@ struct PrivacyPane: View {
                     } trailing: {
                         SettingsSwitch(title: "Always use secure connections", isOn: $store.settings.httpsOnly)
                     }
-                    SettingsCardDivider(inset: 54)
+                    SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                     SecureDNSRows(error: $dnsError)
                 }
                 if let line = dnsFootnote { SettingsFootnote(line) }
-                if let dnsError { SettingsFootnote(dnsError).foregroundStyle(.red) }
+                if let dnsError { SettingsFootnote(dnsError).foregroundStyle(Design.danger) }
             }
             .padding(.bottom, Design.Space.section)
             SettingsSection(title: "Data") {
@@ -86,7 +86,7 @@ private struct SecureDNSRows: View {
             .onChange(of: liveCustom, initial: true) { if let liveCustom { customText = liveCustom } }
         }
         if showsCustom {
-            SettingsCardDivider(inset: 54)
+            SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
             SettingsCardRow {
                 SettingsTextField(placeholder: "https://dns.example/dns-query{?dns}", text: $customText, onSubmit: saveCustom)
                     .disabled(dns.isManaged)

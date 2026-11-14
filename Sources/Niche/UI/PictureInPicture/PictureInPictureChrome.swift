@@ -35,7 +35,7 @@ final class PictureInPictureChrome {
         didSet { for o in overlays.values { o.controls.address = address } }
     }
 
-    static let cornerRadius: CGFloat = 6
+    static let cornerRadius: CGFloat = Design.Radius.inset
     static let edgeMargin = PictureInPictureLayout.edgeMargin
     private static let frameKey = "NichePictureInPictureFrame"
 

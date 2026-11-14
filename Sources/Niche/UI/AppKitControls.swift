@@ -38,7 +38,7 @@ final class ClosureButton: NSButton {
 }
 
 /// SwiftUI's `.background(.regularMaterial, in: RoundedRectangle(cornerRadius:))` with the
-/// hairline `.strokeBorder(Color.primary.opacity(0.1))` most of Niche's floating bits wear.
+/// hairline (`Design.hairlineNS`) most of Niche's floating bits wear.
 final class MaterialCardView: NSVisualEffectView {
     init(radius: CGFloat, material: NSVisualEffectView.Material = .popover, border: Bool = true) {
         super.init(frame: .zero)
@@ -57,7 +57,7 @@ final class MaterialCardView: NSVisualEffectView {
     override func updateLayer() {
         super.updateLayer()
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.1).cgColor
+            layer?.borderColor = Design.hairlineNS.cgColor
         }
     }
 }

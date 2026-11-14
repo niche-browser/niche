@@ -65,6 +65,7 @@ built release app with a test profile. Note anything that fails in the release's
 
 ### Peek, Little Window, Picture in Picture, split view, Capture
 
+- Open a link in a Little Window: the page meets the bar with square top corners from the first frame, and its bottom corners follow the window's (macOS 27 shapes Chromium's page window from its frame view's radii; `ChromiumWindowCorners`).
 - **PR #221:** opening a Peek fades the page behind and draws it back a little, its margins widening
   while the sidebar stays still, and closing brings it back in one smooth motion with no jump at the
   end. With "Pages fill the window edge to edge" on, the page only fades. (The values are checked
@@ -107,6 +108,10 @@ built release app with a test profile. Note anything that fails in the release's
   right, one even dim layer.
 - **#178:** in a split, the focused pane's ring shows (also over docked DevTools), and so does
   the card shadow.
+- Add Split View (⌃⇧=) on a tab, then pick a favorite in the bar: its page opens in the new
+  pane beside the tab and the favorite stays a tile. Again with an open Today tab: that tab's
+  row leaves the list and its page is the new pane (`SplitPaneFill` holds the rule; this is
+  the real pages).
 - **#90:** Capture on a second display and behind other windows isn't blank. It goes to the
   clipboard with the "Screenshot Copied to Clipboard" toast, and Save offers Downloads.
   Full-page capture shows "Capture in Progress" first. Share keeps the control center open. On
@@ -136,8 +141,9 @@ built release app with a test profile. Note anything that fails in the release's
   popover within about 1 s, and so does an on/off switch.
 - **#41:** on a test copy, `Extensions.triggerAction` on a turned-off extension answers "No
   enabled extension…" instead of crashing.
-- **#8:** a Bitwarden popup opens in under 0.5 s and hangs from the button's right edge. A
-  dragged popup reopens at the same offset after the window moves.
+- **#8:** a Bitwarden popup opens in under 0.5 s and hangs from the button's right edge, whole
+  inside the browser window (also with the window against the screen's left edge). A dragged
+  popup stays where it was dropped while it is open; the next one opens at its button again.
 - **#38:** in full screen, SwitchyOmega's Options doesn't slide the Space away, and a second
   click selects the open options tab.
 - **#42:** clicking the URL in the developer bar edits it in place with the whole URL selected
@@ -198,6 +204,5 @@ issue when a change touches that code anyway.
 | #106 | Move the action icon fallback (`default_icon` as a dict or string, else `icons`) into NicheCore |
 | #9 | Move `IconStyle` into NicheCore with a fixture; or `pinExtension` and `extensionIconStyle` hooks plus a toolbar snapshot |
 | #89 | A `menuItemsAt=x,y` hook logging each item's title and shortcut |
-| #8 | Move `ExtensionPopupWindow.placement(anchor:width:)` and the drag offset into NicheCore |
 | #137 | A niche.log line when the permission sheet shows (`permission sheet <host>: <kinds> (tab\|little)`), so a scenario can show a Little Window asks for notifications |
 | #5 | A `processes` hook logging each helper's `--type=` and whether it runs under the sandbox |

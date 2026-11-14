@@ -64,7 +64,8 @@ public enum BrowsingDataClear {
         if range == .allTime {
             r.queriesToSelected = [:]
         } else {
-            let gone = Set(history.keys).subtracting(kept.keys)
+            // By address: another profile's visit has its profile in the key (SpaceSeparation).
+            let gone = Set(history.values.map(\.url)).subtracting(kept.values.map(\.url))
             r.queriesToSelected = r.queriesToSelected.filter { !gone.contains($0.value) }
         }
         r.recentlySwitchedToTabs = r.recentlySwitchedToTabs

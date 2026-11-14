@@ -32,14 +32,31 @@ struct SidebarColors: Equatable {
         countBadgeFill = NSColor(p.countBadgeFill)
     }
 
+    /// Neutral ink over the space's colour: white on a dark sidebar, black on a light one.
+    func ink(_ emphasis: Design.Emphasis) -> NSColor { isDark ? Design.onDark(emphasis) : Design.onLight(emphasis) }
+    /// The plate under something hovered, pressed or selected, on the sidebar or on a favorite's tile.
+    func plate(_ fill: Design.Fill) -> NSColor { Design.barFill(fill, onLight: !isDark) }
+    /// A favorite's tile or a pinned extension's cell under the pointer: a step over its resting
+    /// fill, which on a dark sidebar is a plate already.
+    var tileHover: NSColor { plate(isDark ? .pressed : .selected) }
+    /// A 1 px line or a dashed outline.
+    var rule: NSColor { isDark ? Design.hairlineOnDark : Design.onLight(.quaternary) }
     /// SidebarIconButton's glyph tone outside the header (no active state).
-    var glyph: NSColor { isDark ? NSColor.white.withAlphaComponent(0.55) : NSColor.black.withAlphaComponent(0.26) }
+    var glyph: NSColor { isDark ? Design.onDark(.secondary) : Design.onLight(.quaternary) }
     /// A one-colour favicon or GitHub's mark on the sidebar.
-    var monoGlyph: NSColor { isDark ? NSColor.white.withAlphaComponent(0.92) : NSColor.black.withAlphaComponent(0.85) }
+    var monoGlyph: NSColor { ink(.primary) }
+}
+
+/// Colours of the rows that are their own thing, not an ink or a plate.
+private enum Palette {
+    /// The keyboard focus ring's yellow, under its dashes.
+    static let focusRing = NSColor(red: 1, green: 0.8, blue: 0, alpha: 1)
+    /// The drop badge's pill on a light sidebar: paper white, so its label reads over any row.
+    static let dropBadgeOnLight = NSColor.white.withAlphaComponent(0.9)
 }
 
 enum SidebarSymbols {
-    static func image(_ name: String, size: CGFloat, weight: NSFont.Weight = .regular) -> NSImage? {
+    static func image(_ name: String, size: CGFloat, weight: NSFont.Weight = Design.Icon.weight) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: size, weight: weight))
     }
@@ -64,6 +81,8 @@ extension NSImageView {
     /// Arc's refresh ⇄ stop swap, fitted frame by frame to a 120 fps capture of Arc 1.170 (30 Oct): over
     /// ~90 ms the old glyph fades while shrinking to 0.7 and the new one fades in growing from 0.7,
     /// both easing in and out. (The system's Replace transition un-draws arrow.clockwise over 0.8 s.)
+    private static let swapTime: TimeInterval = 0.09
+
     func swapSymbol(_ image: NSImage?) {
         guard let superview, window != nil, let old = self.image, image != nil else { self.image = image; return }
         let ghost = NSImageView(frame: frame)
@@ -106,7 +125,7 @@ extension NSImageView {
         fade.toValue = fadeIn ? 1 : 0
         let group = CAAnimationGroup()
         group.animations = [scale, fade]
-        group.duration = 0.09
+        group.duration = swapTime
         group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         return group
     }
@@ -114,6 +133,8 @@ extension NSImageView {
     /// Arc's press on the refresh arrow (same capture): a quarter turn clockwise about the arrow's
     /// circle while the button is down, back on release, 0.15 s ease-in-out each way. As in SwiftUI a
     /// turn is added on top of one still running, so a quick click only nudges the arrow.
+    private static let pressTurnTime: TimeInterval = 0.15
+
     func pressTurn(_ down: Bool) {
         guard let layer else { return }
         let to: CGFloat = down ? .pi / 2 : 0
@@ -138,7 +159,7 @@ extension NSImageView {
             let turn = CAKeyframeAnimation(keyPath: "transform")
             turn.values = (0...steps).map { NSValue(caTransform3D: turned((from - to) * CGFloat(steps - $0) / CGFloat(steps))) }
             turn.isAdditive = true
-            turn.duration = 0.15
+            turn.duration = Self.pressTurnTime
             turn.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             turn.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil)
             layer.add(turn, forKey: "turn\(turn.beginTime)")
@@ -193,14 +214,14 @@ final class SidebarGlyphButton: NSView {
     /// Keeps the hover fill while what it opened is open (the player's volume drawer).
     var highlighted = false { didSet { if highlighted != oldValue { refresh() } } }
 
-    init(symbol: String, size: CGFloat, height: CGFloat? = nil, iconSize: CGFloat, weight: NSFont.Weight = .medium, help: String,
+    init(symbol: String, size: CGFloat, height: CGFloat? = nil, iconSize: CGFloat, weight: NSFont.Weight = Design.Icon.weight, help: String,
          optionHelp: String? = nil, colors: SidebarColors, action: @escaping () -> Void) {
         self.size = NSSize(width: size, height: height ?? min(size, 28))
         self.colors = colors
         self.action = action
         super.init(frame: NSRect(origin: .zero, size: self.size))
         wantsLayer = true
-        layer?.cornerRadius = 7
+        layer?.cornerRadius = Design.Radius.inset
         layer?.cornerCurve = .continuous
         glyph.image = SidebarSymbols.image(symbol, size: iconSize, weight: weight)
         shownSymbol = symbol
@@ -221,7 +242,7 @@ final class SidebarGlyphButton: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// `animated` swaps another symbol in the way Arc swaps refresh and stop.
-    func setSymbol(_ symbol: String, iconSize: CGFloat, weight: NSFont.Weight = .medium, help: String, animated: Bool = false) {
+    func setSymbol(_ symbol: String, iconSize: CGFloat, weight: NSFont.Weight = Design.Icon.weight, help: String, animated: Bool = false) {
         let image = SidebarSymbols.image(symbol, size: iconSize, weight: weight)
         if animated, shownSymbol != nil, shownSymbol != symbol {
             glyph.swapSymbol(image)
@@ -266,17 +287,14 @@ final class SidebarGlyphButton: NSView {
         if let tip { (tip.text, tip.keys) = ArcTooltipLabel.split(help) } else if !help.isEmpty { tip = ArcTooltipAnchorView.attach(to: self, help: help) }
     }
 
-    /// Arc 1.170 draws these glyphs at roughly 26% black while the app is in the background; with
-    /// the app active its header glyphs darken to ~59% black, disabled ones stay at ~24%.
+    /// As in Arc 1.170, a light sidebar's header glyphs are faint while the app is in the background
+    /// or the button is disabled (quaternary ink) and darken with the app active (secondary ink).
     private func refresh() {
         let tint: NSColor
-        if colors.isDark {
-            // Arc's row ✕ is a touch brighter than its other glyphs (white 0.6 over the hover fill, 1x).
-            tint = enabled ? NSColor.white.withAlphaComponent(mark != nil ? 0.6 : 0.55) : colors.textTertiary.withAlphaComponent(colors.textTertiary.alphaComponent * 0.55)
-        } else if let active {
-            tint = NSColor.black.withAlphaComponent(enabled && active ? 0.59 : 0.24)
+        if !colors.isDark, let active {
+            tint = colors.ink(enabled && active ? .secondary : .quaternary)
         } else {
-            tint = enabled ? colors.glyph : colors.textTertiary.withAlphaComponent(colors.textTertiary.alphaComponent * 0.55)
+            tint = enabled ? colors.glyph : colors.textTertiary.withAlphaComponent(colors.textTertiary.alphaComponent * Design.Opacity.disabled)
         }
         glyph.contentTintColor = self.tint ?? tint
         mark?.strokeColor = (self.tint ?? tint).cgColor
@@ -433,7 +451,7 @@ final class FocusRingLayer: CALayer {
     private var radius = NicheMetrics.rowCorner
     /// Arc's ring round the open tab of a site in developer mode (TabHighlightView,
     /// TabHighlightState.developerTab, GitHub #139): systemYellow under black dashes at 80 %, a
-    /// radius of 11, and dashes cut to the edge's length (1/60, 1/80 or 1/100 of it by width).
+    /// control's radius, and dashes cut to the edge's length (1/60, 1/80 or 1/100 of it by width).
     private(set) var developer = false
 
     convenience init(radius: CGFloat) {
@@ -445,7 +463,7 @@ final class FocusRingLayer: CALayer {
         self.init()
         guard developer else { return }
         self.developer = true
-        radius = 11
+        radius = Design.Radius.control
         yellow.strokeColor = NSColor.systemYellow.cgColor
         dashes.strokeColor = NSColor.black.cgColor
         dashes.opacity = 0.8
@@ -458,8 +476,8 @@ final class FocusRingLayer: CALayer {
             l.lineWidth = 2
             addSublayer(l)
         }
-        yellow.strokeColor = NSColor(red: 1, green: 0.8, blue: 0, alpha: 1).cgColor
-        dashes.strokeColor = NSColor.black.withAlphaComponent(0.92).cgColor
+        yellow.strokeColor = Palette.focusRing.cgColor
+        dashes.strokeColor = Design.onLight(.primary).cgColor
         dashes.lineDashPattern = [6, 6]
     }
 
@@ -485,7 +503,7 @@ final class FocusRingLayer: CALayer {
 
 /// Arc's SlashView: between a pinned tab's favicon and its name once the tab has left its
 /// pinned page (GitHub #139). A 2 pt round-capped stroke corner to corner of a 4 × 15 pt box,
-/// in TabCellSlash (black or white at 30 %).
+/// in the sidebar's tertiary ink.
 final class SidebarSlashView: NSView {
     static let size = NSSize(width: 4, height: 15)
     var color: NSColor = .gray { didSet { if color != oldValue { needsDisplay = true } } }
@@ -719,7 +737,8 @@ class SidebarRowView: NSView {
 private final class DropBadgeView: NSView {
     private let pill = NSView()
     private let icon = NSImageView()
-    private let label = NSTextField.sidebarLabel(size: 11, weight: .semibold)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue, weight: .semibold)
+    private static let pillHeight: CGFloat = 22
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -728,7 +747,7 @@ private final class DropBadgeView: NSView {
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1.5
         pill.wantsLayer = true
-        pill.layer?.cornerRadius = 11
+        pill.layer?.cornerRadius = Design.Radius.pill(Self.pillHeight)
         pill.shadow = NSShadow()
         pill.layer?.shadowOpacity = 0.08
         pill.layer?.shadowRadius = 2
@@ -743,9 +762,9 @@ private final class DropBadgeView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func show(_ badge: DropDecor.Badge, colors: SidebarColors) {
-        layer?.borderColor = colors.textPrimary.withAlphaComponent(0.3).cgColor
-        pill.layer?.backgroundColor = NSColor.white.withAlphaComponent(colors.isDark ? 0.14 : 0.9).cgColor
-        icon.image = SidebarSymbols.image(badge.symbol, size: 10, weight: .semibold)
+        layer?.borderColor = colors.ink(.tertiary).cgColor
+        pill.layer?.backgroundColor = (colors.isDark ? colors.plate(.pressed) : Palette.dropBadgeOnLight).cgColor
+        icon.image = SidebarSymbols.image(badge.symbol, size: Design.Icon.small)
         icon.contentTintColor = colors.textPrimary
         label.stringValue = badge.label
         label.textColor = colors.textPrimary
@@ -756,9 +775,10 @@ private final class DropBadgeView: NSView {
         super.layout()
         let ls = label.intrinsicContentSize
         let w = 8 + 12 + 4 + ls.width + 8
-        pill.frame = NSRect(x: bounds.width - 8 - w, y: (bounds.height - 22) / 2, width: w, height: 22)
+        let ph = Self.pillHeight
+        pill.frame = NSRect(x: bounds.width - 8 - w, y: (bounds.height - ph) / 2, width: w, height: ph)
         icon.frame = NSRect(x: 8, y: 5, width: 12, height: 12)
-        label.frame = NSRect(x: 24, y: (22 - ls.height) / 2, width: ls.width, height: ls.height)
+        label.frame = NSRect(x: 24, y: (ph - ls.height) / 2, width: ls.width, height: ls.height)
     }
 }
 
@@ -801,8 +821,8 @@ struct TabRowModel: Equatable {
 final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
     private(set) var model: TabRowModel?
     private let favicon = SidebarFaviconView()
-    private let titleLabel = NSTextField.sidebarLabel(size: 14)
-    private let subtitleLabel = NSTextField.sidebarLabel(size: 11)
+    private let titleLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
+    private let subtitleLabel = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
     private var renameField: NSTextField?
     private var accessories: [NSView] = []
     private var focusRing: FocusRingLayer?
@@ -848,7 +868,7 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
         model = m
         if overIcon, !canReset { overIcon = false; stopWatchingFlags(); needsLayout = true }
         refreshIcon()
-        slash.color = (colors.isDark ? NSColor.white : .black).withAlphaComponent(0.3)
+        slash.color = colors.ink(.tertiary)
         titleLabel.stringValue = m.title
         titleLabel.textColor = colors.textPrimary
         // A title that arrives after the row was laid out (a page's, once it loads) fades too.
@@ -896,7 +916,7 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
         let total = TidyTitlesService.sweep
         let fade: CGFloat = 72, speed: CGFloat = 1180
         let start = titleLabel.frame.minX + SidebarText.inset + 20
-        let oldLabel = NSTextField.sidebarLabel(size: 14)
+        let oldLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
         oldLabel.stringValue = old
         oldLabel.textColor = colors.textPrimary
         oldLabel.lineBreakMode = .byClipping
@@ -976,7 +996,7 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
             let dot = CALayer()
             dot.frame = CGRect(x: min(max(x, 2), rect.width - 2) - r, y: rect.midY + spread - r, width: 2 * r, height: 2 * r)
             dot.cornerRadius = r
-            dot.backgroundColor = (dark ? NSColor.white : NSColor.black.withAlphaComponent(0.55)).cgColor
+            dot.backgroundColor = (dark ? Design.onDark(.primary) : Design.onLight(.secondary)).cgColor
             dot.opacity = 0
             let life = Bool.random(using: &rng) && i % 3 == 0 ? Double.random(in: 0.15...0.3, using: &rng) : duration - born
             let blink = CAKeyframeAnimation(keyPath: "opacity")
@@ -1048,8 +1068,8 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
     /// offset on the title's layer that settles to zero, so a relayout mid-way can't fight it.
     private func slideSubtitle(appearing: Bool, titleFrom old: CGPoint?, leavingText: String) {
         layoutSubtreeIfNeeded()
-        let duration = 0.16
-        guard window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+        let duration = Design.Motion.standard
+        guard window != nil, !Design.Motion.reduced,
               let layer = titleLabel.layer, let old else { return }
         let move = CABasicAnimation(keyPath: "position")
         move.isAdditive = true
@@ -1164,8 +1184,9 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
     private lazy var captureDot: NSView = {
         let dot = NSView(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
         let c = CALayer()
-        c.frame = CGRect(x: 4.5, y: 4.5, width: 7, height: 7)
-        c.cornerRadius = 3.5
+        let size: CGFloat = 7
+        c.frame = CGRect(x: 4.5, y: 4.5, width: size, height: size)
+        c.cornerRadius = Design.Radius.pill(size)
         c.backgroundColor = NSColor.systemRed.cgColor
         dot.wantsLayer = true
         dot.layer?.addSublayer(c)
@@ -1175,7 +1196,7 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
     /// Arc 1.171: a playing or muted tab shows a speaker between the favicon and the title (17.5 pt
     /// wide, 8 pt before the title, in the glyph tone); clicking it mutes or unmutes the tab
     /// (31 Oct 2026, issue #28).
-    private lazy var soundButton = SidebarGlyphButton(symbol: Self.soundSymbol, size: 20, iconSize: 13, weight: .regular,
+    private lazy var soundButton = SidebarGlyphButton(symbol: Self.soundSymbol, size: 20, iconSize: Design.Icon.regular,
                                                      help: "Mute Tab", colors: colors) { [weak self] in
         guard let self, let m = self.model, let list = self.list else { return }
         list.store.setMuted(m.id, !m.muted)
@@ -1186,13 +1207,14 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
     private var showsSound = false
     private lazy var peekBadge = SidebarFaviconView()
     private lazy var unreadDot: NSView = {
-        let dot = NSView(frame: NSRect(x: 0, y: 0, width: 6, height: 6))
+        let size: CGFloat = 6
+        let dot = NSView(frame: NSRect(x: 0, y: 0, width: size, height: size))
         dot.wantsLayer = true
-        dot.layer?.cornerRadius = 3
+        dot.layer?.cornerRadius = Design.Radius.pill(size)
         return dot
     }()
     private lazy var closeButton: SidebarGlyphButton = {
-        let b = SidebarGlyphButton(symbol: "xmark", size: Self.closeSize, iconSize: 13, help: "", colors: colors) {}
+        let b = SidebarGlyphButton(symbol: "xmark", size: Self.closeSize, iconSize: Design.Icon.regular, help: "", colors: colors) {}
         b.setCloseMark(minus: false, help: "")
         return b
     }()
@@ -1209,7 +1231,7 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
         if sound {
             if soundButton.superview == nil { addSubview(soundButton) }
             soundButton.colors = colors
-            soundButton.setSymbol(m.muted ? "speaker.slash" : Self.soundSymbol, iconSize: 13, weight: .regular,
+            soundButton.setSymbol(m.muted ? "speaker.slash" : Self.soundSymbol, iconSize: Design.Icon.regular,
                                   help: m.muted ? "Unmute Tab" : "Mute Tab")
         }
         soundButton.isHidden = !sound
@@ -1219,7 +1241,7 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
             shown.append(peekBadge)
         }
         if m.unread && !m.selected && !isHovered {
-            unreadDot.layer?.backgroundColor = colors.textPrimary.withAlphaComponent(0.55).cgColor
+            unreadDot.layer?.backgroundColor = colors.ink(.secondary).cgColor
             shown.append(unreadDot)
         }
         // Arc hides the button while the pointer is on the icon of a tab it can take back.
@@ -1310,7 +1332,7 @@ final class TabRowView: SidebarRowView, ArcTooltipTarget, NSTextFieldDelegate {
         f.isBordered = false
         f.drawsBackground = false
         f.focusRingType = .none
-        f.font = .systemFont(ofSize: 14)
+        f.font = Design.Font.ns(.body)
         f.textColor = colors.textPrimary
         f.delegate = self
         f.cell?.isScrollable = true
@@ -1427,7 +1449,7 @@ struct FolderRowModel: Equatable {
 final class FolderRowView: SidebarRowView, NSTextFieldDelegate {
     private(set) var model: FolderRowModel?
     private let glyph = FolderGlyphView(frame: NSRect(x: 0, y: 0, width: NicheMetrics.favicon, height: 20))
-    private let titleLabel = NSTextField.sidebarLabel(size: 14, weight: .medium)
+    private let titleLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     private var renameField: NSTextField?
     private var accessory: NSView?
 
@@ -1497,17 +1519,17 @@ final class FolderRowView: SidebarRowView, NSTextFieldDelegate {
             } else if let error = m.liveError {
                 // Arc keeps the warning on hover too ("Sign back in to GitHub."): a click signs in, or tries again.
                 let signIn = m.liveSignInURL
-                accessory = SidebarGlyphButton(symbol: "exclamationmark.triangle", size: 26, iconSize: 13, weight: .regular,
+                accessory = SidebarGlyphButton(symbol: "exclamationmark.triangle", size: 26, iconSize: Design.Icon.regular,
                                                help: error, colors: colors) { [weak list] in
                     if let signIn { list?.actions.openURL(signIn) } else { LiveFolderManager.shared.refresh(id) }
                 }
             } else if hover {
-                accessory = SidebarGlyphButton(symbol: "arrow.clockwise", size: 26, iconSize: 12, help: m.liveHelp, colors: colors) {
+                accessory = SidebarGlyphButton(symbol: "arrow.clockwise", size: 26, iconSize: Design.Icon.regular, help: m.liveHelp, colors: colors) {
                     LiveFolderManager.shared.refresh(id)
                 }
             }
         } else if hover && !m.expanded {
-            let l = NSTextField.sidebarLabel(size: 11, weight: .medium)
+            let l = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue, weight: .medium)
             l.stringValue = "\(m.tabCount)"
             l.textColor = colors.textTertiary
             l.sizeToFit()
@@ -1546,7 +1568,7 @@ final class FolderRowView: SidebarRowView, NSTextFieldDelegate {
         f.isBordered = false
         f.drawsBackground = false
         f.focusRingType = .none
-        f.font = .systemFont(ofSize: 14, weight: .medium)
+        f.font = Design.Font.ns(.body)
         f.textColor = colors.textPrimary
         f.delegate = self
         f.cell?.isScrollable = true
@@ -1635,10 +1657,10 @@ final class SplitRowView: SidebarRowView, NSTextFieldDelegate, ArcTooltipTarget 
     private var separators: [NSView] = []
     private var focusRing: FocusRingLayer?
     private let countBadge = SplitCountBadgeView()
-    private let titleLabel = NSTextField.sidebarLabel(size: 14)
+    private let titleLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     private var renameField: NSTextField?
     private lazy var closeButton: SidebarGlyphButton = {
-        let b = SidebarGlyphButton(symbol: "xmark", size: SplitRowMetrics.button, iconSize: 13, help: "", colors: colors) {}
+        let b = SidebarGlyphButton(symbol: "xmark", size: SplitRowMetrics.button, iconSize: Design.Icon.regular, help: "", colors: colors) {}
         b.setCloseMark(minus: false, help: "")
         b.isHidden = true
         addSubview(b)
@@ -1827,7 +1849,7 @@ final class SplitRowView: SidebarRowView, NSTextFieldDelegate, ArcTooltipTarget 
         f.isBordered = false
         f.drawsBackground = false
         f.focusRingType = .none
-        f.font = .systemFont(ofSize: 14)
+        f.font = Design.Font.ns(.body)
         f.textColor = colors.textPrimary
         f.delegate = self
         f.cell?.isScrollable = true
@@ -1896,7 +1918,7 @@ enum SplitRowMetrics {
     static let cellToButton: CGFloat = 5
     /// An open split's pane pill: 4 pt inside the fill top and bottom.
     static let pillInset: CGFloat = 4
-    static let pillRadius: CGFloat = 7
+    static let pillRadius = Design.Radius.inset
     /// The favicon sits this far into its pane.
     static let favicon: CGFloat = 6
 }
@@ -1904,7 +1926,7 @@ enum SplitRowMetrics {
 /// A renamed split's icon: how many panes it holds (Arc: SplitViewCellItemCountIconView). Arc 1.171
 /// live: a 16 pt rounded square in the favicon's place, the digit bold, 7.5 pt tall, centred.
 final class SplitCountBadgeView: NSView {
-    private let label = NSTextField.sidebarLabel(size: 10, weight: .bold)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.micro.rawValue, weight: .bold)
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: NicheMetrics.favicon, height: NicheMetrics.favicon))
@@ -1937,7 +1959,7 @@ final class SplitCellView: NSView, ArcTooltipTarget {
     let cellID: UUID
     private weak var row: SplitRowView?
     private let favicon = SidebarFaviconView()
-    private let titleLabel = NSTextField.sidebarLabel(size: 14)
+    private let titleLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     private let pill = CALayer()
     private var close: SidebarGlyphButton?
     private var title = ""
@@ -1972,8 +1994,8 @@ final class SplitCellView: NSView, ArcTooltipTarget {
         titleLabel.stringValue = m.title
         titleLabel.textColor = colors.textPrimary
         close?.colors = colors
-        // Arc's open split: each pane a pill a shade darker than the white fill (224 on 241).
-        pill.backgroundColor = (colors.isDark ? NSColor.white : .black).withAlphaComponent(0.07).cgColor
+        // Arc's open split: each pane a pill a shade off the row's fill.
+        pill.backgroundColor = colors.plate(.hover).cgColor
         pill.isHidden = !shown
         needsLayout = true
     }
@@ -1984,7 +2006,7 @@ final class SplitCellView: NSView, ArcTooltipTarget {
         close = nil
         guard let button, let row, let list = row.list else { needsLayout = true; return }
         let id = cellID
-        let b = SidebarGlyphButton(symbol: "xmark", size: SplitRowMetrics.button, iconSize: 13, help: button.help,
+        let b = SidebarGlyphButton(symbol: "xmark", size: SplitRowMetrics.button, iconSize: Design.Icon.regular, help: button.help,
                                    optionHelp: "Separate from Split View", colors: row.colors) { [weak list] in
             // Option-click un-splits instead of closing (Arc flag option-click-split-tab-close-button-to-unsplit).
             if NSEvent.modifierFlags.contains(.option) { list?.store.separateFromSplit(id) } else { list?.actions.closePane(id) }
@@ -2038,7 +2060,7 @@ final class LiveStatusRowView: SidebarRowView {
     private(set) var model: LiveStatusModel?
     private let label: NSTextField = {
         let l = NSTextField(wrappingLabelWithString: "")
-        l.font = .systemFont(ofSize: 12)
+        l.font = Design.Font.ns(.detail)
         l.maximumNumberOfLines = 3
         // Truncating the tail would make the field one line high inside a row measured for
         // the wrapped text; the last of the three lines gets the ellipsis instead.
@@ -2058,7 +2080,7 @@ final class LiveStatusRowView: SidebarRowView {
 
     static func height(_ m: LiveStatusModel, width: CGFloat) -> CGFloat {
         let w = max(1, width - leading(depth: m.depth) - 10)
-        let font = NSFont.systemFont(ofSize: 12)
+        let font = Design.Font.ns(.detail)
         let line = ceil(font.ascender - font.descender + font.leading)
         let r = (m.text as NSString).boundingRect(with: NSSize(width: w, height: line * 3), options: [.usesLineFragmentOrigin],
                                                   attributes: [.font: font])
@@ -2104,9 +2126,9 @@ final class LiveStatusRowView: SidebarRowView {
 
 final class NewTabRowView: SidebarRowView {
     private let plus = NSImageView()
-    private let label = NSTextField.sidebarLabel(size: 14)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     /// Zen's ⌘ + New Tab: the clipboard's text under "Paste and Search", in Arc's 11 pt second line.
-    private let preview = NSTextField.sidebarLabel(size: 11)
+    private let preview = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
     private var flagsMonitor: Any?
     /// What a click opens while ⌘ is held over the row with text on the clipboard; nil reads New Tab.
     private var paste: ClipboardPaste?
@@ -2114,7 +2136,7 @@ final class NewTabRowView: SidebarRowView {
 
     override init(key: SpaceListView.RowKey, list: SpaceListView, colors: SidebarColors) {
         super.init(key: key, list: list, colors: colors)
-        // Arc's plus, fitted pixel by pixel at 1x and 2x.
+        // The plus at a bar glyph's size and weight, as the toolbar draws its own.
         plus.image = Self.plusImage
         plus.imageScaling = .scaleNone
         label.stringValue = "New Tab"
@@ -2131,8 +2153,8 @@ final class NewTabRowView: SidebarRowView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    private static let plusImage = SidebarSymbols.image("plus", size: 14.5, weight: .medium)
-    private static let clipboardImage = SidebarSymbols.image("doc.on.clipboard", size: 13, weight: .medium)
+    private static let plusImage = SidebarSymbols.image("plus", size: Design.Icon.bar)
+    private static let clipboardImage = SidebarSymbols.image("doc.on.clipboard", size: Design.Icon.regular)
 
     /// While the ⌘T bar is open Arc draws this row as the open one: the selected tab's fill,
     /// shadow and text.
@@ -2356,7 +2378,7 @@ final class DividerRowView: SidebarRowView {
 
     private func fadeOut(_ v: NSView) {
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
+            ctx.duration = Design.Motion.fast
             v.animator().alphaValue = 0
         } completionHandler: { v.removeFromSuperview() }
     }
@@ -2384,7 +2406,7 @@ final class DividerRowView: SidebarRowView {
     }
 
     private final class ClearButton: NSView {
-        private let label = NSTextField.sidebarLabel(size: 11, weight: .semibold)
+        private let label = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
         private let action: () -> Void
         var colors: SidebarColors { didSet { label.textColor = colors.textSecondary } }
 
@@ -2420,6 +2442,8 @@ enum SidebarTidyMetrics {
     static let period: CGFloat = 12.75
     static let amplitude: CGFloat = 3
     static let cyclesPerSecond: Double = 5
+    /// One period's travel.
+    static let cycle: TimeInterval = 1 / cyclesPerSecond
     static let ramp: TimeInterval = 0.4
     /// One sweep of the broom: tips 31° clockwise from the top of its handle in 0.2 s, holds,
     /// swings 7° past upright and settles, 0.9 s in all.
@@ -2500,7 +2524,7 @@ final class SquiggleLayer: CALayer {
             let travel = CABasicAnimation(keyPath: "transform.translation.x")
             travel.fromValue = 0
             travel.toValue = -SidebarTidyMetrics.period
-            travel.duration = 1 / SidebarTidyMetrics.cyclesPerSecond
+            travel.duration = SidebarTidyMetrics.cycle
             travel.repeatCount = .infinity
             wave.add(travel, forKey: "travel")
         } else {
@@ -2537,7 +2561,7 @@ final class TidyButton: NSView {
     private static let barOffset: CGFloat = 7
     private let broom = CALayer()
     private let broomMask = CALayer()
-    private let label = NSTextField.sidebarLabel(size: 11, weight: .semibold)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
     private let bar = CALayer()
     private let action: () -> Void
     private var hovering = false { didSet { tint() } }
@@ -2622,7 +2646,7 @@ final class TidyButton: NSView {
             let settle = CABasicAnimation(keyPath: "transform.rotation.z")
             settle.fromValue = now
             settle.toValue = 0
-            settle.duration = 0.25
+            settle.duration = Design.Motion.standard
             settle.timingFunction = CAMediaTimingFunction(name: .easeOut)
             broom.add(settle, forKey: "settle")
         }
@@ -2705,7 +2729,7 @@ struct GroupHeaderRowModel: Equatable {
 /// and "Close tab group"; its menu has "Remove header". Arc 1.171, offline copy, 4 Nov 2026.
 final class GroupHeaderRowView: SidebarRowView {
     private(set) var model: GroupHeaderRowModel?
-    private let titleLabel = NSTextField.sidebarLabel(size: 13, weight: .semibold)
+    private let titleLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
     private var buttons: [SidebarGlyphButton] = []
 
     override init(key: SpaceListView.RowKey, list: SpaceListView, colors: SidebarColors) {
@@ -2721,7 +2745,7 @@ final class GroupHeaderRowView: SidebarRowView {
         guard m != model else { return }
         model = m
         titleLabel.stringValue = m.title
-        titleLabel.textColor = colors.isDark ? NSColor.white.withAlphaComponent(0.45) : colors.textSecondary
+        titleLabel.textColor = colors.isDark ? Design.onDark(.tertiary) : colors.textSecondary
         setAccessibilityLabel(m.title)
         needsLayout = true
     }
@@ -2737,12 +2761,12 @@ final class GroupHeaderRowView: SidebarRowView {
         super.hoverChanged()
         if isHovered, buttons.isEmpty, let m = model, let list {
             let id = m.id
-            let folder = SidebarGlyphButton(symbol: "folder.badge.plus", size: 26, iconSize: 13, weight: .regular,
+            let folder = SidebarGlyphButton(symbol: "folder.badge.plus", size: 26, iconSize: Design.Icon.regular,
                                             help: "Create Folder", colors: colors) { [weak list] in
                 guard let list, let f = list.store.folderFromGroup(id) else { return }
                 list.store.setExpanded(f.id, true)
             }
-            let close = SidebarGlyphButton(symbol: "xmark", size: 26, iconSize: 13, help: "", colors: colors) { [weak list] in
+            let close = SidebarGlyphButton(symbol: "xmark", size: 26, iconSize: Design.Icon.regular, help: "", colors: colors) { [weak list] in
                 guard let list else { return }
                 list.closeTabs(list.store.tabs(under: id).map(\.id))
             }
@@ -2780,7 +2804,7 @@ final class GroupHeaderRowView: SidebarRowView {
 final class PinPlaceholderRowView: SidebarRowView {
     private let border = CAShapeLayer()
     private let icon = NSImageView()
-    private let label = NSTextField.sidebarLabel(size: 12, weight: .medium)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue, weight: .medium)
     private var active = false
 
     override init(key: SpaceListView.RowKey, list: SpaceListView, colors: SidebarColors) {
@@ -2789,7 +2813,7 @@ final class PinPlaceholderRowView: SidebarRowView {
         border.lineWidth = 1
         border.lineDashPattern = [4, 3]
         layer?.addSublayer(border)
-        icon.image = SidebarSymbols.image("pin", size: 11, weight: .semibold)
+        icon.image = SidebarSymbols.image("pin", size: Design.Icon.small)
         icon.imageScaling = .scaleNone
         label.stringValue = "Drop to Pin"
         addSubview(icon)
@@ -2811,7 +2835,7 @@ final class PinPlaceholderRowView: SidebarRowView {
     override func baseFill() -> NSColor { active ? colors.hoverFill : .clear }
 
     private func refresh() {
-        border.strokeColor = colors.textTertiary.withAlphaComponent(active ? 0.6 : 0.3).cgColor
+        border.strokeColor = (active ? colors.ink(.tertiary) : colors.rule).cgColor
         icon.contentTintColor = colors.textSecondary
         label.textColor = colors.textSecondary
         refreshBackground()
@@ -2860,7 +2884,7 @@ extension NSView {
         let anim = CABasicAnimation(keyPath: "sublayerTransform")
         anim.fromValue = NSValue(caTransform3D: layer.presentation()?.sublayerTransform ?? layer.sublayerTransform)
         anim.toValue = NSValue(caTransform3D: to)
-        anim.duration = pressed ? 0.08 : Design.Motion.fast
+        anim.duration = pressed ? Design.Motion.exit : Design.Motion.fast
         anim.timingFunction = Design.Motion.curve
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -2871,9 +2895,10 @@ extension NSView {
 }
 
 extension NSTextField {
-    /// A title too long for its row fades out over its last 24 pt instead of ending in "…": the
-    /// row's buttons then appear over a fade, not beside a cut word.
-    func fadeTail(width fade: CGFloat = 24) {
+    /// A title too long for its row fades out over its last 12 pt instead of ending in "…": the
+    /// row's buttons then appear over a fade, not beside a cut word. Dia's fade is about a letter
+    /// and a half; 24 pt dimmed the last word of every long title (13 Nov 2026).
+    func fadeTail(width fade: CGFloat = Design.Space.l) {
         if lineBreakMode != .byClipping {
             lineBreakMode = .byClipping
             cell?.truncatesLastVisibleLine = false

@@ -5,6 +5,8 @@ import AppKit
 /// window and the Peek stays, as in Arc, where the Peek is a card inside the window, and the
 /// sidebar, whose rows open their tabs while the Peek waits on its own (#242).
 final class PeekDimPanel: NSPanel {
+    /// Barely there: a window passes clicks through where it is fully clear.
+    private static let clickCatcher = NSColor.black.withAlphaComponent(0.01)
     private final class Shade: NSView {
         var onClick: () -> Void = {}
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -25,7 +27,7 @@ final class PeekDimPanel: NSPanel {
         shade.wantsLayer = true
         // The page fades instead (MainWindowController.showPeekVeil); this only catches the click,
         // and a window passes clicks through where it is fully clear.
-        shade.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.01).cgColor
+        shade.layer?.backgroundColor = Self.clickCatcher.cgColor
         shade.layer?.cornerRadius = LittleWindow.cornerRadius(of: parent)
         shade.layer?.cornerCurve = .continuous
         shade.autoresizingMask = [.width, .height]

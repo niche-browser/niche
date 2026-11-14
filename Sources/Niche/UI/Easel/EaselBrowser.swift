@@ -8,9 +8,9 @@ import NicheCEF
 /// its pictures in `Easels/<id>/`.
 final class EaselBrowser: NicheBrowser, NativePage {
     /// Arc's Peek shows the canvas on #0B0B0B, where a tab shows the space's backdrop through it.
-    func usePeekLook() { canvas.layer?.backgroundColor = NSColor(white: 11.0 / 255, alpha: 1).cgColor }
+    func usePeekLook() { canvas.layer?.backgroundColor = EaselPalette.peekGround.cgColor }
     /// In a tab again (Peek's ⤢): the veiled backdrop.
-    func usePageLook() { canvas.layer?.backgroundColor = NSColor(white: 0, alpha: 0.5).cgColor }
+    func usePageLook() { canvas.layer?.backgroundColor = EaselPalette.veil.cgColor }
 
     nonisolated func owns(_ url: String) -> Bool { url == address }
 

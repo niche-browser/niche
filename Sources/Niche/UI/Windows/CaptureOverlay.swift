@@ -100,17 +100,23 @@ enum CaptureStyle {
     /// Greyscale (Rec. 601 luma) under a 25 % black veil: 243 → 181, 255 → 191 (measured).
     static let dim: CGFloat = 0.75
     /// The hint's ink on its white card.
-    static let bubbleText = NSColor.black.withAlphaComponent(0.82)
+    static let bubbleText = Design.onLight(.primary)
     /// The two ends of the hint's rim and glow: one neutral shade (Arc: blue and pink).
     static let bubbleBlue = NSColor.black.withAlphaComponent(0.5)
     static let bubblePink = NSColor.black.withAlphaComponent(0.5)
+    /// The rim's two ends on the card's edge.
+    static let rimPink = bubblePink.withAlphaComponent(0.35)
+    static let rimBlue = bubbleBlue.withAlphaComponent(0.35)
+    /// The glow beside the card, and the clear edge it fades to.
+    static let bubbleGlow = NSColor.black.withAlphaComponent(0.26)
+    static let bubbleGlowEdge = bubbleGlow.withAlphaComponent(0)
     static let menuFill = NSColor(Design.graphite)
-    static let menuText = NSColor(white: 1, alpha: 0.9)
-    static let menuIcon = NSColor(white: 1, alpha: 0.45)
-    static let menuDivider = NSColor(white: 1, alpha: 0.07)
+    static let menuText = Design.onDark(.primary)
+    static let menuIcon = Design.onDark(.tertiary)
+    static let menuDivider = Design.hairlineOnDark
     /// A neutral plate, as on every other row in Niche (Arc: indigo).
-    static let menuHover = NSColor(white: 1, alpha: 0.12)
-    static let menuHoverText = NSColor(white: 1, alpha: 0.95)
+    static let menuHover = Design.fillOnDark(.pressed)
+    static let menuHoverText = NSColor.white
 }
 
 // MARK: - The page, the lens and the pointer
@@ -686,13 +692,15 @@ final class CaptureView: NSView {
 // MARK: - The hint at the bottom
 
 /// Arc's ContentCaptureOverlayBubble: a white 354 × 65 pt card 36.5 pt above the page's bottom,
-/// centred, 17 pt corners, a hairline from pink to blue, 14 pt semibold purple text, in a soft
+/// centred, 16 pt corners, a hairline from pink to blue, 13 pt semibold purple text, in a soft
 /// pink and blue glow. "Click or drag…" while there is an element to click, "Drag…" otherwise.
 /// It fades in over ~0.16 s; the dimming itself is instant.
 final class CaptureBubble: NSView {
     static let size = CGSize(width: 354, height: 65)
     static let bottomInset: CGFloat = 36.5
-    static let cornerRadius: CGFloat = 17
+    static let cornerRadius: CGFloat = Design.Radius.panel
+    /// The hint's fade in (Arc: ~0.16 s).
+    static let appearDuration: TimeInterval = 0.16
     static let clickText = "Click or drag to capture a portion of this page"
     static let dragText = "Drag to capture a portion of this page"
 
@@ -711,11 +719,9 @@ final class CaptureBubble: NSView {
         // Arc's glow darkens the dimmed page with a tint rather than lighting it (measured beside the
         // card: 163 grey → 155,147,148 on the left, 140,143,156 on the right, gone ~90 pt out).
         // Neutral in Niche (CaptureStyle): the same soft shade either side, where Arc tints pink and blue.
-        let pink = NSColor.black.withAlphaComponent(0.26)
-        let blue = NSColor.black.withAlphaComponent(0.26)
-        for (g, c) in [(glowPink, pink), (glowBlue, blue)] {
+        for g in [glowPink, glowBlue] {
             g.type = .radial
-            g.colors = [c.cgColor, c.withAlphaComponent(0).cgColor]
+            g.colors = [CaptureStyle.bubbleGlow.cgColor, CaptureStyle.bubbleGlowEdge.cgColor]
             g.startPoint = CGPoint(x: 0.5, y: 0.5)
             g.endPoint = CGPoint(x: 1, y: 1)
             layer?.addSublayer(g)
@@ -724,7 +730,7 @@ final class CaptureBubble: NSView {
         card.cornerRadius = Self.cornerRadius
         card.cornerCurve = .continuous
         layer?.addSublayer(card)
-        rim.colors = [CaptureStyle.bubblePink.withAlphaComponent(0.35).cgColor, CaptureStyle.bubbleBlue.withAlphaComponent(0.35).cgColor]
+        rim.colors = [CaptureStyle.rimPink.cgColor, CaptureStyle.rimBlue.cgColor]
         rim.startPoint = CGPoint(x: 0, y: 0.5)
         rim.endPoint = CGPoint(x: 1, y: 0.5)
         rimMask.fillColor = nil
@@ -732,7 +738,7 @@ final class CaptureBubble: NSView {
         rimMask.lineWidth = 1
         rim.mask = rimMask
         layer?.addSublayer(rim)
-        label.font = .systemFont(ofSize: 14, weight: .semibold)
+        label.font = Design.Font.ns(.body, .semibold)
         label.textColor = CaptureStyle.bubbleText
         label.alignment = .center
         addSubview(label)
@@ -762,7 +768,7 @@ final class CaptureBubble: NSView {
 
     func appear() {
         NSAnimationContext.runAnimationGroup { c in
-            c.duration = 0.16
+            c.duration = Self.appearDuration
             c.timingFunction = CAMediaTimingFunction(name: .easeOut)
             animator().alphaValue = 1
         }
@@ -782,7 +788,7 @@ final class CaptureBubble: NSView {
 // MARK: - The menu after a capture
 
 /// Arc's CapturedImageActionsView, dark whatever the theme: 273 pt wide, 10 pt corners, fill
-/// (18,15,46); 40 pt rows with a 13 pt symbol centred 25 pt in at white 30 % and 14 pt medium text
+/// (18,15,46); 40 pt rows with a 13 pt symbol centred 25 pt in at white 30 % and 13 pt medium text
 /// from 41 pt at white 90 %; sections apart by 9 pt with a hairline 10 pt in from both sides.
 /// Arc's Send To… puts the capture on an easel you pick, New Easel starts one with it; its other
 /// rows (Save to Library, Edit) Niche doesn't have yet.
@@ -796,8 +802,8 @@ final class CaptureMenu: NSView {
     static let width: CGFloat = 273
     static let rowHeight: CGFloat = 40
     static let sectionGap: CGFloat = 9
-    static let padding: CGFloat = 6
-    static let cornerRadius: CGFloat = 10
+    static let padding: CGFloat = Design.Space.s
+    static let cornerRadius: CGFloat = Design.Radius.control
     static let sections: [[Row]] = [
         [Row(title: "Copy", symbol: "doc.on.doc.fill", action: .copy),
          Row(title: "Save...", symbol: "square.and.arrow.down.fill", action: .save),
@@ -820,9 +826,9 @@ final class CaptureMenu: NSView {
         layer?.cornerCurve = .continuous
         shadow = {
             let s = NSShadow()
-            s.shadowColor = NSColor.black.withAlphaComponent(0.3)
-            s.shadowBlurRadius = 12
-            s.shadowOffset = NSSize(width: 0, height: -4)
+            s.shadowColor = Design.Shadow.panelColor
+            s.shadowBlurRadius = Design.Shadow.panelRadius
+            s.shadowOffset = NSSize(width: 0, height: -Design.Shadow.panelOffset)
             return s
         }()
         var y = Self.padding
@@ -860,7 +866,7 @@ final class CaptureMenu: NSView {
     func appear() {
         alphaValue = 0
         NSAnimationContext.runAnimationGroup { c in
-            c.duration = 0.12
+            c.duration = Design.Motion.fast
             animator().alphaValue = 1
         }
     }
@@ -894,13 +900,12 @@ final class CaptureMenuRow: NSView {
         label = NSTextField(labelWithString: row.title)
         super.init(frame: .zero)
         wantsLayer = true
-        fill.cornerRadius = 6
+        fill.cornerRadius = Design.Radius.inset
         fill.cornerCurve = .continuous
         layer?.addSublayer(fill)
-        icon.image = NSImage(systemSymbolName: row.symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
+        icon.image = Design.Icon.symbol(row.symbol, size: Design.Icon.regular)
         icon.imageScaling = .scaleNone
-        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.font = Design.Font.ns(.body, .medium)
         addSubview(icon)
         addSubview(label)
         setAccessibilityRole(.button)
@@ -954,6 +959,11 @@ final class CaptureMenuRow: NSView {
 /// element that a click would take, and a crosshair with that camera at its top right elsewhere.
 @MainActor
 enum CaptureCursors {
+    /// The crosshair's light halo and dark line, and the camera's body.
+    private static let halo = NSColor.white.withAlphaComponent(0.8)
+    private static let line = NSColor(white: 0.17, alpha: 1)
+    private static let cameraBody = NSColor(srgbRed: 0.13, green: 0.16, blue: 0.19, alpha: 1)
+
     static let camera: NSCursor = {
         let size = NSSize(width: 24, height: 19)
         let image = NSImage(size: size, flipped: false) { r in
@@ -969,7 +979,7 @@ enum CaptureCursors {
             // The crosshair: 16 pt arms, 1.5 pt dark lines on a light halo, centred 9 pt from the
             // bottom-left; the camera above and right of it.
             let c = NSPoint(x: 9, y: 9)
-            for (color, width) in [(NSColor.white.withAlphaComponent(0.8), 3.5), (NSColor(white: 0.17, alpha: 1), 1.5)] {
+            for (color, width) in [(halo, 3.5), (line, 1.5)] {
                 color.setStroke()
                 let p = NSBezierPath()
                 p.lineWidth = width
@@ -993,7 +1003,7 @@ enum CaptureCursors {
         NSColor.white.setStroke()
         shape.lineWidth = 2
         shape.stroke()
-        NSColor(srgbRed: 0.13, green: 0.16, blue: 0.19, alpha: 1).setFill()
+        cameraBody.setFill()
         shape.fill()
         let d = body.height * 0.5
         let lens = NSBezierPath(ovalIn: NSRect(x: body.midX - d / 2, y: body.midY - d / 2, width: d, height: d))

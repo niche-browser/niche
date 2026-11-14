@@ -10,7 +10,7 @@ import AppKit
 ///   download arrow knocked out of it, 10 pt from the right edge. The arrow lifts, dips and springs
 ///   back while a heart-shaped ripple grows to 129 % and fades (Arc's 2 s timing); it plays when
 ///   the card appears and loops while it's hovered.
-/// - Updated ("Niche updated!"): a 102 pt card, title 14 pt medium with twinkling sparkles, an ✕,
+/// - Updated ("Niche updated!"): a 102 pt card, title 13 pt medium with twinkling sparkles, an ✕,
 ///   and rows 31.7 pt apart with an icon on a faint 21 pt tile, 13 pt text and a drawn arrow:
 ///   What's new, Sponsor Niche. It pops in with a slight tilt that settles.
 ///
@@ -29,8 +29,8 @@ final class UpdateBannerView: NSView {
     /// Room the sidebar gives the banner (8 pt above the card).
     static var preferredHeight: CGFloat {
         switch kind {
-        case .ready?: return 8 + ReadyCard.height
-        case .updated?: return 8 + UpdatedCard.height
+        case .ready?: return Design.Space.m + ReadyCard.height
+        case .updated?: return Design.Space.m + UpdatedCard.height
         case nil: return 0
         }
     }
@@ -91,7 +91,7 @@ final class UpdateBannerView: NSView {
         super.layout()
         guard let card else { return }
         let h = card is UpdatedCard ? UpdatedCard.height : ReadyCard.height
-        card.frame = NSRect(x: 8, y: 8, width: max(0, bounds.width - 16), height: h)
+        card.frame = NSRect(x: Design.Space.m, y: Design.Space.m, width: max(0, bounds.width - 2 * Design.Space.m), height: h)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -115,13 +115,23 @@ struct BannerPalette {
     let tile: NSColor
     let dark: Bool
 
+    /// The card over a light space, resting and under the pointer: white, so the space shows through.
+    private static let cardLight = NSColor.white.withAlphaComponent(0.82)
+    private static let cardLightHover = NSColor.white.withAlphaComponent(0.92)
+    /// Arc's text on a light card: the ink at 70 % for details, 36 % for the ✕.
+    private static let secondaryInk: CGFloat = 0.7
+    private static let tertiaryInk: CGFloat = 0.36
+    /// The tile behind a row's icon on a light card.
+    private static let tileLight = NSColor.black.withAlphaComponent(0.015)
+    private static let srgb: (Double, Double, Double, CGFloat) -> NSColor = { NSColor(srgbRed: $0, green: $1, blue: $2, alpha: $3) }
+
     init(colors: SidebarColors, themeColor: String?) {
         dark = colors.isDark
         let c = HexColor.components(themeColor ?? "") ?? (0.55, 0.45, 0.75)
         let (h, s, measured) = SpaceTheme.hsb(c.r, c.g, c.b)
         func hsb(_ s: Double, _ v: Double, _ a: CGFloat = 1) -> NSColor {
             let o = SpaceTheme.rgb(h: h, s: max(0, min(1, s)), v: max(0, min(1, v)))
-            return NSColor(srgbRed: o.0, green: o.1, blue: o.2, alpha: a)
+            return Self.srgb(o.0, o.1, o.2, a)
         }
         // Arc's purple space (#9E6EC4): the card fades from white 94 % at its top-left to 58 %
         // toward the bottom right; text is a dark tint of the space (secondary 70 %, the ✕ 36 %);
@@ -144,19 +154,20 @@ struct BannerPalette {
             }
             v = lo
         }
-        let white = NSColor.white
         // One flat fill (Arc's faded from 94 % at the top left to 58 %).
-        fill = dark ? (white.withAlphaComponent(0.09), white.withAlphaComponent(0.09)) : (white.withAlphaComponent(0.82), white.withAlphaComponent(0.82))
-        hoverFill = dark ? (white.withAlphaComponent(0.13), white.withAlphaComponent(0.13)) : (white.withAlphaComponent(0.92), white.withAlphaComponent(0.92))
+        let rest = dark ? Design.fillOnDark(.selected) : Self.cardLight
+        let hover = dark ? Design.fillOnDark(.pressed) : Self.cardLightHover
+        fill = (rest, rest)
+        hoverFill = (hover, hover)
         let ink = hsb(s * 1.2, 0.216)
         title = dark ? colors.textPrimary : ink
-        secondary = dark ? colors.textSecondary : ink.withAlphaComponent(0.7)
-        tertiary = dark ? colors.textTertiary : ink.withAlphaComponent(0.36)
+        secondary = dark ? colors.textSecondary : ink.withAlphaComponent(Self.secondaryInk)
+        tertiary = dark ? colors.textTertiary : ink.withAlphaComponent(Self.tertiaryInk)
         accent = dark ? hsb(s * 0.55, 0.95) : hsb(s * 0.9, min(1, max(v, 0.55) * 1.04))
         icon = dark ? accent : hsb(s * 0.89, v * 0.913)
         hoverIcon = dark ? hsb(s * 0.4, 1) : hsb(s * 1.28, v * 0.78)
         heart = dark ? hsb(s * 0.5, 0.95, 0.45) : hsb(s * 0.735, v, 0.6)
-        tile = dark ? NSColor.white.withAlphaComponent(0.03) : NSColor.black.withAlphaComponent(0.015)
+        tile = dark ? Design.fillOnDark(.subtle) : Self.tileLight
     }
 }
 
@@ -172,12 +183,12 @@ class BannerCard: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 11
+        layer?.cornerRadius = Design.Radius.control
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
         backdrop.actions = ["colors": NSNull(), "bounds": NSNull(), "position": NSNull(), "startPoint": NSNull(), "endPoint": NSNull()]
         layer?.addSublayer(backdrop)
-        close.image = SidebarSymbols.image("xmark", size: 10, weight: .medium)
+        close.image = SidebarSymbols.image("xmark", size: Design.Icon.small, weight: .medium)
         close.imageScaling = .scaleNone
         _ = ArcTooltipAnchorView.attach(to: close, help: "Dismiss")
         addSubview(close)
@@ -218,9 +229,10 @@ class BannerCard: NSView {
         move.fromValue = 14
         move.toValue = 0
         let group = CAAnimationGroup()
-        group.animations = [fade, move]
-        group.duration = 0.35
-        group.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1)
+        // Under Reduce motion it fades in where it is.
+        group.animations = Design.Motion.reduced ? [fade] : [fade, move]
+        group.duration = Design.Motion.slow
+        group.timingFunction = Design.Motion.curve
         layer.add(group, forKey: "appear")
     }
 
@@ -252,9 +264,11 @@ class BannerCard: NSView {
 @MainActor
 final class ReadyCard: BannerCard {
     static let height: CGFloat = 56
-    private let title = NSTextField.sidebarLabel(size: 13, weight: .semibold)
-    private let subtitle = NSTextField.sidebarLabel(size: 11)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
+    private let subtitle = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
     private let heart = UpdateHeartView()
+    /// The heart plays once the card has slid in.
+    private static let heartDelay: CFTimeInterval = 0.25
 
     init(title: String, subtitle: String) {
         super.init(frame: .zero)
@@ -286,7 +300,7 @@ final class ReadyCard: BannerCard {
 
     override func appear() {
         super.appear()
-        heart.play(after: 0.25)
+        heart.play(after: Self.heartDelay)
     }
 
     override func hoverChanged() {
@@ -443,7 +457,7 @@ final class UpdateHeartView: NSView {
 @MainActor
 final class UpdatedCard: BannerCard {
     static let height: CGFloat = 102
-    private let title = NSTextField.sidebarLabel(size: 14, weight: .medium)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .medium)
     private let sparkles = SparklesView()
     private let rows: [BannerRow]
 
@@ -453,7 +467,7 @@ final class UpdatedCard: BannerCard {
         super.init(frame: .zero)
         title.stringValue = "Niche updated!"
         // Arc's ✕ here is larger and lighter than the ready card's hover one.
-        close.image = SidebarSymbols.image("xmark", size: 12, weight: .regular)
+        close.image = SidebarSymbols.image("xmark", size: Design.Icon.regular, weight: .regular)
         addSubview(title)
         addSubview(sparkles)
         for r in rows { addSubview(r) }
@@ -489,7 +503,7 @@ final class UpdatedCard: BannerCard {
         guard let layer else { return }
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0
-        fade.duration = 0.2
+        fade.duration = Design.Motion.standard
         let pop = CASpringAnimation(keyPath: "transform")
         var from = CATransform3DMakeScale(0.9, 0.9, 1)
         from = CATransform3DRotate(from, -0.05, 0, 0, 1)
@@ -520,7 +534,7 @@ final class UpdatedCard: BannerCard {
 final class BannerRow: NSView {
     private let tile = NSView()
     private let icon = NSImageView()
-    private let label = NSTextField.sidebarLabel(size: 13, weight: .medium)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .medium)
     private let arrow = CAShapeLayer()
     private let action: () -> Void
     private var palette: BannerPalette?
@@ -530,9 +544,9 @@ final class BannerRow: NSView {
         self.action = action
         super.init(frame: .zero)
         tile.wantsLayer = true
-        tile.layer?.cornerRadius = 5
+        tile.layer?.cornerRadius = Design.Radius.inset
         tile.layer?.cornerCurve = .continuous
-        icon.image = SidebarSymbols.image(symbol, size: 12.75, weight: .semibold)
+        icon.image = SidebarSymbols.image(symbol, size: Design.Icon.regular, weight: .semibold)
         icon.imageScaling = .scaleNone
         label.stringValue = text
         // Arc's arrow is larger than the font's →: 12 × 10.25 pt with a 1.5 pt stroke.
@@ -605,6 +619,8 @@ final class SparklesView: NSView {
     /// Position as a fraction of the view, size in points, delay in seconds.
     private static let stars: [(x: CGFloat, y: CGFloat, size: CGFloat, delay: CFTimeInterval)] = [
         (1.0, 0.2333, 8, 0), (0.06, 0.88, 2.5, 0.5), (0.42, 0.12, 2, 0.9), (0.62, 0.84, 1.8, 1.3), (0.24, 0.1, 1.6, 0.25)]
+    /// One twinkle: a star swells and brightens, then settles.
+    private static let twinkle: CFTimeInterval = 1.6
     private var layers: [CAShapeLayer] = []
     var color = NSColor.systemPurple { didSet { for l in layers { l.fillColor = color.cgColor } } }
 
@@ -656,7 +672,7 @@ final class SparklesView: NSView {
             fade.values = [0.55, 1, 0.55]
             let group = CAAnimationGroup()
             group.animations = [scale, fade]
-            group.duration = 1.6
+            group.duration = Self.twinkle
             group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             group.repeatCount = .infinity
             group.beginTime = now + s.delay

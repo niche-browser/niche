@@ -30,6 +30,12 @@ gains a finding fails, one that loses one is reported so the baseline can come d
   perf-no-network
       Networking (URLSession, CFNetwork, Network.framework, sockets) under either Perf folder: the
       performance recorder never sends anything anywhere (#91); the export is the user's to share.
+  design-literal
+      A literal colour, font size, corner radius or animation time in a view (Sources/Niche/UI and
+      the Perf pane). Every window takes those from Design (Sources/Niche/UI/Design.swift,
+      docs/design.md), which is what keeps one bar's glyphs, plates and type like the next one's.
+      A component's own value is a named `static let` beside a comment saying what it is; the
+      token files themselves (Design, Colors, Theme, the emoji catalog) are exempt.
   perf-boundary
       The performance recorder stays removable (#91, docs/performance.md): outside its two folders
       only the files in PERF_CALLERS reach it, and inside Sources/Niche/Perf only PerfCEF.swift sees
@@ -55,6 +61,12 @@ PERF_CALLERS = {"App/main.swift", "App/AppDelegate.swift", "Services/BrowserMana
                 "UI/Settings/SettingsWindowController.swift"}
 PERF_NAME = re.compile(r"\b(?:Perf(?:[A-Z]\w*)?|PerformancePane)\b")
 NETWORK = re.compile(r"\bURLSession\b|\bCFNetwork\b|\bNWConnection\b|\bNWPathMonitor\b|^\s*import\s+Network\b|\bCFSocket\w*|\bCFStream\w*|\bsocket\(")
+DESIGN_LITERAL = re.compile(
+    r"cornerRadius\s*[:=]\s*(?!0\b(?!\.))\d|ystem(?:Font)?\((?:ofSize|size):\s*\d|[dD]uration\s*[:=]\s*\d|withAlphaComponent\(\s*\d"
+    r"|(?:white|black|primary)\.opacity\(\s*\d|(?:NS)?Color\((?:red|srgbRed|calibratedRed|white|calibratedWhite|hue|deviceRed):"
+    r"|hex:\s*\"")
+DESIGN_NAMED = re.compile(r"^\s*(?:(?:private|fileprivate|public|internal)\s+)?static\s+(?:let|var|func)\s")
+DESIGN_EXEMPT = {"UI/Design.swift", "UI/Colors.swift", "UI/Theme.swift", "UI/Sidebar/EmojiCatalog+Data.swift"}
 CLOCK_FILES = {"Services/SidebarStore.swift", "Services/BrowserManager.swift", "Services/LiveFolderManager.swift",
                "Services/SidebarIntegrity.swift", "App/AppComposition.swift"}
 
@@ -110,6 +122,9 @@ def findings():
                     hit("perf-boundary", rel, i)
             elif rel not in PERF_CALLERS and PERF_NAME.search(line):
                 hit("perf-boundary", rel, i)
+            if (top == "UI" or rel == "Perf/PerformancePane.swift") and rel not in DESIGN_EXEMPT \
+                    and DESIGN_LITERAL.search(line) and not DESIGN_NAMED.match(line):
+                hit("design-literal", rel, i)
             for name in re.findall(r"\benum (\w+)Importer\b", line):
                 if not os.path.isdir(os.path.join(ROOT, "Tests", "Fixtures", name)):
                     hit("importer-without-fixture", f"{rel}:{name}", i)

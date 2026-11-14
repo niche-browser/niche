@@ -9,6 +9,8 @@ import SwiftUI
 final class CommandBarController {
     var isOpen = false
     var mode: CommandBarMode = .newTab
+    /// The bar is open over the empty pane Add Split View made: an open tab's row fills that pane.
+    var fillsSplitPane = false
     var query = ""
     var result = SuggestionResult()
     var selectedIndex = 0

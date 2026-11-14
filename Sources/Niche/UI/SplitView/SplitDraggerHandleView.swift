@@ -25,7 +25,7 @@ final class SplitDraggerHandleView: NSView {
         static let pillLength: CGFloat = 36
         static let pillColor = NSColor(white: 0, alpha: 0.28)
         static let pillHighlightColor = NSColor(white: 0, alpha: 0.45)
-        static let fade: TimeInterval = 0.12
+        static let fade: TimeInterval = Design.Motion.fast
     }
 
     override init(frame: NSRect) {
@@ -33,7 +33,7 @@ final class SplitDraggerHandleView: NSView {
         wantsLayer = true
         pill.wantsLayer = true
         pill.layer?.backgroundColor = Style.pillColor.cgColor
-        pill.layer?.cornerRadius = Style.pillThickness / 2
+        pill.layer?.cornerRadius = Design.Radius.pill(Style.pillThickness)
         pill.alphaValue = 0
         addSubview(pill)
     }

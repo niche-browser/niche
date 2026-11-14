@@ -163,19 +163,24 @@ final class PaneCardView: NSView {
         if subview !== ring, ring.superview === self { addSubview(ring, positioned: .above, relativeTo: nil) }
     }
 
+    /// Measured on Arc 1.170 (the maintainer theme, 2x): the empty pane is the
+    /// gradient plus about +9/+11/+12 per channel, i.e. a white veil at ~0.2.
+    private static let emptyVeil = NSColor.white.withAlphaComponent(0.2)
+    /// The veil a page of Niche's own (an Easel) takes under its toolbar.
+    private static let clearPageVeil = NSColor.black.withAlphaComponent(0.5)
+
     private func refreshBackground() {
-        // Measured on Arc 1.170 (the maintainer theme, 2x): the empty pane is the
-        // gradient plus about +9/+11/+12 per channel, i.e. a white veil at ~0.2.
-        layer?.backgroundColor = transparent || hasPage ? NSColor.clear.cgColor : NSColor(white: 1, alpha: isDark ? 0.08 : 0.2).cgColor
-        let bar = developerBar ?? toolbarColor.map { NSColor(Color(hex: $0)) } ?? .white
+        layer?.backgroundColor = (transparent || hasPage ? NSColor.clear : isDark ? Design.fillOnDark(.selected) : Self.emptyVeil).cgColor
+        // A page that has drawn nothing yet has the canvas under its bar too: one surface.
+        let bar = developerBar ?? toolbarColor.map { NSColor(Color(hex: $0)) } ?? NicheBrowser.pageCanvasColor
         // A page of Niche's own over the backdrop (an Easel) takes its veil under the toolbar too, as Arc's does.
-        let veiled = pageColor == "clear" ? NSColor(white: 0, alpha: 0.5) : bar
+        let veiled = pageColor == "clear" ? Self.clearPageVeil : bar
         toolbarBackground.layer?.backgroundColor = (hasPage && !transparent ? veiled : NSColor.clear).cgColor
         // "clear": a page of Niche's own that lets the window's backdrop through (an Easel, as in Arc).
         let page = pageColor == "clear" ? NSColor.clear : pageColor.map { NSColor(Color(hex: $0)) } ?? NicheBrowser.pageCanvasColor
         pageBackground.layer?.backgroundColor = (hasPage && !transparent ? page : NSColor.clear).cgColor
         hairline.isHidden = hasPage || transparent || !showToolbar
-        hairline.layer?.backgroundColor = NSColor(white: isDark ? 1 : 0, alpha: 0.08).cgColor
+        hairline.layer?.backgroundColor = Design.barFill(.hover, onLight: !isDark).cgColor
     }
 
     override func layout() {
@@ -197,7 +202,7 @@ final class PaneCardView: NSView {
         fill.origin.y += inset
         fill.size.height = max(0, fill.height - (th == 0 ? 2 * inset : inset))
         pageBackground.frame = fill
-        pageBackground.layer?.cornerRadius = rounded ? cornerRadius : 0
+        pageBackground.layer?.cornerRadius = rounded ? cornerRadius : .zero
         pageBackground.layer?.maskedCorners = th == 0 ? [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
                                                       : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         elsewhereView.frame = fill

@@ -2,13 +2,16 @@ import CoreGraphics
 
 /// Where a space's favorite tiles go in a grid `width` points wide (the sidebar less 8 pt each side).
 ///
-/// Arc 1.171 (AX frames, 1–9 favorites at sidebar widths 100–347, 31 Oct): at most as many
-/// columns (up to four) as keep a tile at least as wide as it is tall (47 pt), then the fewest
-/// that need no more rows: one favorite fills the row, five go 3 + 2, nine 3 × 3, four at
-/// 200 pt 2 × 2 (#29). A short last row keeps the tile width, from the left.
+/// Arc's rule (1.171, AX frames, 1–9 favorites at sidebar widths 100–347, 31 Oct) at Dia's tile
+/// size: at most as many columns (up to six) as keep a tile at least as wide as it is tall
+/// (40 pt), then the fewest that need no more rows: one favorite fills the row, five go in one
+/// row at 280 pt, seven 4 + 3 (#29). A short last row keeps the tile width, from the left.
 public struct FavoritesLayout: Equatable {
-    public static let tileHeight: CGFloat = 47
+    /// Dia's tile, where Arc's was 47 pt: the same favorites in a quieter block (13 Nov 2026).
+    public static let tileHeight: CGFloat = 40
     public static let gap: CGFloat = 8
+    /// The most tiles in a row, however wide the sidebar.
+    public static let maxColumns = 6
 
     public let count: Int
     public let width: CGFloat
@@ -19,7 +22,7 @@ public struct FavoritesLayout: Equatable {
     }
 
     public var columns: Int {
-        let widest = (1...4).last { (width - CGFloat($0 - 1) * Self.gap) / CGFloat($0) >= Self.tileHeight } ?? 1
+        let widest = (1...Self.maxColumns).last { (width - CGFloat($0 - 1) * Self.gap) / CGFloat($0) >= Self.tileHeight } ?? 1
         guard count > 0 else { return widest }
         let rows = (count + widest - 1) / widest
         return (count + rows - 1) / rows

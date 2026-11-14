@@ -5,7 +5,7 @@ import QuartzCore
 /// (⌘Return in the command bar with the sidebar hidden, GitHub #85), "Copied Current URL",
 /// "Cannot Add New Pane" and the rest (`backgroundTabCreated`, `copyTabURL`, `maxNumberPanes`…), so
 /// Niche shows all of its confirmations with this. Arc 1.171, measured 2 Nov 2026 at 1x: a 42 pt pill 8 pt below the top of the
-/// page and 9 pt in from its right edge, 14 pt medium black text with 12 pt either side, a fill
+/// page and 9 pt in from its right edge, medium black text (14 pt in Arc, the body size here) with 12 pt either side, a fill
 /// from the space's colours with a 1 pt darker outline. It springs in from its top centre
 /// (≈0.3 s response, 4 % overshoot), stays 4.85 s after the last tab it announced (another one
 /// bumps it by 4 %) and shrinks back into its top in 80 ms. Some of Arc's carry a button
@@ -42,13 +42,13 @@ final class ShinyToast {
     static let topInset: CGFloat = 8
     static let trailingInset: CGFloat = 9
     static let padding: CGFloat = 12
-    static let cornerRadius: CGFloat = 10
+    static let cornerRadius: CGFloat = Design.Radius.control
     /// Room around the pill in its panel, so the spring's overshoot isn't clipped.
     static let margin: CGFloat = 8
-    static let font = NSFont.systemFont(ofSize: 14, weight: .medium)
+    static let font = Design.Font.ns(.body, .medium)
     /// How long the toast stays up after the last message.
     static let visibleFor: TimeInterval = 4.85
-    static let buttonFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    static let buttonFont = Design.Font.ns(.body, .semibold)
     static let buttonHeight: CGFloat = 26
     static let buttonPadding: CGFloat = 10
     /// Between the text and the button.
@@ -67,7 +67,20 @@ final class ShinyToast {
     private var persistent = false
     private var onClose: (() -> Void)?
     static let closeSize: CGFloat = 26
-    static let closeGap: CGFloat = 6
+    static let closeGap: CGFloat = Design.Space.s
+    /// The glyph button: a wash of white over the pill (60 % on a light toast, 15 % on a dark one)
+    /// with an outline of the text colour.
+    private static let glyphWashOnLight: CGFloat = 0.6
+    private static let glyphWashOnDark: CGFloat = 0.15
+    private static let glyphOutlineOnLight: CGFloat = 0.3
+    private static let glyphOutlineOnDark: CGFloat = 0.2
+    /// Another message bumps the toast: 1 → 1.044 → 1 in ~0.2 s (Arc 1.171).
+    private static let bumpDuration: TimeInterval = 0.21
+    /// It shrinks back into its top in 80 ms (Arc 1.171).
+    private static let shrinkDuration: TimeInterval = 0.08
+
+    /// A plate in the toast's own ink (black on a light toast, white on a dark one).
+    private static func wash(_ ink: NSColor, _ fill: Design.Fill) -> NSColor { ink.withAlphaComponent(fill.rawValue) }
     private var hide: DispatchWorkItem?
     private var action: Action?
     /// The text colour: the button is a wash of it.
@@ -92,7 +105,7 @@ final class ShinyToast {
         label.alignmentMode = .center
         label.foregroundColor = NSColor.black.cgColor
         pill.addSublayer(label)
-        button.cornerRadius = Self.buttonHeight / 2
+        button.cornerRadius = Design.Radius.pill(Self.buttonHeight)
         button.cornerCurve = .continuous
         buttonLabel.font = Self.buttonFont
         buttonLabel.fontSize = Self.buttonFont.pointSize
@@ -101,7 +114,7 @@ final class ShinyToast {
         buttonGlyph.contentsGravity = .center
         button.addSublayer(buttonGlyph)
         pill.addSublayer(button)
-        closeButton.cornerRadius = Self.closeSize / 2
+        closeButton.cornerRadius = Design.Radius.pill(Self.closeSize)
         closeGlyph.contentsGravity = .center
         closeButton.addSublayer(closeGlyph)
         pill.addSublayer(closeButton)
@@ -168,26 +181,26 @@ final class ShinyToast {
         buttonLabel.isHidden = glyph != nil
         buttonGlyph.isHidden = glyph == nil
         if let glyph {
-            // A wash of white over the pill (60 % on a light toast, 15 % on a dark one) with an
-            // outline of the text colour, the glyph in the text colour.
+            // A wash of white over the pill with an outline of the text colour, the glyph in the
+            // text colour.
             let dark = (colors.text.usingColorSpace(.sRGB)?.brightnessComponent ?? 0) > 0.5
             let b = Self.glyphButton
             button.frame = CGRect(x: width - Self.glyphPadding - b.width, y: (height - b.height) / 2, width: b.width, height: b.height)
-            button.cornerRadius = 7
+            button.cornerRadius = Design.Radius.inset
             button.borderWidth = 1
-            button.borderColor = colors.text.withAlphaComponent(dark ? 0.2 : 0.3).cgColor
-            button.backgroundColor = (colors.top.blended(withFraction: dark ? 0.15 : 0.6, of: .white) ?? colors.top).cgColor
-            let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium).applying(.init(paletteColors: [colors.text]))
+            button.borderColor = colors.text.withAlphaComponent(dark ? Self.glyphOutlineOnDark : Self.glyphOutlineOnLight).cgColor
+            button.backgroundColor = (colors.top.blended(withFraction: dark ? Self.glyphWashOnDark : Self.glyphWashOnLight, of: .white) ?? colors.top).cgColor
+            let config = Design.Icon.configuration(Design.Icon.regular).applying(.init(paletteColors: [colors.text]))
             buttonGlyph.contents = NSImage(systemSymbolName: glyph, accessibilityDescription: action?.title)?.withSymbolConfiguration(config)
             buttonGlyph.contentsScale = scale
             buttonGlyph.frame = CGRect(origin: .zero, size: b)
         } else if let buttonWidth, let action {
-            button.cornerRadius = Self.buttonHeight / 2
+            button.cornerRadius = Design.Radius.pill(Self.buttonHeight)
             button.borderWidth = 0
             let inset = (Self.height - Self.buttonHeight) / 2
             button.frame = CGRect(x: width - inset - closeRoom - buttonWidth, y: inset, width: buttonWidth, height: Self.buttonHeight)
             buttonTint = colors.text
-            button.backgroundColor = colors.text.withAlphaComponent(0.1).cgColor
+            button.backgroundColor = Self.wash(colors.text, .selected).cgColor
             buttonLabel.foregroundColor = colors.text.cgColor
             buttonLabel.contentsScale = scale
             buttonLabel.string = action.title
@@ -200,7 +213,7 @@ final class ShinyToast {
             closeButton.frame = CGRect(x: width - (height - s) / 2 - s, y: (height - s) / 2, width: s, height: s)
             // Only the glyph at rest; the round fill shows under the pointer (moved(to:)).
             closeButton.backgroundColor = NSColor.clear.cgColor
-            let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold).applying(.init(paletteColors: [colors.text]))
+            let config = Design.Icon.configuration(Design.Icon.small, weight: .semibold).applying(.init(paletteColors: [colors.text]))
             closeGlyph.contents = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")?.withSymbolConfiguration(config)
             closeGlyph.contentsScale = scale
             closeGlyph.frame = CGRect(x: 0, y: 0, width: s, height: s)
@@ -240,7 +253,7 @@ final class ShinyToast {
         if persistent {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            if action?.symbol == nil { button.backgroundColor = buttonTint.withAlphaComponent(inside ? 0.16 : 0.1).cgColor }
+            if action?.symbol == nil { button.backgroundColor = Self.wash(buttonTint, inside ? .strong : .selected).cgColor }
             if !inside { closeButton.backgroundColor = NSColor.clear.cgColor }
             CATransaction.commit()
             return
@@ -252,7 +265,7 @@ final class ShinyToast {
         }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        if action?.symbol == nil { button.backgroundColor = buttonTint.withAlphaComponent(inside ? 0.16 : 0.1).cgColor }
+        if action?.symbol == nil { button.backgroundColor = Self.wash(buttonTint, inside ? .strong : .selected).cgColor }
         CATransaction.commit()
     }
 
@@ -263,7 +276,7 @@ final class ShinyToast {
         let over = closeButton.frame.insetBy(dx: -4, dy: -4).contains(local)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        closeButton.backgroundColor = over ? buttonTint.withAlphaComponent(0.12).cgColor : NSColor.clear.cgColor
+        closeButton.backgroundColor = over ? Self.wash(buttonTint, .pressed).cgColor : NSColor.clear.cgColor
         CATransaction.commit()
     }
 
@@ -314,7 +327,7 @@ final class ShinyToast {
         let bump = CAKeyframeAnimation(keyPath: "transform.scale")
         bump.values = [1, 1.044, 1]
         bump.keyTimes = [0, 0.2, 1]
-        bump.duration = 0.21
+        bump.duration = Self.bumpDuration
         bump.timingFunctions = [CAMediaTimingFunction(name: .easeOut), CAMediaTimingFunction(name: .easeInEaseOut)]
         pill.add(bump, forKey: "appear")
     }
@@ -350,11 +363,14 @@ final class ShinyToast {
         fade.toValue = 0
         let group = CAAnimationGroup()
         group.animations = [shrink, fade]
-        group.duration = 0.08
+        group.duration = Self.shrinkDuration
         pill.add(group, forKey: "fade")
         setOpacity(0)
         CATransaction.commit()
     }
+
+    /// One tone of a theme's hue, in sRGB.
+    private static func tone(_ hue: CGFloat, _ s: CGFloat, _ b: CGFloat) -> NSColor { NSColor(hue: hue, saturation: s, brightness: b, alpha: 1).usingColorSpace(.sRGB) ?? .gray }
 
     /// Arc builds it from the space's background (ShinyToastBackgroundBasedPalette): the theme's hue,
     /// pale with black text on a light theme, deep with white text on a dark one, a little darker
@@ -365,12 +381,9 @@ final class ShinyToast {
         let theme = theme.shown
         let comps = theme.colors.compactMap(HexColor.components)
         let n = Double(max(comps.count, 1))
-        let mean = NSColor(srgbRed: comps.reduce(0) { $0 + $1.r } / n, green: comps.reduce(0) { $0 + $1.g } / n,
-                           blue: comps.reduce(0) { $0 + $1.b } / n, alpha: 1)
+        let mean = NSColor(RGB(comps.reduce(0) { $0 + $1.r } / n, comps.reduce(0) { $0 + $1.g } / n, comps.reduce(0) { $0 + $1.b } / n))
         let hue = mean.hueComponent, sat = comps.isEmpty ? 0 : mean.saturationComponent
-        func color(_ s: CGFloat, _ b: CGFloat) -> NSColor {
-            NSColor(hue: hue, saturation: s, brightness: b, alpha: 1).usingColorSpace(.sRGB) ?? .gray
-        }
+        func color(_ s: CGFloat, _ b: CGFloat) -> NSColor { tone(hue, s, b) }
         if theme.isDark {
             let s = min(0.76, sat * 1.9)
             let top = color(s, 0.40)

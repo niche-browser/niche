@@ -6,6 +6,13 @@ extension NSPasteboard.PasteboardType {
     static let nicheSidebarItem = NSPasteboard.PasteboardType(UTType.nicheSidebarItem.identifier)
 }
 
+/// Colours of the list that are their own thing, not an ink or a plate.
+private enum Palette {
+    /// The card a dragged row rides on: near-opaque paper on a light sidebar, graphite on a dark one.
+    static let dragCardOnLight = NSColor(white: 1, alpha: 0.92)
+    static let dragCardOnDark = NSColor(white: 0.18, alpha: 0.92)
+}
+
 /// A space's pinned and Today list, drawn by AppKit like Arc's sidebar (an AppKit list of
 /// cells), not SwiftUI. Scrolling moves one clip view; nothing is laid out or diffed per frame.
 /// The list reads the store inside an observation scope, rebuilds its flat row models when
@@ -142,7 +149,7 @@ final class SpaceListView: NSView, NSDraggingSource {
             l.opacity = 0
             document.layer?.addSublayer(l)
         }
-        dropLine.cornerRadius = 1
+        dropLine.cornerRadius = Design.Radius.pill(Self.dropLineHeight)
         dropLine.zPosition = 5
         dropLine.opacity = 0
         document.layer?.addSublayer(dropLine)
@@ -608,10 +615,13 @@ final class SpaceListView: NSView, NSDraggingSource {
         }
     }
 
+    /// The insertion line's thickness.
+    private static let dropLineHeight: CGFloat = 2
+
     private func updateDropChrome() {
         let fill = colors.hoverFill.cgColor
         CATransaction.begin()
-        CATransaction.setAnimationDuration(0.2)
+        CATransaction.setAnimationDuration(Design.Motion.duration(Design.Motion.standard))
         pinnedHighlight.backgroundColor = fill
         todayHighlight.backgroundColor = fill
         pinnedHighlight.frame = pinnedFrame.insetBy(dx: -2, dy: 0)
@@ -619,7 +629,7 @@ final class SpaceListView: NSView, NSDraggingSource {
         pinnedHighlight.opacity = highlightPinned ? 1 : 0
         todayHighlight.opacity = highlightToday ? 1 : 0
         if let line = dropLineSpec {
-            dropLine.backgroundColor = colors.textPrimary.withAlphaComponent(0.5).cgColor
+            dropLine.backgroundColor = colors.ink(.secondary).cgColor
             if dropLine.opacity == 0 {
                 CATransaction.setDisableActions(true)
                 dropLine.frame = NSRect(x: line.minX, y: line.y - 1, width: max(0, line.maxX - line.minX), height: 2)
@@ -729,7 +739,7 @@ final class SpaceListView: NSView, NSDraggingSource {
         let f = placed(row)
         let y = min(max(0, f.midY - visible.height / 2), max(0, document.frame.height - visible.height))
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.45
+            ctx.duration = Design.Motion.duration(Design.Motion.slow)
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.3, 0, 0.2, 1)
             clip.animator().setBoundsOrigin(NSPoint(x: 0, y: y))
         } completionHandler: { [weak self] in
@@ -737,18 +747,20 @@ final class SpaceListView: NSView, NSDraggingSource {
         }
     }
 
-    /// Arc 1.170 draws a full-width 1 pt hairline (~5% black over the light theme) at an edge of
-    /// the list only while rows are hidden past it, fading over ~0.25 s.
+    /// Arc 1.170 draws a full-width 1 pt hairline at an edge of the list only while rows are hidden
+    /// past it, fading over ~0.25 s. Here it takes the sidebar's separator colour.
+    private static let hairlineFade: TimeInterval = 0.25
+
     private func updateHairlines(animated: Bool) {
         let clip = scrollView.contentView.bounds
         let state = (top: clip.minY > 0.5, bottom: contentBottom - clip.minY > clip.height + 0.5)
-        let color = (colors.isDark ? NSColor.white.withAlphaComponent(0.07) : NSColor.black.withAlphaComponent(0.05)).cgColor
+        let color = colors.separator.cgColor
         topHairline.layer?.backgroundColor = color
         bottomHairline.layer?.backgroundColor = color
         guard state != hairlineState || !animated else { return }
         hairlineState = state
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = animated ? 0.25 : 0
+            ctx.duration = animated ? Self.hairlineFade : 0
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             topHairline.animator().alphaValue = state.top ? 1 : 0
             bottomHairline.animator().alphaValue = state.bottom ? 1 : 0
@@ -765,7 +777,7 @@ final class SpaceListView: NSView, NSDraggingSource {
         guard row.frame.minY < visible.minY || row.frame.maxY > visible.maxY else { return }
         let y = min(max(0, row.frame.midY - visible.height / 2), max(0, document.frame.height - visible.height))
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.25
+            ctx.duration = Design.Motion.duration(Design.Motion.standard)
             ctx.timingFunction = SidebarListMetrics.timing
             clip.animator().setBoundsOrigin(NSPoint(x: 0, y: y))
         }
@@ -914,7 +926,7 @@ final class SpaceListView: NSView, NSDraggingSource {
         let size = row.bounds.size
         let rep = row.bitmapImageRepForCachingDisplay(in: row.bounds)
         if let rep { row.cacheDisplay(in: row.bounds, to: rep) }
-        let fill = colors.isDark ? NSColor(white: 0.18, alpha: 0.92) : NSColor(white: 1, alpha: 0.92)
+        let fill = colors.isDark ? Palette.dragCardOnDark : Palette.dragCardOnLight
         return NSImage(size: size, flipped: false) { r in
             fill.setFill()
             NSBezierPath(roundedRect: r, xRadius: NicheMetrics.rowCorner, yRadius: NicheMetrics.rowCorner).fill()
@@ -1158,8 +1170,9 @@ final class SpaceListView: NSView, NSDraggingSource {
 enum SidebarListMetrics {
     /// Rows either side of the insertion line ease this far apart.
     static let nudge: CGFloat = 3
-    /// SwiftUI's .snappy(duration: 0.22, extraBounce: 0), which the list's changes used.
-    static let duration = Design.Motion.standard
+    /// The time of SwiftUI's `.snappy` with no extra bounce, which the list's changes used; none
+    /// under Reduce motion, where rows take their places at once.
+    static var duration: TimeInterval { Design.Motion.duration(Design.Motion.standard) }
     static let timing = Design.Motion.curve
 }
 
@@ -1182,11 +1195,11 @@ final class SpaceListScrollView: NSScrollView {
 
 /// Arc 1.171's list scroller (31 Oct 2026, issue #31): AppKit's overlay scroller, shown while
 /// scrolling and faded out after, with no track and a 4 pt knob 3 pt in from the sidebar's
-/// edge, white at 49 % on dark themes. It is only as wide as the 10 pt gutter right of the rows,
+/// edge, in the sidebar's tertiary ink. It is only as wide as the 10 pt gutter right of the rows,
 /// so it never covers a row's trailing buttons.
 /// With "Show scroll bars: Always" (or Automatic with a mouse) Arc follows the system to a legacy
 /// scroller instead (1 Nov 2026, issue #48): always shown, no track, AppKit's legacy knob (5 pt
-/// wide, 3 pt in, 1 pt inside its knob rect, 50 % white or black), and its rows give up 8 pt.
+/// wide, 3 pt in, 1 pt inside its knob rect, in the secondary ink), and its rows give up 8 pt.
 /// Forcing overlay there hid the knob: AppKit never fades an overlay knob in while the system
 /// prefers legacy. The legacy knob snaps to pixels, as the sidebar can be any width.
 final class SidebarScroller: NSScroller {
@@ -1217,14 +1230,16 @@ final class SidebarScroller: NSScroller {
         guard knob.height > 0 else { return }
         if scrollerStyle == .legacy {
             let r = NSRect(x: bounds.maxX - 8, y: knob.minY + 1, width: 5, height: max(0, knob.height - 2))
-            NSColor(white: isDarkTheme ? 1 : 0, alpha: 0.5).setFill()
-            NSBezierPath(roundedRect: backingAlignedRect(r, options: .alignAllEdgesNearest), xRadius: 2.5, yRadius: 2.5).fill()
+            (isDarkTheme ? Design.onDark(.secondary) : Design.onLight(.secondary)).setFill()
+            let half = Design.Radius.pill(r.width)
+            NSBezierPath(roundedRect: backingAlignedRect(r, options: .alignAllEdgesNearest), xRadius: half, yRadius: half).fill()
             return
         }
         guard !Self.hiddenForSwipe else { return }
         let r = NSRect(x: bounds.maxX - 7, y: knob.minY + 2, width: 4, height: max(0, knob.height - 4))
-        (isDarkTheme ? NSColor.white.withAlphaComponent(0.49) : NSColor.black.withAlphaComponent(0.3)).setFill()
-        NSBezierPath(roundedRect: r, xRadius: 2, yRadius: 2).fill()
+        (isDarkTheme ? Design.onDark(.tertiary) : Design.onLight(.tertiary)).setFill()
+        let half = Design.Radius.pill(r.width)
+        NSBezierPath(roundedRect: r, xRadius: half, yRadius: half).fill()
     }
 }
 

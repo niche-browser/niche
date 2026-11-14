@@ -17,11 +17,11 @@ final class PictureInPictureControlsView: NSView {
     private let scrim = CALayer()
     private let addressLabel = NSTextField(labelWithString: "")
     private static let topButtonSize: CGFloat = 26
-    private let closeButton = PictureInPictureButton(symbol: "xmark", pointSize: 12, diameter: topButtonSize, tip: "Close")
-    private let backButton = PictureInPictureButton(symbol: "pip.exit", pointSize: 13, diameter: topButtonSize, tip: "Back to Tab")
-    private let playButton = PictureInPictureButton(symbol: "play.fill", pointSize: 22, diameter: 48, tip: "Play")
-    private let skipBackButton = PictureInPictureButton(symbol: "gobackward.15", pointSize: 17, diameter: 38, tip: "Skip back 15 seconds")
-    private let skipAheadButton = PictureInPictureButton(symbol: "goforward.15", pointSize: 17, diameter: 38, tip: "Skip ahead 15 seconds")
+    private let closeButton = PictureInPictureButton(symbol: "xmark", pointSize: Design.Icon.regular, diameter: topButtonSize, tip: "Close")
+    private let backButton = PictureInPictureButton(symbol: "pip.exit", pointSize: Design.Icon.regular, diameter: topButtonSize, tip: "Back to Tab")
+    private let playButton = PictureInPictureButton(symbol: "play.fill", pointSize: Design.Icon.large, diameter: 48, tip: "Play")
+    private let skipBackButton = PictureInPictureButton(symbol: "gobackward.15", pointSize: Design.Icon.image, diameter: 38, tip: "Skip back 15 seconds")
+    private let skipAheadButton = PictureInPictureButton(symbol: "goforward.15", pointSize: Design.Icon.image, diameter: 38, tip: "Skip ahead 15 seconds")
     private var buttons: [PictureInPictureButton] { [backButton, closeButton, playButton, skipBackButton, skipAheadButton] }
     private var hideTimer: Timer?
     private var shown = false
@@ -131,7 +131,7 @@ final class PictureInPictureControlsView: NSView {
         anim.fromValue = layer.presentation()?.opacity ?? layer.opacity
         anim.toValue = opacity
         anim.duration = duration
-        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)   // Arc: .easeInOut(duration: 0.2)
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)   // Arc: SwiftUI's easeInOut over 0.2 s
         layer.opacity = opacity
         layer.add(anim, forKey: "fade")
     }
@@ -157,7 +157,7 @@ final class PictureInPictureButton: NSView {
             guard label != oldValue else { return }
             text.stringValue = label ?? ""
             text.isHidden = label == nil
-            layer?.cornerRadius = label == nil ? diameter / 2 : 6
+            layer?.cornerRadius = label == nil ? Design.Radius.pill(diameter) : Design.Radius.inset
             needsLayout = true
         }
     }
@@ -177,13 +177,13 @@ final class PictureInPictureButton: NSView {
         self.tip = tip
         super.init(frame: NSRect(x: 0, y: 0, width: diameter, height: diameter))
         wantsLayer = true
-        layer?.cornerRadius = diameter / 2
+        layer?.cornerRadius = Design.Radius.pill(diameter)
         image.image = Self.image(symbol, pointSize)
         image.contentTintColor = .white
         image.imageScaling = .scaleNone
         image.frame = bounds
         addSubview(image)
-        text.font = .systemFont(ofSize: 12, weight: .medium)
+        text.font = Design.Font.ns(.detail, .medium)
         text.textColor = .white
         text.isHidden = true
         addSubview(text)
@@ -213,13 +213,16 @@ final class PictureInPictureButton: NSView {
     }
 
     private static func image(_ name: String, _ size: CGFloat) -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
+        let config = Design.Icon.configuration(size, weight: .semibold)
         return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
     }
 
+    /// Held down over a video: stronger than any plate on a panel, or it doesn't show on a bright frame.
+    private static let pressedFill = NSColor.white.withAlphaComponent(0.32)
+
     private func updateBackground() {
-        let alpha: CGFloat = isPressed ? 0.32 : (isHovered ? 0.2 : 0)
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(alpha).cgColor
+        let fill: NSColor = isPressed ? Self.pressedFill : (isHovered ? Design.fillOnDark(.strong) : .clear)
+        layer?.backgroundColor = fill.cgColor
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }

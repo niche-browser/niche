@@ -26,6 +26,8 @@ enum StoreTests {
         tabSleepCadence()
         tabRestTimes()
         commandBarKeepsToItsSpace()
+        historyKeepsToItsProfile()
+        archivedTabsKeepToTheirSpace()
         integrity()
         liveFolderExpiry()
         liveRepositoryFiltering()
@@ -60,6 +62,7 @@ enum StoreTests {
         tidyTabs()
         pinHook()
         dropOnPinnedTabSplits()
+        emptySplitPaneTakesThePickedRow()
         reopenClosedTabs()
         windowsShareTheSidebar()
         blankWindows()
@@ -308,6 +311,48 @@ enum StoreTests {
         store.focusSpace(home)
         let back = Set(store.commandBarTabs(window: nil).map(\.id))
         expect(back.contains(video) && !back.contains(doc), "and in Home, Home's")
+    }
+
+    /// A profile keeps what it browsed: the bar in a space on another profile never offers it,
+    /// and deleting a profile forgets its visits (13 Nov 2026).
+    @MainActor
+    private static func historyKeepsToItsProfile() {
+        let store = SidebarStore(clock: ManualScheduler())
+        let home = store.focusedSpaceID
+        let client = store.createProfile(name: "Client")
+        let work = store.createSpace(title: "Work", emoji: "💼").id
+        store.setProfile(client.id, forSpace: work)
+        store.recordVisit(url: "https://mail.google.com/", title: "Personal mail", profileID: nil)
+        store.recordVisit(url: "https://mail.google.com/", title: "Client mail", profileID: client.id)
+        store.recordVisit(url: "https://client.example/", title: "Client site", profileID: client.id)
+        expect(store.focusedSpaceID == work, "Work has the focus")
+        expect(Set(store.commandBarHistory(window: nil).map(\.title)) == ["Client mail", "Client site"],
+               "the bar in a space on the Client profile offers the Client profile's visits only")
+        store.focusSpace(home)
+        expect(store.commandBarHistory(window: nil).map(\.title) == ["Personal mail"], "and on Default, Default's")
+        expect(store.history["https://mail.google.com/"]?.title == "Personal mail", "Default's visit keeps the key history.json had")
+        store.setProfile(nil, forSpace: work)
+        store.deleteProfile(client.id)
+        expect(store.history.values.allSatisfy { $0.profileID == nil }, "a deleted profile's visits go with it")
+    }
+
+    /// The bar offers the tabs archived from the space in use; another space's stay out, so
+    /// restoring one never takes the window away (13 Nov 2026).
+    @MainActor
+    private static func archivedTabsKeepToTheirSpace() {
+        let store = SidebarStore(clock: ManualScheduler())
+        let home = store.focusedSpaceID
+        let video = store.createTab(url: "https://www.youtube.com/").id
+        store.archiveTab(video, reason: .manual)
+        let work = store.createSpace(title: "Work", emoji: "💼").id
+        let doc = store.createTab(url: "https://example.test/doc").id
+        store.archiveTab(doc, reason: .manual)
+        expect(store.focusedSpaceID == work && store.commandBarArchive(window: nil).map(\.id) == [doc],
+               "the bar in Work offers the tab archived from Work, not Home's")
+        store.focusSpace(home)
+        expect(store.commandBarArchive(window: nil).map(\.id) == [video], "and in Home, Home's")
+        store.deleteSpace(work)
+        expect(Set(store.commandBarArchive(window: nil).map(\.id)).contains(doc), "a tab whose space is gone is offered where the bar is")
     }
 
     // promise: #136
@@ -1564,6 +1609,51 @@ enum StoreTests {
         store.unpinTab(a.id)
         store.togglePinned(a.id)
         expect(heard == [a.id, a.id], "pinning it again does")
+    }
+
+    /// Add Split View opens an empty pane and the command bar; a row that is an open tab fills
+    /// that pane instead of switching away from the split (13 Nov 2026: picking a favorite showed
+    /// the favorite alone and left the pane empty). A Today tab of the space moves in, in the empty
+    /// pane's place; a favorite or pinned tab, a tab of another space and a pane already in the
+    /// split stay where they are, and the pane opens their address.
+    @MainActor
+    private static func emptySplitPaneTakesThePickedRow() {
+        let store = AppComposition(clock: ManualScheduler()).store
+        let sid = store.createSpace(title: "Fill", emoji: "🧩").id
+        let other = store.createSpace(title: "Elsewhere", emoji: "🧭").id
+        guard let space = store.space(sid) else { return expect(false, "the space is made") }
+        let favorite = store.createTab(url: "https://youtube.com/", pinned: true, select: false, parent: space.favoritesContainerID)
+        let pinned = store.createTab(url: "https://example.com/pinned", in: sid, pinned: true, select: false)
+        let away = store.createTab(url: "https://example.com/away", in: other, select: false)
+        let today = store.createTab(url: "https://example.com/today", in: sid, select: false)
+        let page = store.createTab(url: "https://example.com/page", in: sid, select: false)
+        store.focusSpace(sid)
+        store.selectTab(page.id)
+
+        // A favorite: it stays a favorite, and the pane is told to open its page.
+        guard let empty = store.addEmptyPane(nextTo: page.id), let split = store.splitContaining(page.id) else {
+            return expect(false, "Add Split View makes an empty pane")
+        }
+        expect(store.fillEmptyPane(empty.id, with: favorite.id) == .opens("https://youtube.com/"), "a favorite's page opens in the pane")
+        expect(store.isFavorite(favorite.id) && store.children(of: split.id).map(\.id) == [page.id, empty.id]
+               && store.selectedTabID == empty.id, "the favorite stays put and the split stays on screen")
+        expect(store.fillEmptyPane(empty.id, with: pinned.id) == .opens("https://example.com/pinned") && store.isPinned(pinned.id),
+               "a pinned tab too")
+        expect(store.fillEmptyPane(empty.id, with: away.id) == .opens("https://example.com/away") && store.spaceID(ofItem: away.id) == other,
+               "a tab of another space stays in its space")
+        expect(store.fillEmptyPane(empty.id, with: page.id) == .opens("https://example.com/page")
+               && store.children(of: split.id).map(\.id) == [page.id, empty.id], "the split's own pane opens a second time")
+
+        // A Today tab of this space: the tab itself becomes the pane.
+        expect(store.fillEmptyPane(empty.id, with: today.id) == .joined, "an open tab joins the split")
+        expect(store.children(of: split.id).map(\.id) == [page.id, today.id] && store.item(empty.id) == nil,
+               "in the empty pane's place, which is gone")
+        expect(store.selectedTabID == today.id, "and it is the focused pane")
+        expect(store.archive.allSatisfy { $0.item.id != empty.id }, "an empty pane leaves nothing in the archive")
+
+        // Not an empty pane: nothing to fill.
+        expect(store.fillEmptyPane(page.id, with: favorite.id) == nil && store.fillEmptyPane(today.id, with: pinned.id) == nil,
+               "a pane with a page is left alone")
     }
 
     // promise: #191 #180

@@ -1,4 +1,5 @@
 import AppKit
+import NicheCEF
 import SwiftUI
 
 /// Arc's toolbar above the page, in AppKit: nav buttons, the friendly URL (or the full URL in
@@ -43,9 +44,9 @@ final class PaneToolbarView: NSView {
         var closeTint = NSColor.secondaryLabelColor
         var hairline: NSColor?
         var dividerColor = NSColor.clear
-        /// Icon hover fill. White everywhere, as in Arc, where it doesn't show on a white bar either;
-        /// the developer bar is no longer white (GitHub #42).
-        var hover = NSColor.white.withAlphaComponent(0.1)
+        /// The plate under a hovered button: dark on a light bar, light on a dark one, so it shows
+        /// on any page (a white plate vanished on a white bar).
+        var hover = Design.barFill(.hover, onLight: false)
         /// Arc's diagonal stripes behind the developer bar.
         var stripes = false
         /// The developer address field's selected text.
@@ -60,12 +61,14 @@ final class PaneToolbarView: NSView {
     private var left: [ToolbarGlyphButton] = []
     private var right: [NSView] = []
     private let urlButton = ToolbarURLButton()
-    private let placeholderLabel = NSTextField.sidebarLabel(size: 13)
+    private let placeholderLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     private let hairline = NSView()
     private let devDivider = NSView()
     /// Arc's rule between the developer buttons and the extensions.
     private let devTrailingDivider = NSView()
     private let stripes = DeveloperStripesView()
+    /// The light that crosses the bar while its page loads (BarLoadingSheen).
+    private let sheen = BarLoadingSheen()
     /// Arc lifts the whole developer bar ~9% toward white while its address field is edited.
     private let editVeil = NSView()
     private var press = WindowDragGesture()
@@ -87,6 +90,7 @@ final class PaneToolbarView: NSView {
         devTrailingDivider.wantsLayer = true
         stripes.isHidden = true
         addSubview(stripes)
+        addSubview(sheen)
         placeholderLabel.stringValue = "Search or Enter URL…"
         urlButton.action = { [weak self] in self?.editURL() }
         urlButton.onCopy = { [weak self] in self?.copyURL() }
@@ -94,7 +98,7 @@ final class PaneToolbarView: NSView {
         urlButton.onCommit = { [weak self] in self?.actions.loadTyped($0) }
         urlButton.onEditingChange = { [weak self] in self?.editVeil.isHidden = !$0 }
         editVeil.wantsLayer = true
-        editVeil.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.09).cgColor
+        editVeil.layer?.backgroundColor = Design.fillOnDark(.selected).cgColor
         for v in [hairline, editVeil, devDivider, devTrailingDivider, urlButton, placeholderLabel] as [NSView] {
             v.isHidden = true
             addSubview(v)
@@ -189,22 +193,28 @@ final class PaneToolbarView: NSView {
         // white (MainWindowController.toolbarColors uses the same rule for the card behind the bar).
         // The tab's own colour counts until its page is live: retarget builds this before it is.
         let onCard = m.kind == .normal || m.kind == .developer
-        let cardHex = ToolbarColor.hex(reported: nav.themeColor, remembered: item?.tab?.themeColor)
-        let light = (cardHex.flatMap(HexColor.luminance) ?? 1) > 0.6
+        let cardHex = ToolbarColor.hex(reported: nav.themeColor, remembered: item?.tab?.themeColor, ground: nav.pageColor)
+        // A page that has drawn nothing yet starts on the canvas, and so does its bar.
+        let canvas = NicheBrowser.pageCanvasColor
+        let canvasIsLight = (canvas.usingColorSpace(.sRGB)?.brightnessComponent ?? 1) > 0.6
+        let light = cardHex.flatMap(HexColor.luminance).map { $0 > 0.6 } ?? canvasIsLight
         if onCard {
-            m.fill = cardHex.map { NSColor(hex: $0) } ?? .white
+            m.fill = cardHex.map { NSColor(hex: $0) } ?? canvas
             m.fg = Design.barInk(onLight: light)
             m.fgDim = Design.barInkDim(onLight: light)
+            m.hover = Design.barFill(.hover, onLight: light)
         } else {
-            m.fill = m.kind == .emptyPane ? .clear : (palette.isDark ? NSColor.white.withAlphaComponent(0.025) : NSColor.black.withAlphaComponent(0.03))
+            let onLight = !palette.isDark
+            m.fill = m.kind == .emptyPane ? .clear : Design.barFill(.subtle, onLight: onLight).withAlphaComponent(Design.Fill.subtle.rawValue - 0.01)
             m.fg = NSColor(palette.textSecondary)
             m.fgDim = NSColor(palette.textTertiary)
-            // No hairline under the bar on the card: the bar and the page read as one surface (Arc draws one).
-            if m.kind != .emptyPane { m.hairline = palette.isDark ? NSColor.white.withAlphaComponent(0.07) : NSColor.black.withAlphaComponent(0.07) }
+            m.hover = Design.barFill(.hover, onLight: onLight)
+            // No hairline under the bar on the card: the bar and the page read as one surface.
+            if m.kind != .emptyPane { m.hairline = Design.barFill(.hover, onLight: onLight) }
         }
         m.placeholder = NSColor(palette.textTertiary)
         m.closeTint = m.kind == .emptyPane ? NSColor(palette.textSecondary) : m.fgDim
-        m.dividerColor = light ? NSColor.black.withAlphaComponent(0.15) : NSColor.white.withAlphaComponent(0.22)
+        m.dividerColor = Design.barFill(.strong, onLight: light)
         if m.kind == .developer {
             // Arc's developer bar (GitHub #42): the space's colour under faint stripes, whatever the
             // page's theme-color, with near-white ink (Arc's foregroundPrimary, Office 236/237/254),
@@ -214,10 +224,10 @@ final class PaneToolbarView: NSView {
             let ink = NSColor.white.blended(withFraction: 0.07, of: m.fill) ?? .white
             m.fg = ink
             m.fgDim = ink
-            m.hairline = NSColor.white.withAlphaComponent(0.1)
-            m.dividerColor = theme.developerSecondaryColor.withAlphaComponent(0.45)
-            m.selection = theme.developerSecondaryColor.withAlphaComponent(0.6)
-            m.hover = NSColor.white.withAlphaComponent(0.08)
+            m.hairline = Design.hairlineOnDark
+            m.dividerColor = theme.developerSecondaryColor.withAlphaComponent(Design.Emphasis.tertiary.rawValue)
+            m.selection = theme.developerSecondaryColor.withAlphaComponent(Design.Emphasis.secondary.rawValue)
+            m.hover = Design.barFill(.hover, onLight: false)
             m.stripes = true
         }
         return m
@@ -244,7 +254,12 @@ final class PaneToolbarView: NSView {
         return b
     }
 
-    private func glyph(_ key: String, _ symbol: String, help: String, enabled: Bool = true, width: CGFloat = 26, iconSize: CGFloat = 13,
+    /// The width of a navigation button (the toggle, ‹, ›, ↻): the layout's pitch for the left group.
+    static let navWidth: CGFloat = 37
+
+    /// Every bar button draws its glyph at `Design.Icon.bar`, so the ones side by side match.
+    private func glyph(_ key: String, _ symbol: String, help: String, enabled: Bool = true, width: CGFloat = 26,
+                       iconSize: CGFloat = Design.Icon.bar,
                        tint: NSColor? = nil, animated: Bool = false, action: @escaping (PaneToolbarView) -> Void) -> ToolbarGlyphButton {
         let b = button(key) { ToolbarGlyphButton() }
         b.configure(symbol: symbol, image: nil, help: help, enabled: enabled, width: width, iconSize: iconSize, tint: tint ?? model.fgDim,
@@ -253,6 +268,9 @@ final class PaneToolbarView: NSView {
         return b
     }
 
+    /// A bar's fade to its page's colour: Arc's took 14-16 frames at 100 fps (GitHub #84).
+    private static let barFade: TimeInterval = 0.18
+
     private func apply(old: Model) {
         let m = model
         // A tab's bar fades to the colour its page reports, like Arc's (white to the page's colour over
@@ -260,7 +278,7 @@ final class PaneToolbarView: NSView {
         if m.kind == .normal, old.kind == .normal, m.tabID != nil, m.tabID == old.tabID, m.fill != old.fill, let layer {
             let fade = CABasicAnimation(keyPath: "backgroundColor")
             fade.fromValue = layer.presentation()?.backgroundColor ?? old.fill.cgColor
-            fade.duration = 0.18
+            fade.duration = Self.barFade
             fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer.add(fade, forKey: "barFade")
         } else {
@@ -268,6 +286,8 @@ final class PaneToolbarView: NSView {
         }
         layer?.backgroundColor = m.fill.cgColor
         stripes.isHidden = !m.stripes
+        sheen.ink = m.fg
+        sheen.setRunning(m.kind == .normal && m.isLoading)
         // The card under the bar takes its colour and height (Arc's developer bar is 40 pt, 32 otherwise).
         (superview as? PaneCardView)?.developerBar = m.kind == .developer ? m.fill : nil
         hairline.isHidden = m.hairline == nil
@@ -283,14 +303,14 @@ final class PaneToolbarView: NSView {
             switch item {
             case .toggleSidebar:
                 return glyph("toggle", "sidebar.left", help: m.sidebarVisible ? "Hide Sidebar (⌘S)" : "Show Sidebar (⌘S)",
-                             width: 37, iconSize: 15.5) { $0.actions.toggleSidebar() }
+                             width: Self.navWidth) { $0.actions.toggleSidebar() }
             case .back(let enabled):
-                return glyph("back", "arrow.left", help: wide ? "" : "Go Back (⌘[)", enabled: enabled, width: 37, iconSize: 15) { if !wide { $0.navigate("goBack") } }
+                return glyph("back", "chevron.left", help: wide ? "" : "Go Back (⌘[)", enabled: enabled, width: Self.navWidth) { if !wide { $0.navigate("goBack") } }
             case .forward(let enabled):
-                return glyph("forward", "arrow.right", help: wide ? "" : "Go Forward (⌘])", enabled: enabled, width: 37, iconSize: 15) { if !wide { $0.navigate("goForward") } }
+                return glyph("forward", "chevron.right", help: wide ? "" : "Go Forward (⌘])", enabled: enabled, width: Self.navWidth) { if !wide { $0.navigate("goForward") } }
             case .reload(let loading, let enabled):
-                return glyph("reload", loading ? "xmark" : "arrow.clockwise", help: enabled ? "Refresh (⌘R)" : "", enabled: enabled, width: 37,
-                             iconSize: 15, animated: enabled) { if !wide { $0.navigate("reload") } }
+                return glyph("reload", loading ? "xmark" : "arrow.clockwise", help: enabled ? "Refresh (⌘R)" : "", enabled: enabled,
+                             width: Self.navWidth, animated: enabled) { if !wide { $0.navigate("reload") } }
             case .copyURL:
                 return glyph("copy", "link", help: "Copy URL (⇧⌘C)", width: 28) { $0.actions.performAction("copyURL") }
             case .divider:
@@ -308,7 +328,7 @@ final class PaneToolbarView: NSView {
                 // page it dims and says why (docs/protected-media.md).
                 b.configure(symbol: nil, image: ExtensionStore.shared.badged(e?.icon, e?.badge, tint: m.fgDim),
                             help: m.protectedMedia.map(ExtensionStore.offOnProtectedMedia) ?? "", enabled: m.protectedMedia == nil,
-                            width: rightBox, iconSize: 16, tint: m.fgDim, hover: m.hover)
+                            width: rightBox, iconSize: Design.Icon.image, tint: m.fgDim, hover: m.hover)
                 let pane = paneTabID
                 b.action = { [weak self] in
                     if let pane { self?.actions.paneRunExtension(pane, id) } else { self?.actions.runExtension(id) }
@@ -316,16 +336,16 @@ final class PaneToolbarView: NSView {
                 b.menuProvider = { ExtensionStore.shared.entries.first { $0.extensionID == id }.map(ExtensionsMenu.iconMenu) }
                 return b
             case .extensions:
-                return glyph("extensions", "slider.horizontal.2.square", help: "Extensions", width: rightBox, iconSize: 16) {
+                return glyph("extensions", "slider.horizontal.2.square", help: "Extensions", width: rightBox) {
                     if let pane = $0.paneTabID { $0.actions.paneExtensionsMenu(pane) } else { $0.actions.showExtensionsMenu() }
                 }
             case .addSplit:
-                return glyph("split", "square.split.2x1", help: "Add Split View (⌃⇧=)", width: rightBox, iconSize: 16) { $0.actions.performAction("addSplitView") }
+                return glyph("split", "square.split.2x1", help: "Add Split View (⌃⇧=)", width: rightBox) { $0.actions.performAction("addSplitView") }
             case .splitOptions:
                 return glyph("splitOptions", "rectangle.split.2x1", help: "Split View Options", width: rightBox) { $0.showSplitMenu(from: $0.buttons["splitOptions"]) }
             case .closePane:
                 let id = paneTabID
-                return glyph("close", "xmark", help: "Close this Split Pane (⌃⇧-)", width: rightBox, iconSize: 14, tint: m.closeTint) {
+                return glyph("close", "xmark", help: "Close this Split Pane (⌃⇧-)", width: rightBox, tint: m.closeTint) {
                     if let id { $0.actions.closePane(id) }
                 }
             }
@@ -350,7 +370,7 @@ final class PaneToolbarView: NSView {
             urlButton.isHidden = false
             placeholderLabel.isHidden = true
             // Arc's developer URL has no hover fill (it edits in place on a click).
-            let urlHover = m.kind == .developer ? NSColor.clear : NSColor.white.withAlphaComponent(0.08)
+            let urlHover = m.kind == .developer ? NSColor.clear : m.hover
             urlButton.show(host: m.host, path: m.path, url: m.url, developer: m.kind == .developer,
                            fg: m.fg, fgDim: m.fgDim, hover: urlHover, copyHover: m.hover)
             urlButton.selection = m.selection
@@ -368,11 +388,12 @@ final class PaneToolbarView: NSView {
         let m = model
         hairline.frame = NSRect(x: 0, y: h - 1, width: w, height: 1)
         stripes.frame = bounds
+        sheen.frame = bounds
         editVeil.frame = bounds
         // Buttons are 26 pt boxes on the 32 pt bar, 28 pt on the 40 pt developer bar (Arc).
         let bh: CGFloat = m.kind == .developer ? 28 : 26
         for b in buttons.values {
-            b.cornerRadius = m.kind == .developer ? 6 : 7
+            b.cornerRadius = Design.Radius.inset
             b.iconRowHeight = bh
         }
         // Right group, from the trailing edge, 5 pt in (Arc 1.171, captures and AX reads 8 Nov 2026):
@@ -405,10 +426,10 @@ final class PaneToolbarView: NSView {
         // (Arc, 3-pane split): judged on that pane's full set, so all panes of a width agree.
         var showsCopy = true
         if m.kind == .normal {
-            let fullLeft: CGFloat = 2.5 + 3 * 37 + 6
+            let fullLeft: CGFloat = 2.5 + 3 * Self.navWidth + 6
             let fullRight: CGFloat = (m.inSplit ? 5 + 32 + 32 + 4 : 5 + 32 + 4) + 32 + 6
             let fullRoom = w - fullLeft - fullRight - 2 * (8 + 6)
-            showsCopy = !ToolbarRoom.plan(pins: [], reload: 37, settings: 32 + PaneToolbarView.rightGap, needed: urlButton.idealWidth(withCopy: true),
+            showsCopy = !ToolbarRoom.plan(pins: [], reload: Self.navWidth, settings: 32 + PaneToolbarView.rightGap, needed: urlButton.idealWidth(withCopy: true),
                                           room: fullRoom).hidesSettings
         }
         urlButton.showsCopy = showsCopy
@@ -592,6 +613,11 @@ private final class ToolbarMenuAction: NSObject {
 /// ToolbarIcon / ToolbarImageButton: a glyph (or an extension's icon) with a rounded hover fill.
 final class ToolbarGlyphButton: NSView {
     var action: () -> Void = {}
+    override func accessibilityPerformPress() -> Bool {
+        guard enabled else { return false }
+        action()
+        return true
+    }
     /// Right-click menu (a pinned extension's icon options).
     var menuProvider: (() -> NSMenu?)?
     private(set) var width: CGFloat = 26
@@ -603,9 +629,9 @@ final class ToolbarGlyphButton: NSView {
     private var turnsOnPress = false
     private var hovering = false { didSet { if hovering != oldValue { refreshFill() } } }
     private var shown: (String?, NSImage?, CGFloat, NSColor, Bool)?
-    private var hover = NSColor.white.withAlphaComponent(0.1)
+    private var hover = Design.barFill(.hover, onLight: false)
     private var iconBox: NSSize?
-    var cornerRadius: CGFloat = 7 { didSet { layer?.cornerRadius = cornerRadius } }
+    var cornerRadius: CGFloat = Design.Radius.inset { didSet { layer?.cornerRadius = cornerRadius } }
     /// The fill while not hovered (the sidebar's pinned extension grid draws its cells like tiles).
     var restFill: NSColor = .clear { didSet { refreshFill() } }
     /// The height an extension icon is centred in, from the bottom (the toolbar sets its button height;
@@ -615,20 +641,25 @@ final class ToolbarGlyphButton: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 7
+        layer?.cornerRadius = Design.Radius.inset
         layer?.cornerCurve = .continuous
         imageView.imageScaling = .scaleNone
         addSubview(imageView)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     /// `animated` swaps another symbol in the way Arc swaps refresh and stop.
     func configure(symbol: String?, image: NSImage?, help: String, enabled: Bool, width: CGFloat, iconSize: CGFloat, tint: NSColor,
-                   hover: NSColor = .white.withAlphaComponent(0.1), animated: Bool = false) {
+                   hover: NSColor = Design.barFill(.hover, onLight: false), animated: Bool = false) {
         self.width = width
         self.enabled = enabled
         self.hover = hover
+        // VoiceOver reads the tooltip's words without the shortcut in brackets.
+        setAccessibilityLabel(help.isEmpty ? nil : ArcTooltipLabel.split(help).0)
+        setAccessibilityEnabled(enabled)
         if shown == nil || shown!.0 != symbol || shown!.1 !== image || shown!.2 != iconSize || shown!.3 != tint || shown!.4 != enabled {
             let was = shown?.0
             shown = (symbol, image, iconSize, tint, enabled)
@@ -637,7 +668,7 @@ final class ToolbarGlyphButton: NSView {
                 let glyph = SidebarSymbols.image(symbol, size: iconSize)
                 if animated, was != nil, was != symbol { imageView.swapSymbol(glyph) } else { imageView.image = glyph }
                 turnsOnPress = animated && symbol == "arrow.clockwise"
-                imageView.contentTintColor = enabled ? tint : tint.withAlphaComponent(tint.alphaComponent * 0.4)
+                imageView.contentTintColor = enabled ? tint : tint.withAlphaComponent(tint.alphaComponent * Design.Opacity.disabled)
             } else {
                 imageView.imageScaling = .scaleProportionallyUpOrDown
                 imageView.image = image ?? SidebarSymbols.image("puzzlepiece.extension", size: iconSize)
@@ -645,7 +676,7 @@ final class ToolbarGlyphButton: NSView {
                 imageView.contentTintColor = image == nil || image?.isTemplate == true ? tint : nil
             }
             // An icon in its own colours can't be tinted grey: a disabled one fades instead.
-            imageView.alphaValue = symbol == nil && !enabled ? 0.35 : 1
+            imageView.alphaValue = symbol == nil && !enabled ? Design.Opacity.disabled : 1
         }
         iconBox = symbol == nil ? NSSize(width: iconSize, height: iconSize) : nil
         needsLayout = true
@@ -756,12 +787,12 @@ final class ToolbarURLButton: NSView, NSTextFieldDelegate {
     private var contextClick = false
     private let content = NSView()
     private let icon = NSImageView()
-    private let label = NSTextField.sidebarLabel(size: 13)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     private let tip: ArcTooltipAnchorView
     private let copyTip: ArcTooltipAnchorView
     private var developer = false
-    private var hover = NSColor.white.withAlphaComponent(0.08)
-    private var copyHover = NSColor.white.withAlphaComponent(0.1)
+    private var hover = Design.barFill(.hover, onLight: false)
+    private var copyHover = Design.barFill(.hover, onLight: false)
     /// Arc's normal bar (1.171, #88): the glyph is a 24 pt button of its own and the host has its
     /// own pill, 24 pt tall, starting 20 pt in with the text 7 pt inside it. Each has its own hover;
     /// the pointer picks one where they meet. The developer bar is one piece.
@@ -789,7 +820,7 @@ final class ToolbarURLButton: NSView, NSTextFieldDelegate {
         layer?.cornerCurve = .continuous
         for f in [copyFill, addressFill] {
             f.wantsLayer = true
-            f.layer?.cornerRadius = 7
+            f.layer?.cornerRadius = Design.Radius.inset
             f.layer?.cornerCurve = .continuous
             addSubview(f)
         }
@@ -843,16 +874,16 @@ final class ToolbarURLButton: NSView, NSTextFieldDelegate {
         if developer {
             icon.image = SidebarSymbols.image(url.hasPrefix("https://") ? "lock.fill" : "globe", size: 11, weight: .semibold)
             icon.contentTintColor = fgDim
-            label.attributedStringValue = NSAttributedString(string: url, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: fg])
+            label.attributedStringValue = NSAttributedString(string: url, attributes: [.font: Design.Font.mono(.detail), .foregroundColor: fg])
         } else {
             icon.image = SidebarSymbols.image("link", size: 12, weight: .medium)
             icon.contentTintColor = fgDim
-            let s = NSMutableAttributedString(string: host, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: fg])
-            s.append(NSAttributedString(string: path, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: fgDim]))
+            let s = NSMutableAttributedString(string: host, attributes: [.font: Design.Font.ns(.body), .foregroundColor: fg])
+            s.append(NSAttributedString(string: path, attributes: [.font: Design.Font.ns(.body), .foregroundColor: fgDim]))
             label.attributedStringValue = s
         }
         label.lineBreakMode = .byTruncatingTail
-        layer?.cornerRadius = developer ? 6 : 7
+        layer?.cornerRadius = Design.Radius.inset
         needsLayout = true
     }
 
@@ -893,7 +924,7 @@ final class ToolbarURLButton: NSView, NSTextFieldDelegate {
         f.isBordered = false
         f.drawsBackground = false
         f.focusRingType = .none
-        f.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        f.font = Design.Font.mono(.detail)
         f.textColor = ink
         f.cell?.isScrollable = true
         f.cell?.wraps = false
@@ -993,6 +1024,8 @@ final class ToolbarURLButton: NSView, NSTextFieldDelegate {
 /// 14.5 pt from the bar's left edge at its top.
 final class DeveloperStripesView: NSView {
     private static let pitch: CGFloat = 45, band: CGFloat = 21, phase: CGFloat = 14.5
+    /// The stripes' ink: barely there over the space's colour.
+    private static let stripe = NSColor.white.withAlphaComponent(0.02)
 
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -1013,7 +1046,7 @@ final class DeveloperStripesView: NSView {
             path.close()
             x += Self.pitch
         }
-        NSColor.white.withAlphaComponent(0.02).setFill()
+        Self.stripe.setFill()
         path.fill()
     }
 }

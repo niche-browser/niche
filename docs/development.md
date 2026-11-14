@@ -136,6 +136,11 @@ Support/NicheDev`, never the installed Niche's profile. Ad-hoc development build
 encryption key for fresh profiles; use test data and do not copy a daily browser profile
 or real credentials into them.
 
+On 13 Nov 2026 pages stayed blank (`painted=0 frameRate=0` in `niche.log`) whenever the dev
+profile was on an external volume, the same profile copied to the internal disk painted. Until
+that is understood, keep `NICHE_DATA_DIR` on the internal disk when the checkout is on an
+external one: `NICHE_DATA_DIR="$HOME/Library/Application Support/NicheDev" scripts/dev.sh`.
+
 The dev bundle records the CEF download source and Sparkle version. Changing either
 pin refreshes the bundled frameworks, including an engine rebuild with the same CEF
 version but a new release suffix. The watcher notices changes to both fetch scripts.

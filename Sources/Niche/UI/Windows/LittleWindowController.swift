@@ -105,9 +105,10 @@ enum LittlePalette {
     static let tooltipCapGlyph = Color(red: 40 / 255, green: 46 / 255, blue: 252 / 255)
     /// Arc's toast in a Little Arc ("Copied Current URL", 1.171, 3 Nov 2026, sRGB): deeper than the
     /// default dark theme's in a browser window, the same in every space.
-    static let toast: ShinyToast.Colors = (NSColor(srgbRed: 41 / 255, green: 18 / 255, blue: 77 / 255, alpha: 1),
-                                           NSColor(srgbRed: 33 / 255, green: 16 / 255, blue: 61 / 255, alpha: 1),
-                                           NSColor(srgbRed: 33 / 255, green: 14 / 255, blue: 66 / 255, alpha: 1), .white)
+    static let toast: ShinyToast.Colors = (toastTop, toastBottom, toastOutline, .white)
+    private static let toastTop = NSColor(srgbRed: 41 / 255, green: 18 / 255, blue: 77 / 255, alpha: 1)
+    private static let toastBottom = NSColor(srgbRed: 33 / 255, green: 16 / 255, blue: 61 / 255, alpha: 1)
+    private static let toastOutline = NSColor(srgbRed: 33 / 255, green: 14 / 255, blue: 66 / 255, alpha: 1)
     static let barNS = NSColor(red: 12 / 255, green: 9 / 255, blue: 28 / 255, alpha: 1)
     static let buttonNS = NSColor(red: 5 / 255, green: 6 / 255, blue: 37 / 255, alpha: 1)
 
@@ -335,12 +336,23 @@ final class LittleWindowController: NSWindowController, NSWindowDelegate, @preco
         w.ignoresMouseEvents = isParked
         window.addChildWindow(w, ordered: .above)
         ChromiumChildFocus.attach(w)
+        // The moment Chromium changes the page window's style, not at the next layout: until then
+        // the page showed macOS's round corners under the bar.
+        hostStyle = w.observe(\.styleMask) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.positionHostWindow(self.shell.convert(self.shell.page.frame, to: nil))
+            }
+        }
         positionHostWindow(shell.convert(shell.page.frame, to: nil))
         w.orderFront(nil)
         rejoinPage()
         // The command bar and the spaces popup stay above the page window.
         if commandPanel.parent === window { window.removeChildWindow(commandPanel); window.addChildWindow(commandPanel, ordered: .above) }
     }
+
+    /// Watches the page window's style mask (attachHostWindow).
+    private var hostStyle: NSKeyValueObservation?
 
     private func positionHostWindow(_ rectInWindow: NSRect) {
         guard let window, let w = browser?.hostWindow, w.parent === window, !rectInWindow.isEmpty else { return }
@@ -350,11 +362,12 @@ final class LittleWindowController: NSWindowController, NSWindowDelegate, @preco
         // showed as a strip above the page and cut off its bottom.
         let full = NSRect(origin: .zero, size: onScreen.size)
         if let cv = w.contentView, cv.frame != full { cv.frame = full }
-        // Chromium can restore its own style mask (fullscreen, display changes).
+        // Chromium can restore its own style mask (as the page first shows, fullscreen, display
+        // changes), and with it a frame view that rounds all four corners: square it again.
         if w.styleMask.contains(.titled) || w.styleMask.contains(.resizable) {
             w.styleMask.remove([.titled, .resizable])
-            ChromiumWindowCorners.setSquare(true, for: w)
         }
+        ChromiumWindowCorners.setSquare(true, for: w)
         if let layer = w.contentView?.layer, layer.cornerRadius != shell.pageCornerRadius { layer.cornerRadius = shell.pageCornerRadius }
     }
 
@@ -1222,7 +1235,7 @@ final class LittleWindowController: NSWindowController, NSWindowDelegate, @preco
     func browser(_ browser: NicheBrowser, didChangeProgress progress: Double) { state.progress = progress }
 
     func browser(_ browser: NicheBrowser, didFinishLoadingURL url: String, title: String, statusCode: Int) {
-        store.recordVisit(url: url, title: title)
+        store.recordVisit(url: url, title: title, profileID: store.profile(state.profileID)?.id)
     }
 
     func browser(_ browser: NicheBrowser, didLoadFavicon image: NSImage, forURL iconURL: String) {
@@ -1363,7 +1376,7 @@ final class LittleShellView: NSView {
     /// Arc's Peek card: its own 32 pt bar, the page edge to edge, 8 pt corners all round.
     var isPeek = false {
         didSet {
-            layer?.cornerRadius = isPeek ? PeekLayout.cornerRadius : 0
+            layer?.cornerRadius = isPeek ? PeekLayout.cornerRadius : .zero
             layer?.cornerCurve = .continuous
             layer?.masksToBounds = isPeek
             needsLayout = true
@@ -1562,11 +1575,11 @@ final class LittleTooltipPanel: NSPanel {
     }
 }
 
-/// Arc's hover tip: 28pt navy pill, 14pt semibold text, 20pt key caps.
+/// Arc's hover tip: 28pt navy pill, 13pt semibold text, 20pt key caps.
 final class LittleTooltipView: NSView {
     init(text: String, caps: [String]) {
         super.init(frame: .zero)
-        let font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        let font = Design.Font.ns(.body, .semibold)
         let textW = ceil((text as NSString).size(withAttributes: [.font: font]).width)
         let capsW = caps.isEmpty ? 0 : 2 + CGFloat(caps.count) * 20 + CGFloat(caps.count - 1) * 4
         let pillW = 10 + textW + (caps.isEmpty ? 0 : 6 + capsW) + (caps.isEmpty ? 10 : 6)
@@ -1575,12 +1588,12 @@ final class LittleTooltipView: NSView {
         let pill = NSView(frame: NSRect(x: 2, y: 2, width: pillW, height: 28))
         pill.wantsLayer = true
         pill.layer?.backgroundColor = NSColor(LittlePalette.tooltip).cgColor
-        pill.layer?.cornerRadius = 10
+        pill.layer?.cornerRadius = Design.Radius.control
         pill.layer?.cornerCurve = .continuous
         pill.layer?.borderWidth = 1
         pill.layer?.borderColor = NSColor(LittlePalette.tooltipBorder).cgColor
         addSubview(pill)
-        let label = NSTextField.sidebarLabel(size: 14, weight: .semibold)
+        let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
         label.stringValue = text
         label.textColor = NSColor(LittlePalette.tooltipText)
         label.frame = NSRect(x: 10 - SidebarText.inset, y: (28 - 17) / 2, width: textW + 2 * SidebarText.inset, height: 17)
@@ -1590,9 +1603,9 @@ final class LittleTooltipView: NSView {
             let cap = NSView(frame: NSRect(x: x, y: 4, width: 20, height: 20))
             cap.wantsLayer = true
             cap.layer?.backgroundColor = NSColor(LittlePalette.tooltipCap).cgColor
-            cap.layer?.cornerRadius = 5
+            cap.layer?.cornerRadius = Design.Radius.inset
             cap.layer?.cornerCurve = .continuous
-            let glyph = NSTextField.sidebarLabel(size: 12, weight: .semibold)
+            let glyph = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue, weight: .semibold)
             glyph.stringValue = c
             glyph.textColor = NSColor(LittlePalette.tooltipCapGlyph)
             glyph.alignment = .center
@@ -1638,15 +1651,15 @@ final class LittleToolbarView: NSView {
     private let store: SidebarStore
     private let pill = NSView()
     private let search = NSImageView()
-    private let urlLabel = NSTextField.sidebarLabel(size: 13)
-    private let puzzle = LittleIconView(symbol: "puzzlepiece.extension", size: 15)
-    private let link = LittleIconView(symbol: "link", size: 14)
+    private let urlLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
+    private let puzzle = LittleIconView(symbol: "puzzlepiece.extension", size: Design.Icon.bar)
+    private let link = LittleIconView(symbol: "link", size: Design.Icon.bar)
     private let profileChip = LittleProfileChip()
     private let openButton = NSView()
     private let openPart = NSView()
-    private let openLabel = NSTextField.sidebarLabel(size: 13, weight: .medium)
+    private let openLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .medium)
     private let badge = NSView()
-    private let badgeLabel = NSTextField.sidebarLabel(size: 11, weight: .medium)
+    private let badgeLabel = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue, weight: .medium)
     private let divider = NSView()
     private let chevronPart = NSView()
     private let chevron = NSImageView()
@@ -1661,10 +1674,10 @@ final class LittleToolbarView: NSView {
         wantsLayer = true
         layer?.backgroundColor = LittlePalette.barNS.cgColor
         pill.wantsLayer = true
-        pill.layer?.cornerRadius = 8
+        pill.layer?.cornerRadius = Design.Radius.row
         pill.layer?.cornerCurve = .continuous
         addSubview(pill)
-        search.image = SidebarSymbols.image("magnifyingglass", size: 13, weight: .medium)
+        search.image = Design.Icon.symbol("magnifyingglass", size: Design.Icon.regular)
         search.contentTintColor = NSColor(LittlePalette.icon)
         search.imageScaling = .scaleNone
         pill.addSubview(search)
@@ -1676,7 +1689,7 @@ final class LittleToolbarView: NSView {
         pill.addSubview(profileChip)
         openButton.wantsLayer = true
         openButton.layer?.backgroundColor = LittlePalette.buttonNS.cgColor
-        openButton.layer?.cornerRadius = 7
+        openButton.layer?.cornerRadius = Design.Radius.inset
         openButton.layer?.cornerCurve = .continuous
         openButton.layer?.masksToBounds = true
         openButton.layer?.borderWidth = 1
@@ -1686,7 +1699,7 @@ final class LittleToolbarView: NSView {
         openButton.addSubview(openPart)
         openPart.addSubview(openLabel)
         badge.wantsLayer = true
-        badge.layer?.cornerRadius = 4
+        badge.layer?.cornerRadius = Design.Radius.small
         badge.layer?.cornerCurve = .continuous
         badge.layer?.backgroundColor = NSColor(LittlePalette.badge).cgColor
         badgeLabel.stringValue = "⌘O"
@@ -1724,15 +1737,15 @@ final class LittleToolbarView: NSView {
         profileChip.isHidden = profile == nil
         profileChip.name = profile ?? ""
         profileChip.hovered = hover == .profile
-        let text = NSMutableAttributedString(string: "Open in ", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium),
+        let text = NSMutableAttributedString(string: "Open in ", attributes: [.font: Design.Font.ns(.body, .medium),
                                                                              .foregroundColor: NSColor(LittlePalette.label)])
-        text.append(NSAttributedString(string: space.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .bold),
+        text.append(NSAttributedString(string: space.title, attributes: [.font: Design.Font.ns(.body, .bold),
                                                                          .foregroundColor: NSColor(LittlePalette.spaceName(space.theme))]))
         openLabel.attributedStringValue = text
         openButton.toolTip = "Open this page in \(space.title) as a tab (⌘O)"
         openPart.layer?.backgroundColor = hover == .open ? NSColor(LittlePalette.buttonHover).cgColor : nil
         chevronPart.layer?.backgroundColor = hover == .chevron ? NSColor(LittlePalette.buttonHover).cgColor : nil
-        chevron.image = SidebarSymbols.image(popupOpen ? "chevron.up" : "chevron.down", size: 10, weight: .bold)
+        chevron.image = Design.Icon.symbol(popupOpen ? "chevron.up" : "chevron.down", size: Design.Icon.small, weight: .bold)
         needsLayout = true
     }
 
@@ -1801,13 +1814,15 @@ final class LittleToolbarView: NSView {
 final class LittleProfileChip: NSView {
     static let height: CGFloat = 22
     private let face = ProfileAvatarView(frame: NSRect(x: 6, y: 4, width: 14, height: 14))
-    private let label = NSTextField.sidebarLabel(size: 11, weight: .medium)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue, weight: .medium)
     private let chevron = NSImageView()
-    private static let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+    private static let font = Design.Font.ns(.caption, .medium)
+    /// The chevron fills the 8 pt slot after the name.
+    private static let chevronSize: CGFloat = 8
     var name = "" { didSet { if name != oldValue { label.stringValue = name; needsLayout = true } } }
     var hovered = false {
         didSet {
-            layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 46 / 255 : 31 / 255).cgColor
+            layer?.backgroundColor = Design.fillOnDark(hovered ? .strong : .pressed).cgColor
             let ink = NSColor(hovered ? LittlePalette.iconHot : LittlePalette.text)
             label.textColor = ink
             face.ink = ink
@@ -1823,10 +1838,10 @@ final class LittleProfileChip: NSView {
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 60, height: Self.height))
         wantsLayer = true
-        layer?.cornerRadius = Self.height / 2
+        layer?.cornerRadius = Design.Radius.pill(Self.height)
         label.font = Self.font
         label.lineBreakMode = .byClipping
-        chevron.image = SidebarSymbols.image("chevron.down", size: 8, weight: .bold)
+        chevron.image = SidebarSymbols.image("chevron.down", size: Self.chevronSize, weight: .bold)
         chevron.imageScaling = .scaleNone
         addSubview(face)
         addSubview(label)
@@ -1844,7 +1859,7 @@ final class LittleProfileChip: NSView {
         let textW = ceil((name as NSString).size(withAttributes: [.font: Self.font]).width)
         let th = ceil(label.intrinsicContentSize.height)
         label.frame = NSRect(x: 6 + 14 + 3 - SidebarText.inset, y: (Self.height - th) / 2, width: textW + 2 * SidebarText.inset, height: th)
-        chevron.frame = NSRect(x: 6 + 14 + 3 + textW + 4, y: 0, width: 8, height: Self.height)
+        chevron.frame = NSRect(x: 6 + 14 + 3 + textW + 4, y: 0, width: Self.chevronSize, height: Self.height)
     }
 }
 
@@ -1861,7 +1876,7 @@ private final class LittleIconView: NSView {
     init(symbol: String, size: CGFloat) {
         super.init(frame: NSRect(x: 0, y: 0, width: 26, height: 26))
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = Design.Radius.inset
         layer?.cornerCurve = .continuous
         glyph.image = SidebarSymbols.image(symbol, size: size)
         glyph.imageScaling = .scaleNone
@@ -1898,34 +1913,34 @@ final class LittleSpacesPopup: NSView, NSTextFieldDelegate {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = LittlePalette.buttonNS.cgColor
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = Design.Radius.card
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
         layer?.borderWidth = 1
         layer?.borderColor = NSColor(LittlePalette.buttonBorder).cgColor
         let h = LittleMetrics.popupHeaderHeight
         let glass = NSImageView(frame: NSRect(x: 14, y: 0, width: 16, height: h))
-        glass.image = SidebarSymbols.image("magnifyingglass", size: 13, weight: .medium)
+        glass.image = Design.Icon.symbol("magnifyingglass", size: Design.Icon.regular)
         glass.contentTintColor = NSColor(LittlePalette.icon)
         glass.imageScaling = .scaleNone
         addSubview(glass)
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 14)
-        field.textColor = NSColor.white.withAlphaComponent(0.9)
+        field.font = Design.Font.ns(.body)
+        field.textColor = Design.onDark(.primary)
         field.placeholderString = "Search Spaces…"
         field.usesSingleLineMode = true
         field.cell?.isScrollable = true
         field.delegate = self
         addSubview(field)
         close.wantsLayer = true
-        close.layer?.cornerRadius = 6
+        close.layer?.cornerRadius = Design.Radius.inset
         close.layer?.cornerCurve = .continuous
         close.layer?.backgroundColor = NSColor(LittlePalette.popupButton).cgColor
         let up = NSImageView(frame: NSRect(x: 0, y: 0, width: 28, height: 28))
-        up.image = SidebarSymbols.image("chevron.up", size: 11, weight: .bold)
-        up.contentTintColor = NSColor.white.withAlphaComponent(0.9)
+        up.image = Design.Icon.symbol("chevron.up", size: Design.Icon.small, weight: .bold)
+        up.contentTintColor = Design.onDark(.primary)
         up.imageScaling = .scaleNone
         close.addSubview(up)
         addSubview(close)
@@ -1953,25 +1968,25 @@ final class LittleSpacesPopup: NSView, NSTextFieldDelegate {
             row.wantsLayer = true
             let tile = NSView(frame: NSRect(x: 14, y: (LittleMetrics.popupRowHeight - 40) / 2, width: 40, height: 40))
             tile.wantsLayer = true
-            tile.layer?.cornerRadius = 9
+            tile.layer?.cornerRadius = Design.Radius.row
             tile.layer?.cornerCurve = .continuous
             tile.layer?.backgroundColor = NSColor(hex: s.theme.shown.accent ?? s.theme.shown.colors.first ?? "#888888").cgColor
-            let emoji = NSTextField.sidebarLabel(size: 20)
+            let emoji = NSTextField.sidebarLabel(size: Design.TextSize.pane.rawValue)
             emoji.stringValue = s.emoji
             emoji.alignment = .center
             emoji.frame = NSRect(x: -SidebarText.inset, y: (40 - 25) / 2, width: 40 + 2 * SidebarText.inset, height: 25)
             tile.addSubview(emoji)
             if let name = s.symbol {
                 let glyph = NSImageView(frame: NSRect(x: 0, y: 0, width: 40, height: 40))
-                glyph.image = SidebarSymbols.image(name, size: 17, weight: .medium)
+                glyph.image = Design.Icon.symbol(name, size: Design.Icon.image)
                 glyph.imageScaling = .scaleNone
                 glyph.contentTintColor = .white
                 tile.addSubview(glyph)
             }
             row.addSubview(tile)
-            let title = NSTextField.sidebarLabel(size: 15, weight: .semibold)
+            let title = NSTextField.sidebarLabel(size: Design.TextSize.title.rawValue, weight: .semibold)
             title.stringValue = s.title
-            title.textColor = NSColor.white.withAlphaComponent(0.88)
+            title.textColor = Design.onDark(.primary)
             title.frame = NSRect(x: 14 + 40 + 12 - SidebarText.inset, y: (LittleMetrics.popupRowHeight - 18) / 2,
                                  width: LittleMetrics.popupWidth - 66 - 14 + 2 * SidebarText.inset, height: 18)
             row.addSubview(title)

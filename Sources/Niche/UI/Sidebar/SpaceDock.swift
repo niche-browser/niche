@@ -8,8 +8,8 @@ struct LibraryGlyph: View {
 
     var body: some View {
         Image(systemName: "tray.full.fill")
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(dark ? Color.white.opacity(0.55) : Color.black.opacity(0.4))
+            .font(.system(size: Design.Icon.regular))
+            .foregroundStyle(dark ? Design.onDarkColor(.secondary) : Design.onLightColor(.tertiary))
             .frame(width: 28, height: 28)
     }
 

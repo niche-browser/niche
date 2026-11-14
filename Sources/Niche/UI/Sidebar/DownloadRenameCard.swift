@@ -4,7 +4,7 @@ import AppKit
 /// its tail on the download bin. Measured on Arc 1.171, 4 Nov 2026 (60 fps, a dark space, 347 pt
 /// sidebar): 8 pt from either side, 65 pt tall plus a 9 pt tail (Niche: 71, so the old name's baseline sits as
 /// far from the bottom as the label's cap top from the top; the maintainer, 5 Nov 2026); "Download renamed to:" 12 pt in
-/// blue, the new name 14 pt semibold, the old name 12 pt in blue, struck through; revert ↶ and close
+/// blue, the new name 13 pt semibold, the old name 12 pt in blue, struck through; revert ↶ and close
 /// ✕ at the top right; four-point sparkles twinkling round it. It springs out of the bin (0.55× to
 /// 1.05× at 0.29 s, settled by 0.55 s), the strike draws in 0.5 s later over 0.15 s, and it shrinks
 /// back into the bin in 0.12 s after 8 s.
@@ -12,6 +12,27 @@ final class DownloadRenameCard: NSView {
     static let bodyHeight: CGFloat = 71
     static let tail: CGFloat = 9
     static var height: CGFloat { bodyHeight + tail }
+    /// ↶ and ✕.
+    private static let button: CGFloat = 26
+    /// Arc's timings: the fade as the card springs out, the strike's wait and its draw, the shrink
+    /// back into the bin.
+    private static let fadeIn: CFTimeInterval = 0.1
+    private static let strikeDelay: CFTimeInterval = 0.5
+    private static let strikeDraw: CFTimeInterval = 0.15
+    private static let shrink: CFTimeInterval = 0.12
+    /// A sparkle's breath, and how much longer each next one takes.
+    private static let twinkle: CFTimeInterval = 1.4
+    private static let twinkleStep: CFTimeInterval = 0.23
+
+    /// The card's own colours, on a dark space and on a light one.
+    private enum Palette {
+        static let blueOnDark = NSColor(hex: "#929BFF")
+        static let blueOnLight = NSColor(hex: "#343BD1")
+        static let cardOnDark = NSColor(srgbRed: 0x03 / 255, green: 0x06 / 255, blue: 0x1F / 255, alpha: 1)
+        static let cardOnLight = NSColor.white
+        static let sparkleOnDark = NSColor(white: 0.85, alpha: 1)
+        static let sparkleOnLight = NSColor(white: 0.6, alpha: 1)
+    }
 
     let rename: TidyDownloadsService.Rename
     var onRevert: () -> Void = {}
@@ -23,9 +44,9 @@ final class DownloadRenameCard: NSView {
     var tailX: CGFloat = 33 { didSet { needsLayout = true } }
 
     private let shape = CAShapeLayer()
-    private let label = NSTextField.sidebarLabel(size: 12)
-    private let newName = NSTextField.sidebarLabel(size: 14, weight: .semibold)
-    private let oldName = NSTextField.sidebarLabel(size: 12)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue)
+    private let newName = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
+    private let oldName = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue)
     private let strike = CAShapeLayer()
     private let sparkles = CALayer()
     private var revert: SidebarGlyphButton!
@@ -49,9 +70,9 @@ final class DownloadRenameCard: NSView {
         strike.actions = ["strokeEnd": NSNull(), "path": NSNull()]
         layer?.addSublayer(strike)
         layer?.addSublayer(sparkles)
-        revert = SidebarGlyphButton(symbol: "arrow.uturn.backward", size: 26, iconSize: 13, weight: .medium,
+        revert = SidebarGlyphButton(symbol: "arrow.uturn.backward", size: Self.button, iconSize: Design.Icon.regular, weight: .medium,
                                     help: "Revert to original name", colors: colors) { [weak self] in self?.onRevert() }
-        close = SidebarGlyphButton(symbol: "xmark", size: 26, iconSize: 13, help: "", colors: colors) { [weak self] in self?.onClose() }
+        close = SidebarGlyphButton(symbol: "xmark", size: Self.button, iconSize: Design.Icon.regular, help: "", colors: colors) { [weak self] in self?.onClose() }
         close.setCloseMark(minus: false, help: "Close")
         addSubview(revert)
         addSubview(close)
@@ -68,24 +89,24 @@ final class DownloadRenameCard: NSView {
     /// Arc drew it navy on a dark space; a light space's card is white (Arc's Max picture), not measured.
     /// Arc's #343BD1 text read at 2.6:1 on the navy card; Niche uses #929BFF there (8:1; the maintainer, 5 Nov 2026).
     private func style() {
-        let blue = NSColor(hex: dark ? "#929BFF" : "#343BD1")
-        shape.fillColor = (dark ? NSColor(srgbRed: 0x03 / 255, green: 0x06 / 255, blue: 0x1F / 255, alpha: 1) : .white).cgColor
-        shape.shadowColor = NSColor.black.cgColor
-        shape.shadowOpacity = dark ? 0 : 0.12
-        shape.shadowRadius = 6
-        shape.shadowOffset = CGSize(width: 0, height: -1)
+        let blue = dark ? Palette.blueOnDark : Palette.blueOnLight
+        shape.fillColor = (dark ? Palette.cardOnDark : Palette.cardOnLight).cgColor
+        shape.shadowColor = Design.Shadow.cardColor.cgColor
+        shape.shadowOpacity = dark ? 0 : 1
+        shape.shadowRadius = Design.Shadow.cardRadius
+        shape.shadowOffset = CGSize(width: 0, height: -Design.Shadow.cardOffset)
         label.textColor = blue
         oldName.textColor = blue
         strike.strokeColor = blue.cgColor
-        newName.textColor = dark ? NSColor(white: 0.94, alpha: 1) : .black
-        for b in [revert, close] { b?.tint = NSColor(white: dark ? 0.55 : 0.5, alpha: 1) }
+        newName.textColor = dark ? Design.onDark(.primary) : Design.onLight(.primary)
+        for b in [revert, close] { b?.tint = dark ? Design.onDark(.secondary) : Design.onLight(.secondary) }
     }
 
     override func layout() {
         super.layout()
         let w = bounds.width, body = Self.bodyHeight
         let p = CGMutablePath()
-        p.addRoundedRect(in: CGRect(x: 0, y: 0, width: w, height: body), cornerWidth: 12, cornerHeight: 12)
+        p.addRoundedRect(in: CGRect(x: 0, y: 0, width: w, height: body), cornerWidth: Design.Radius.card, cornerHeight: Design.Radius.card)
         let tx = min(max(tailX, 16), w - 16)
         p.move(to: CGPoint(x: tx - 7, y: body - 0.5))
         p.addLine(to: CGPoint(x: tx, y: body + Self.tail))
@@ -96,7 +117,7 @@ final class DownloadRenameCard: NSView {
         // Text 13 pt in; cap tops 12.5, 31 and 50 pt down (Arc).
         // The label stops short of ↶; the names may run to the card's right padding.
         func place(_ l: NSTextField, capTop: CGFloat, right: CGFloat) {
-            let f = l.font ?? .systemFont(ofSize: 12)
+            let f = l.font ?? Design.Font.ns(.detail)
             let top = capTop - (f.ascender - f.capHeight) - 1
             l.frame = NSRect(x: 13 - SidebarText.inset, y: top, width: max(0, w - 13 - right) + 2 * SidebarText.inset,
                              height: l.intrinsicContentSize.height)
@@ -105,10 +126,11 @@ final class DownloadRenameCard: NSView {
         place(newName, capTop: 31, right: 13)
         place(oldName, capTop: 50, right: 13)
         // ↶ and ✕ centred 47 and 21 pt in from the right, 17 pt down.
-        close.frame = NSRect(x: w - 21 - 13, y: 17 - 13, width: 26, height: 26)
-        revert.frame = NSRect(x: w - 47 - 13, y: 17 - 13, width: 26, height: 26)
+        let side = Self.button
+        close.frame = NSRect(x: w - 21 - side / 2, y: 17 - side / 2, width: side, height: side)
+        revert.frame = NSRect(x: w - 47 - side / 2, y: 17 - side / 2, width: side, height: side)
         // The text field truncates long names. Keep the animated strike inside its text area too.
-        let f = oldName.font ?? .systemFont(ofSize: 12)
+        let f = oldName.font ?? Design.Font.ns(.detail)
         let ink = (oldName.stringValue as NSString).size(withAttributes: [.font: f]).width
         let textFrame = oldName.frame.insetBy(dx: SidebarText.inset, dy: 0)
         let midY = 50 + f.capHeight - f.xHeight / 2
@@ -134,12 +156,12 @@ final class DownloadRenameCard: NSView {
             star.path = Self.star(size: size)
             star.bounds = CGRect(x: 0, y: 0, width: size, height: size)
             star.position = c
-            star.fillColor = NSColor(white: dark ? 0.85 : 0.6, alpha: 1).cgColor
+            star.fillColor = (dark ? Palette.sparkleOnDark : Palette.sparkleOnLight).cgColor
             star.opacity = 0
             let twinkle = CAKeyframeAnimation(keyPath: "opacity")
             twinkle.values = [0, peak, peak * 0.35, peak]
             twinkle.keyTimes = [0, 0.3, 0.65, 1]
-            twinkle.duration = 1.4 + Double(i) * 0.23
+            twinkle.duration = Self.twinkle + Double(i) * Self.twinkleStep
             twinkle.autoreverses = true
             twinkle.repeatCount = .infinity
             twinkle.beginTime = CACurrentMediaTime() + 0.1 * Double(i)
@@ -188,13 +210,13 @@ final class DownloadRenameCard: NSView {
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0
         fade.toValue = 1
-        fade.duration = 0.1
+        fade.duration = Self.fadeIn
         layer?.add(fade, forKey: "fadeIn")
         let draw = CABasicAnimation(keyPath: "strokeEnd")
         draw.fromValue = 0
         draw.toValue = 1
-        draw.beginTime = CACurrentMediaTime() + 0.5
-        draw.duration = 0.15
+        draw.beginTime = CACurrentMediaTime() + Self.strikeDelay
+        draw.duration = Self.strikeDraw
         draw.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         draw.fillMode = .backwards
         strike.strokeEnd = 1
@@ -211,7 +233,7 @@ final class DownloadRenameCard: NSView {
         fade.toValue = 0
         let g = CAAnimationGroup()
         g.animations = [shrink, fade]
-        g.duration = 0.12
+        g.duration = Self.shrink
         g.timingFunction = CAMediaTimingFunction(name: .easeIn)
         g.fillMode = .forwards
         g.isRemovedOnCompletion = false

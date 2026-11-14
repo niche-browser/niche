@@ -50,10 +50,10 @@ final class BoostEditorController {
         p.contentView = glass
         host.frame = glass.bounds
         let f = window.frame
-        let w = BoostEditorLayout.width, h = min(BoostEditorLayout.height, f.height - 80)
+        let w = BoostEditorLayout.width, h = min(BoostEditorLayout.height, f.height - BoostEditorLayout.windowReserve)
         // Under the toolbar at the window's right edge (`h` leaves it inside the window).
-        let top = f.maxY - 64
-        p.setFrame(NSRect(x: f.maxX - 12 - w, y: top - h, width: w, height: h), display: false)
+        let top = f.maxY - BoostEditorLayout.toolbarDrop
+        p.setFrame(NSRect(x: f.maxX - Design.Space.l - w, y: top - h, width: w, height: h), display: false)
         window.addChildWindow(p, ordered: .above)
         p.orderFront(nil)
         panel = p
@@ -82,7 +82,7 @@ final class BoostEditorController {
     /// its right edge. The window's shadow can't scale, so the content carries one meanwhile.
     private func growIn(_ panel: NSPanel, _ view: NSView) {
         view.wantsLayer = true
-        guard let layer = view.layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        guard let layer = view.layer, !Design.Motion.reduced else { return }
         let b = view.bounds
         let s = BoostEditorMotion.openScale
         // The layer scales about its anchor point; move the pivot to the right edge's middle.
@@ -93,10 +93,10 @@ final class BoostEditorController {
         t = CATransform3DTranslate(t, -dx, -dy, 0)
         panel.hasShadow = false
         layer.shadowPath = CGPath(roundedRect: b, cornerWidth: BoostEditorLayout.radius, cornerHeight: BoostEditorLayout.radius, transform: nil)
-        layer.shadowColor = NSColor.black.cgColor
-        layer.shadowOpacity = 0.25
-        layer.shadowRadius = 10
-        layer.shadowOffset = CGSize(width: 0, height: -3)
+        layer.shadowColor = Design.Shadow.panelColor.cgColor
+        layer.shadowOpacity = 1
+        layer.shadowRadius = Design.Shadow.panelRadius
+        layer.shadowOffset = CGSize(width: 0, height: -Design.Shadow.panelOffset)
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak panel, weak layer] in
             layer?.shadowOpacity = 0
@@ -142,7 +142,7 @@ final class BoostEditorController {
         f.origin.x = f.maxX - width
         f.size.width = width
         // Arc: Code widens the panel in 0.35 s, Back narrows it in 0.13 s, both easing out.
-        guard duration > 0, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { panel.setFrame(f, display: true); return }
+        guard duration > 0, !Design.Motion.reduced else { panel.setFrame(f, display: true); return }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = duration
             ctx.timingFunction = Self.easeOut
@@ -227,17 +227,46 @@ enum BoostEditorLayout {
     static let height: CGFloat = 572
     static let inset: CGFloat = 14
     static var column: CGFloat { width - 2 * inset }
-    static let radius: CGFloat = 16
-    static let control: CGFloat = 32
+    static let radius = Design.Radius.panel
+    static let control = Design.Space.controlLarge
+    /// The panel's top edge below the window's, under the toolbar, and what a short window keeps clear.
+    static let toolbarDrop: CGFloat = 64
+    static let windowReserve: CGFloat = 80
+    /// The header row, and the round plate of its buttons.
+    static let header: CGFloat = 48
+    static let headerButton: CGFloat = 26
+    /// The colour wheel: its height, its handle, and how far the handle stays inside the frame.
+    static let wheelHeight: CGFloat = 168
+    static let wheelHandle: CGFloat = 28
+    static let wheelHandleRing: CGFloat = 3
+    static let wheelCentre: CGFloat = 6
+    static let wheelMargin: CGFloat = 22
+    /// Chips, font tiles and the two actions, by height.
+    static let chip: CGFloat = 30
+    static let fontTile: CGFloat = 34
+    static let action: CGFloat = 38
+    /// The ring round the selected font.
+    static let selectionRing: CGFloat = 1.5
+    /// The Code editor's text inset, and the text view's own line padding inside it.
+    static let codeInset: CGFloat = 10
+    static let codeLinePadding: CGFloat = 5
+    /// The tools under the Code editor.
+    static let codeFooter: CGFloat = 56
 }
 
 /// Colours that follow the panel's appearance: ink on a translucent plate, the accent for what is on.
 private enum BoostStyle {
-    static let plate = Color.primary.opacity(0.06)
-    static let plateHover = Color.primary.opacity(0.1)
-    static let hairline = Color.primary.opacity(0.1)
+    static let plate = Design.fill(.hover)
+    static let hairline = Design.hairline
     static let secondary = Color.secondary
-    static let label = Font.system(size: 11, weight: .semibold)
+    static let label = Design.Font.ui(.caption, .semibold)
+    /// What is switched off shows through, dimmed.
+    static let fontInk = Design.inkColor(.secondary)
+    /// The wheel: every hue round its frame, the picked tint, a grey handle while nothing is picked.
+    static let rainbow: [Color] = (0...12).map { Color(hue: Double($0) / 12, saturation: 0.75, brightness: 0.95) }
+    static let tint: (Double) -> Color = { Color(hue: $0, saturation: 0.65, brightness: 0.9) }
+    static let handleIdle = Color(white: 0.55)
+    static let handleRing = Color.white
 }
 
 private struct BoostEditorView: View {
@@ -247,7 +276,7 @@ private struct BoostEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Rectangle().fill(BoostStyle.hairline).frame(height: 1)
+            Rectangle().fill(BoostStyle.hairline).frame(height: Design.Space.hair)
             if model.showingCode { code } else { controls }
         }
         // Laid out at its final width and kept centred while the panel widens or narrows.
@@ -268,15 +297,15 @@ private struct BoostEditorView: View {
                 .pickerStyle(.segmented).labelsHidden().frame(width: 170)
                 HStack {
                     Button { model.setCode(false) } label: {
-                        Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 10).frame(height: 28)
+                        Label("Back", systemImage: "chevron.left").font(Design.Font.ui(.detail, .semibold))
+                            .padding(.horizontal, 10).frame(height: Design.Space.control)
                             .background(Capsule().fill(BoostStyle.plate))
                     }
                     .buttonStyle(.plain).padding(.leading, 10)
                     Spacer()
                 }
             }
-            .frame(height: 48)
+            .frame(height: BoostEditorLayout.header)
         } else {
             boostHeader
         }
@@ -285,7 +314,7 @@ private struct BoostEditorView: View {
     private var boostHeader: some View {
         HStack(spacing: 0) {
             iconButton("xmark", help: "Done") { model.onClose() }
-            Spacer(minLength: 4)
+            Spacer(minLength: Design.Space.xs)
             Menu {
                 Button("Rename this Boost…") { rename() }
                 Button("Shuffle") { model.shuffle() }
@@ -295,28 +324,28 @@ private struct BoostEditorView: View {
                 Divider()
                 Button("All Boosts…") { NotificationCenter.default.post(name: .nicheShowBoostsLibrary, object: nil) }
             } label: {
-                VStack(spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(model.boost.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                VStack(spacing: Design.Space.hair) {
+                    HStack(spacing: Design.Space.xs) {
+                        Text(model.boost.name).font(Design.Font.ui(.body, .semibold)).lineLimit(1)
+                        Image(systemName: "chevron.down").font(Design.Font.ui(.micro, .bold)).foregroundStyle(.secondary)
                     }
-                    Text(model.boost.host).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(model.boost.host).font(Design.Font.ui(.micro)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .frame(maxWidth: 150)
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            Spacer(minLength: 4)
+            Spacer(minLength: Design.Space.xs)
             iconButton("arrow.uturn.backward", help: "Undo") { model.undo() }
-                .disabled(model.history.isEmpty).opacity(model.history.isEmpty ? 0.35 : 1)
+                .disabled(model.history.isEmpty).opacity(model.history.isEmpty ? Design.Opacity.disabled : 1)
         }
         .padding(.horizontal, 10)
-        .frame(height: 48)
+        .frame(height: BoostEditorLayout.header)
     }
 
     private func iconButton(_ symbol: String, help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 11, weight: .bold))
-                .frame(width: 26, height: 26)
+            Image(systemName: symbol).font(.system(size: Design.Icon.small, weight: .bold))
+                .frame(width: BoostEditorLayout.headerButton, height: BoostEditorLayout.headerButton)
                 .background(Circle().fill(BoostStyle.plate))
         }
         .buttonStyle(.plain).help(help).accessibilityLabel(help)
@@ -327,26 +356,26 @@ private struct BoostEditorView: View {
             ColorWheel(hue: model.boost.hue, strength: model.boost.strength) { h, s in
                 model.change { $0.hue = h; $0.strength = s }
             }
-            .frame(width: BoostEditorLayout.column, height: 168)
+            .frame(width: BoostEditorLayout.column, height: BoostEditorLayout.wheelHeight)
             .padding(.top, BoostEditorLayout.inset)
-            HStack(spacing: 6) {
+            HStack(spacing: Design.Space.s) {
                 chip("circle.lefthalf.filled", "Invert", on: model.boost.invert, help: "Invert lightness") { model.change { $0.invert.toggle() } }
                 chip("slider.horizontal.3", "Adjust", on: showColors, help: "Contrast, brightness and saturation") { showColors.toggle() }
                     .popover(isPresented: $showColors, arrowEdge: .leading) { advanced }
                 chip("arrow.counterclockwise", "Reset", on: false, help: "Back to the site's own colours") {
-                    model.change { $0.hue = 0; $0.strength = 0; $0.invert = false; $0.contrast = 50; $0.brightness = 50; $0.saturation = 50 }
+                    model.change { $0.hue = 0; $0.strength = 0; $0.invert = false; $0.contrast = Self.neutral; $0.brightness = Self.neutral; $0.saturation = Self.neutral }
                 }
-                .disabled(model.boost.colorsUntouched).opacity(model.boost.colorsUntouched ? 0.4 : 1)
+                .disabled(model.boost.colorsUntouched).opacity(model.boost.colorsUntouched ? Design.Opacity.disabled : 1)
             }
             .padding(.top, 10)
-            sectionLabel("Font").padding(.top, 16)
-            fonts.padding(.top, 6)
-            HStack(spacing: 6) {
+            sectionLabel("Font").padding(.top, Design.Space.xl)
+            fonts.padding(.top, Design.Space.s)
+            HStack(spacing: Design.Space.s) {
                 sizeControl
                 caseMenu
             }
             .padding(.top, 10)
-            HStack(spacing: 6) {
+            HStack(spacing: Design.Space.s) {
                 action("Zap", symbol: "bolt.fill", on: model.zapping, help: "Click things on the page to hide them") { model.toggleZap() }
                 action("Code", symbol: "curlybraces", on: false, help: "Your own CSS and JavaScript") { model.setCode(true) }
             }
@@ -356,26 +385,29 @@ private struct BoostEditorView: View {
         .frame(width: BoostEditorLayout.column)
     }
 
+    /// Contrast, brightness and saturation run 0 to 100 around this: the site's own.
+    private static let neutral: Double = 50
+
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased()).font(BoostStyle.label).kerning(0.6).foregroundStyle(.secondary)
     }
 
     private var advanced: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Design.Space.l) {
             slider("Contrast", \.contrast)
             slider("Brightness", \.brightness)
             slider("Saturation", \.saturation)
         }
-        .padding(16)
+        .padding(Design.Space.xl)
         .frame(width: 240)
     }
 
     private func slider(_ title: String, _ key: WritableKeyPath<Boost, Double>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Design.Space.xs) {
             HStack {
-                Text(title).font(.system(size: 12, weight: .medium))
+                Text(title).font(Design.Font.ui(.detail, .medium))
                 Spacer()
-                Text("\(Int(model.boost[keyPath: key] - 50))").font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                Text("\(Int(model.boost[keyPath: key] - Self.neutral))").font(Design.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             Slider(value: Binding(get: { model.boost[keyPath: key] }, set: { v in model.change { $0[keyPath: key] = v } }), in: 0...100)
                 .controlSize(.small).tint(Design.accent)
@@ -404,16 +436,17 @@ private struct BoostEditorView: View {
     }
 
     private var fonts: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 5)
-        return LazyVGrid(columns: columns, spacing: 5) {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: Design.Space.xs), count: 5)
+        return LazyVGrid(columns: columns, spacing: Design.Space.xs) {
             ForEach(Boost.fonts.indices, id: \.self) { i in
                 let on = model.boost.font == i
                 Button { model.change { $0.font = $0.font == i ? nil : i } } label: {
-                    Text("Aa").font(Self.previewFont(i, size: 15))
-                        .foregroundStyle(on ? Design.accent : Color.primary.opacity(0.75))
-                        .frame(maxWidth: .infinity).frame(height: 34)
-                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(on ? Design.accent.opacity(0.14) : BoostStyle.plate))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(on ? Design.accent.opacity(0.7) : .clear, lineWidth: 1.5))
+                    Text("Aa").font(Self.previewFont(i, size: Design.TextSize.title.rawValue))
+                        .foregroundStyle(on ? Design.accent : BoostStyle.fontInk)
+                        .frame(maxWidth: .infinity).frame(height: BoostEditorLayout.fontTile)
+                        .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(on ? Design.accent.opacity(0.14) : BoostStyle.plate))
+                        .overlay(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
+                            .strokeBorder(on ? Design.accent.opacity(0.7) : .clear, lineWidth: BoostEditorLayout.selectionRing))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).help(Self.fontName(i)).accessibilityLabel(Self.fontName(i))
@@ -430,20 +463,20 @@ private struct BoostEditorView: View {
         return HStack(spacing: 0) {
             stepButton("textformat.size.smaller", help: "Smaller text", enabled: i > 0) { model.change { $0.textScale = Self.sizes[i - 1] } }
             Text(scale == 1 ? "100%" : "\(Int((scale * 100).rounded()))%")
-                .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                .font(Design.Font.ui(.caption, .semibold).monospacedDigit())
                 .frame(maxWidth: .infinity)
             stepButton("textformat.size.larger", help: "Larger text", enabled: i < Self.sizes.count - 1) { model.change { $0.textScale = Self.sizes[i + 1] } }
         }
         .frame(height: BoostEditorLayout.control)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(BoostStyle.plate))
+        .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(BoostStyle.plate))
     }
 
     private func stepButton(_ symbol: String, help: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+            Image(systemName: symbol).font(.system(size: Design.Icon.small, weight: .semibold))
                 .frame(width: 30, height: BoostEditorLayout.control).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.35).help(help).accessibilityLabel(help)
+        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : Design.Opacity.disabled).help(help).accessibilityLabel(help)
     }
 
     private var caseMenu: some View {
@@ -453,14 +486,14 @@ private struct BoostEditorView: View {
             }
             .pickerStyle(.inline).labelsHidden()
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "textformat").font(.system(size: 11, weight: .semibold))
-                Text(model.boost.textCase.title).font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+            HStack(spacing: Design.Space.xs) {
+                Image(systemName: "textformat").font(.system(size: Design.Icon.small, weight: .semibold))
+                Text(model.boost.textCase.title).font(Design.Font.ui(.caption, .semibold)).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(Design.Font.ui(.micro, .bold)).foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, Design.Space.m)
             .frame(maxWidth: .infinity, minHeight: BoostEditorLayout.control)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(BoostStyle.plate))
+            .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(BoostStyle.plate))
             .contentShape(Rectangle())
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).help("Text case")
@@ -468,13 +501,13 @@ private struct BoostEditorView: View {
 
     private func chip(_ symbol: String, _ title: String, on: Bool, help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
-                Text(title).font(.system(size: 11.5, weight: .semibold))
+            HStack(spacing: Design.Space.xs) {
+                Image(systemName: symbol).font(.system(size: Design.Icon.small, weight: .semibold))
+                Text(title).font(Design.Font.ui(.caption, .semibold))
             }
             .foregroundStyle(on ? Color.white : Color.primary)
-            .frame(maxWidth: .infinity, minHeight: 30)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(on ? Design.accent : BoostStyle.plate))
+            .frame(maxWidth: .infinity, minHeight: BoostEditorLayout.chip)
+            .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(on ? Design.accent : BoostStyle.plate))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).help(help).accessibilityLabel(help)
@@ -482,14 +515,14 @@ private struct BoostEditorView: View {
 
     private func action(_ title: String, symbol: String, on: Bool, help: String, _ run: @escaping () -> Void) -> some View {
         Button(action: run) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
-                Text(on ? "Zapping…" : title).font(.system(size: 13, weight: .semibold))
+            HStack(spacing: Design.Space.s) {
+                Image(systemName: symbol).font(.system(size: Design.Icon.regular, weight: .semibold))
+                Text(on ? "Zapping…" : title).font(Design.Font.ui(.body, .semibold))
             }
             .foregroundStyle(on ? Color.white : Color.primary)
-            .frame(maxWidth: .infinity, minHeight: 38)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(on ? Design.accent : BoostStyle.plate))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(BoostStyle.hairline, lineWidth: on ? 0 : 1))
+            .frame(maxWidth: .infinity, minHeight: BoostEditorLayout.action)
+            .background(RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous).fill(on ? Design.accent : BoostStyle.plate))
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous).strokeBorder(BoostStyle.hairline, lineWidth: on ? 0 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).help(help).accessibilityLabel(help)
@@ -502,11 +535,12 @@ private struct BoostEditorView: View {
                 .overlay(alignment: .topLeading) {
                     if (model.codeIsJS ? model.boost.js : model.boost.css).isEmpty {
                         Text(model.codeIsJS ? "// Runs on every page of \(model.boost.host)" : "/* Applies to every page of \(model.boost.host) */")
-                            .font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.white.opacity(0.35))
-                            .padding(.leading, 15).padding(.top, 10).allowsHitTesting(false)
+                            .font(Design.Font.ui(.detail, design: .monospaced)).foregroundStyle(Design.onDarkColor(.tertiary))
+                            .padding(.leading, BoostEditorLayout.codeInset + BoostEditorLayout.codeLinePadding)
+                            .padding(.top, BoostEditorLayout.codeInset).allowsHitTesting(false)
                     }
                 }
-            HStack(spacing: 6) {
+            HStack(spacing: Design.Space.s) {
                 chip("eyedropper", "Pick", on: model.picking, help: model.picking ? "Hide Selector Picker" : "Show Selector Picker") {
                     model.togglePicker()
                 }
@@ -521,7 +555,7 @@ private struct BoostEditorView: View {
                 Spacer()
             }
             .padding(.horizontal, BoostEditorLayout.inset)
-            .frame(height: 56)
+            .frame(height: BoostEditorLayout.codeFooter)
         }
         .frame(width: BoostEditorLayout.codeWidth)
     }
@@ -561,35 +595,35 @@ private struct ColorWheel: View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
             let c = CGPoint(x: w / 2, y: h / 2)
-            let reach = min(w, h) / 2 - 22
+            let reach = min(w, h) / 2 - BoostEditorLayout.wheelMargin
             let angle = hue * 2 * .pi, r = strength * reach
             let handle = CGPoint(x: c.x + cos(angle) * r, y: c.y - sin(angle) * r)
-            let tint = Color(hue: hue, saturation: 0.65, brightness: 0.9)
+            let tint = BoostStyle.tint(hue)
             ZStack {
                 // The frame: every hue, faint, so the wheel says what it picks before it is touched.
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(AngularGradient(colors: (0...12).map { Color(hue: Double($0) / 12, saturation: 0.75, brightness: 0.95) },
-                                          center: .center, angle: .degrees(0)))
+                RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous)
+                    .fill(AngularGradient(colors: BoostStyle.rainbow, center: .center, angle: .degrees(0)))
                     .opacity(0.55)
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                // Inside the frame, its corners concentric with the frame's.
+                RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous)
                     .fill(Color(nsColor: .windowBackgroundColor))
-                    .padding(6)
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .padding(Design.Space.s)
+                RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous)
                     .fill(RadialGradient(colors: [tint.opacity(strength * 0.35), .clear], center: UnitPoint(x: handle.x / w, y: handle.y / h),
                                          startRadius: 0, endRadius: reach))
-                    .padding(6)
+                    .padding(Design.Space.s)
                 Canvas { ctx, s in
                     for x in stride(from: 14.0, to: s.width - 13, by: 7) {
                         for y in stride(from: 14.0, to: s.height - 13, by: 7) {
-                            ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.2, height: 1.2)), with: .color(.primary.opacity(0.13)))
+                            ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.2, height: 1.2)), with: .color(Design.fill(.pressed)))
                         }
                     }
                 }
-                Circle().fill(Color.primary.opacity(0.25)).frame(width: 6, height: 6).position(c)
-                Circle().fill(strength > 0 ? tint : Color(white: 0.55))
-                    .frame(width: 28, height: 28)
-                    .overlay(Circle().strokeBorder(.white, lineWidth: 3))
-                    .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
+                Circle().fill(Design.fill(.strong)).frame(width: BoostEditorLayout.wheelCentre, height: BoostEditorLayout.wheelCentre).position(c)
+                Circle().fill(strength > 0 ? tint : BoostStyle.handleIdle)
+                    .frame(width: BoostEditorLayout.wheelHandle, height: BoostEditorLayout.wheelHandle)
+                    .overlay(Circle().strokeBorder(BoostStyle.handleRing, lineWidth: BoostEditorLayout.wheelHandleRing))
+                    .shadow(color: Color(nsColor: Design.Shadow.cardColor), radius: Design.Shadow.cardRadius, y: Design.Shadow.cardOffset)
                     .position(handle)
             }
             .contentShape(Rectangle())
@@ -613,14 +647,14 @@ private struct CodeEditor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
         let tv = scroll.documentView as! NSTextView
-        tv.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        tv.font = Design.Font.mono(.detail)
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
         tv.isAutomaticSpellingCorrectionEnabled = false
-        tv.backgroundColor = NSColor(srgbRed: 0.13, green: 0.13, blue: 0.15, alpha: 1)
-        tv.textColor = NSColor(white: 0.92, alpha: 1)
+        tv.backgroundColor = Design.panelDark
+        tv.textColor = Design.onDark(.primary)
         tv.insertionPointColor = .white
-        tv.textContainerInset = NSSize(width: 10, height: 10)
+        tv.textContainerInset = NSSize(width: BoostEditorLayout.codeInset, height: BoostEditorLayout.codeInset)
         tv.delegate = context.coordinator
         tv.string = text
         return scroll

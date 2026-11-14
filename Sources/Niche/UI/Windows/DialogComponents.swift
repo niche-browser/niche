@@ -4,14 +4,31 @@ import SwiftUI
 /// Niche's dialog card: graphite, the ground of the logo's tile, a step lighter so it lifts off a
 /// dark page. Buttons are neutral plates and the one default action is the signal orange.
 enum DialogTheme {
-    static let card = Color(hex: "#1B1D21")
-    static let body = Color(hex: "#B4B6BC")
+    static let card = Design.panelDarkColor
+    static let body = Design.onDarkColor(.secondary)
+    /// What is read first: a title, a field's text, a button's label.
+    static let title = Design.onDarkColor(.primary)
+    /// Placeholders and disabled labels.
+    static let faint = Design.onDarkColor(.tertiary)
+    /// The 1 pt rim of a button, a key badge or a field.
+    static let outline = Color(nsColor: Design.hairlineOnDark)
+    /// The lip under the default button: deep orange (dimmed while it is disabled), a dark red under Delete.
+    static let accentLip = Color(hex: "#7A2A12")
+    static let accentLipDisabled = Color(hex: "#3A2018")
+    static let destructiveLip = Color(hex: "#41232A")
+}
+
+private enum Metrics {
+    /// The smallest key badge beside a button's title.
+    static let key = CGSize(width: 27, height: 19)
+    /// How far the default button's lip shows below it.
+    static let lip: CGFloat = 1.5
 }
 
 /// The card a dialog draws on. The sheet it sits in already has macOS's 1 pt light edge, as Arc's does,
 /// so the card draws none of its own.
 struct DialogSurface: ViewModifier {
-    var cornerRadius: CGFloat = 24
+    var cornerRadius: CGFloat = Design.Radius.panel
 
     func body(content: Content) -> some View {
         content
@@ -24,7 +41,7 @@ struct DialogButton: View {
     enum Style {
         case secondary, primary, accent, destructive
 
-        /// Under the pointer: 10 % white over the neutral buttons, 10 % black over the coloured ones.
+        /// Under the pointer: a white plate over the neutral buttons, a black one over the coloured ones.
         var hoverTint: Color { self == .secondary ? .white : .black }
     }
     let title: String
@@ -55,46 +72,46 @@ struct DialogButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
-                Text(title).font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(accent || destructive ? .white : enabled ? Color(hex: "#ECEDEF") : Color(hex: "#5C5F66"))
+            HStack(spacing: Design.Space.m) {
+                Text(title).font(Design.Font.ui(.body, .medium))
+                    .foregroundStyle(enabled ? DialogTheme.title : DialogTheme.faint)
                 if !key.isEmpty {
-                    Text(key).font(.system(size: key == "↩" ? 13 : 11, weight: .bold))
-                        .foregroundStyle(destructive ? .white : accent ? .white : enabled ? Color(hex: "#B4B6BC") : Color(hex: "#5C5F66"))
-                        .frame(minWidth: badge?.width ?? 27, maxWidth: badge?.width, minHeight: badge?.height ?? 19, maxHeight: badge?.height)
-                        .padding(.horizontal, badge != nil || key == "↩" ? 0 : 2)
-                        .background(RoundedRectangle(cornerRadius: badge == nil ? 5 : 3, style: .continuous)
-                            .fill(destructive ? Color(hex: "#F74C31") : accent ? Color(hex: "#F6693F") : primary ? Color(hex: enabled ? "#454850" : "#2A2C31") : Color(hex: "#3A3D45")))
-                        .overlay(RoundedRectangle(cornerRadius: badge == nil ? 5 : 3, style: .continuous)
-                            .strokeBorder(destructive ? Color(hex: "#FA624C") : accent ? Color(hex: "#F98A66") : .clear, lineWidth: 1))
+                    Text(key).font(Design.Font.ui(key == "↩" ? .body : .caption, .bold))
+                        .foregroundStyle(accent || destructive ? DialogTheme.title : enabled ? DialogTheme.body : DialogTheme.faint)
+                        .frame(minWidth: badge?.width ?? Metrics.key.width, maxWidth: badge?.width,
+                               minHeight: badge?.height ?? Metrics.key.height, maxHeight: badge?.height)
+                        .padding(.horizontal, badge != nil || key == "↩" ? 0 : Design.Space.xxs)
+                        .background(RoundedRectangle(cornerRadius: badge == nil ? Design.Radius.inset : Design.Radius.small, style: .continuous)
+                            .fill(Design.fillOnDarkColor(accent || destructive ? .pressed : primary ? (enabled ? .selected : .subtle) : .hover)))
+                        .overlay(RoundedRectangle(cornerRadius: badge == nil ? Design.Radius.inset : Design.Radius.small, style: .continuous)
+                            .strokeBorder(accent || destructive ? DialogTheme.outline : .clear, lineWidth: 1))
                 }
             }
-            .padding(.leading, 12.5)
-            .padding(.trailing, 12)
-            .frame(height: 37)
+            .padding(.horizontal, Design.Space.l)
+            .frame(height: Design.Space.control)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(destructive ? Color(hex: "#F53516") : accent ? Color(hex: "#F45120") : primary ? Color(hex: enabled ? "#34373E" : "#222429") : Color(hex: "#2B2D33"))
+                RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
+                    .fill(destructive ? Design.danger : accent ? Design.accent : primary ? Design.fillOnDarkColor(enabled ? .pressed : .subtle) : Design.panelDarkRaisedColor)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(destructive ? Color(hex: "#F53516") : accent ? Color(hex: "#F7774F") : primary ? (enabled ? Color(hex: "#4A4D55") : .clear) : Color(hex: "#3D4048"), lineWidth: 1)
+                RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
+                    .strokeBorder(destructive || (primary && !enabled) ? .clear : DialogTheme.outline, lineWidth: 1)
             )
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
                     // The default button sits on a darker lip, ~1.5 pt below: deep orange for Quit and Save,
                     // a dark red for Delete.
-                    .fill(style == .accent ? Color(hex: enabled ? "#7A2A12" : "#3A2018") : destructive ? Color(hex: "#41232A") : .clear)
-                    .offset(y: 1.5)
+                    .fill(style == .accent ? (enabled ? DialogTheme.accentLip : DialogTheme.accentLipDisabled) : destructive ? DialogTheme.destructiveLip : .clear)
+                    .offset(y: Metrics.lip)
             )
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(style.hoverTint.opacity(hovered && enabled ? 0.1 : 0))
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
+                .fill(style.hoverTint.opacity(hovered && enabled ? Design.Fill.selected.rawValue : 0))
                 .allowsHitTesting(false))
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
         .onHover { hovered = $0 }
-        .animation(.easeOut(duration: 0.1), value: hovered)
+        .animation(.easeOut(duration: Design.Motion.fast), value: hovered)
         .accessibilityLabel(title)
         .fixedSize()
     }

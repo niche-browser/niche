@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Arc's Filter panel on Library ▸ Archived Tabs and Downloads (Arc 1.172.1, 8 Nov 2026, 2x stills):
 /// it takes the search row's place: the title ("Filter Archived Tabs", 15 pt semibold, 12 pt in) and
-/// a Done pill (59 × 36 pt); then each question (12.5 pt semibold, faded) over a wrapping row of
+/// a Done pill (59 × 36 pt); then each question (12 pt semibold, faded) over a wrapping row of
 /// 33 pt chips, 6 pt apart, light until picked, dark with white text once picked.
 struct LibraryFilterPanel: View {
     struct Chip: Identifiable {
@@ -26,37 +26,43 @@ struct LibraryFilterPanel: View {
     let toggle: (String) -> Void
     let done: () -> Void
 
-    private var ink: Color { dark ? .white : .black }
+    /// Arc's Done pill and chip height.
+    private static let donePill = CGSize(width: 59, height: 36)
+    private static let chipHeight: CGFloat = 33
+
+    /// Neutral ink and plates over the space's colour: white on a dark sidebar, black on a light one.
+    private func ink(_ emphasis: Design.Emphasis) -> Color { dark ? Design.onDarkColor(emphasis) : Design.onLightColor(emphasis) }
+    private func plate(_ fill: Design.Fill) -> Color { (dark ? Color.white : .black).opacity(fill.rawValue) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(ink.opacity(0.78))
+                Text(title).font(Design.Font.title).foregroundStyle(ink(.secondary))
                 Spacer()
                 Button(action: done) {
-                    Text("Done").font(.system(size: 14, weight: .medium)).foregroundStyle(ink.opacity(0.78))
-                        .frame(width: 59, height: 36)
-                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(ink.opacity(0.06)))
+                    Text("Done").font(Design.Font.control).foregroundStyle(ink(.secondary))
+                        .frame(width: Self.donePill.width, height: Self.donePill.height)
+                        .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(plate(.hover)))
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.cancelAction)
             }
-            .frame(height: 36)
+            .frame(height: Self.donePill.height)
             .padding(.top, 10)
             ForEach(sections) { s in
-                Text(s.title).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(ink.opacity(0.55))
-                    .padding(.top, 16).padding(.bottom, 7)
-                FlowRow(spacing: 6) {
+                Text(s.title).font(Design.Font.ui(.detail, .semibold)).foregroundStyle(ink(.secondary))
+                    .padding(.top, Design.Space.xl).padding(.bottom, Design.Space.s)
+                FlowRow(spacing: Design.Space.s) {
                     ForEach(s.chips) { c in
                         Button { toggle(c.id) } label: {
-                            HStack(spacing: 5) {
-                                if let icon = c.icon { Text(icon).font(.system(size: 13)) }
-                                Text(c.label).font(.system(size: 14, weight: c.on ? .semibold : .regular))
+                            HStack(spacing: Design.Space.xs) {
+                                if let icon = c.icon { Text(icon).font(.system(size: Design.Icon.regular)) }
+                                Text(c.label).font(Design.Font.ui(.body, c.on ? .semibold : .regular))
                             }
-                            .foregroundStyle(c.on ? (dark ? Color.black : .white) : ink.opacity(0.7))
-                            .padding(.horizontal, 12).frame(height: 33)
-                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(c.on ? ink.opacity(dark ? 0.85 : 0.68) : ink.opacity(0.05)))
+                            .foregroundStyle(c.on ? (dark ? Color.black : .white) : ink(.secondary))
+                            .padding(.horizontal, Design.Space.l).frame(height: Self.chipHeight)
+                            .background(RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous)
+                                .fill(c.on ? ink(dark ? .primary : .secondary) : plate(.hover)))
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(c.on ? [.isButton, .isSelected] : .isButton)
@@ -64,7 +70,7 @@ struct LibraryFilterPanel: View {
                 }
             }
         }
-        .padding(.leading, 12).padding(.trailing, 8).padding(.bottom, 4)
+        .padding(.leading, Design.Space.l).padding(.trailing, Design.Space.m).padding(.bottom, Design.Space.xs)
         .frame(width: width, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }

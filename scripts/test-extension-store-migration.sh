@@ -14,6 +14,7 @@ xcrun swiftc -swift-version 5 -parse-as-library ${NICHE_TEST_SWIFTC_FLAGS:-} \
   Packages/NicheCore/Sources/NicheCore/ExtensionActionState.swift \
   Packages/NicheCore/Sources/NicheCore/ExtensionBadge.swift \
   Packages/NicheCore/Sources/NicheCore/ExtensionProxyControl.swift \
+  Packages/NicheCore/Sources/NicheCore/ExtensionInstallNotice.swift \
   Sources/Niche/Services/Import/ExtensionImporter.swift Sources/Niche/Services/ExtensionStore.swift \
   Tests/ExtensionStoreSupport/AppServices.swift Tests/ExtensionStoreMigrationTests.swift \
   -o "$TEST_DIR/extension-migration-tests"

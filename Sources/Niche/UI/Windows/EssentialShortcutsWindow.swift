@@ -1,6 +1,26 @@
 import AppKit
 import SwiftUI
 
+private enum Metrics {
+    /// The window, Arc's.
+    static let size = NSSize(width: 475, height: 462)
+    /// The heading's top, under the traffic lights.
+    static let headerTop: CGFloat = 37.5
+    /// One shortcut's row; with its hairline the rows are 73 pt apart.
+    static let row: CGFloat = 72
+    static let viewAllWidth: CGFloat = 96
+    /// A key cap: its face stands this tall on a lip as tall as a control; a word ("TAB") gets the wide cap.
+    static let capFace: CGFloat = 26
+    static let capWide: CGFloat = 34
+    /// The rim of a key cap's face.
+    static let capRim: CGFloat = 0.75
+}
+
+private extension Color {
+    /// The hairline between rows and around plates on this always-dark window.
+    static let shortcutsHairline = Color(nsColor: Design.hairlineOnDark)
+}
+
 /// Arc's Help ▸ Essential Keyboard Shortcuts (KeyboardShortcutsEDUWindowController, Arc 1.172.1,
 /// captured 7 Nov 2026 at 2x): a 475 × 462 pt floating window, #161C2F, traffic lights only,
 /// opening at the top right of the screen. "Essential Keyboard Shortcuts" in heavy 20.5 pt at 30 pt
@@ -27,7 +47,7 @@ final class EssentialShortcutsWindow {
             panel.makeKeyAndOrderFront(nil)
             return
         }
-        let size = NSSize(width: 475, height: 462)
+        let size = Metrics.size
         let p = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
         p.titlebarAppearsTransparent = true
@@ -49,7 +69,7 @@ final class EssentialShortcutsWindow {
         p.setFrame(NSRect(origin: .zero, size: size), display: false)
         if let screen = NSScreen.main {
             let v = screen.visibleFrame
-            p.setFrameOrigin(NSPoint(x: v.maxX - size.width - 10, y: v.maxY - size.height - 10))
+            p.setFrameOrigin(NSPoint(x: v.maxX - size.width - Design.Space.l, y: v.maxY - size.height - Design.Space.l))
         }
         panel = p
         p.makeKeyAndOrderFront(nil)
@@ -64,37 +84,37 @@ private struct EssentialShortcutsView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center) {
                 Text("Essential Keyboard Shortcuts")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(Design.Font.ui(.pane, .semibold))
                     .kerning(-0.4)
-                    .foregroundStyle(.white)
-                Spacer(minLength: 8)
+                    .foregroundStyle(Design.onDarkColor(.primary))
+                Spacer(minLength: Design.Space.m)
                 ViewAllButton(action: viewAll)
             }
-            .frame(height: 28)
-            .padding(.top, 37.5)
-            .padding(.bottom, 3)
+            .frame(height: Design.Space.control)
+            .padding(.top, Metrics.headerTop)
+            .padding(.bottom, Design.Space.xxs)
             ForEach(Array(EssentialShortcutsWindow.rows.enumerated()), id: \.offset) { i, row in
                 if i > 0 {
-                    Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
+                    Rectangle().fill(Color.shortcutsHairline).frame(height: Design.Space.hair)
                 }
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2.5) {
-                        Text(row.title).font(.system(size: 15)).foregroundStyle(.white)
-                        Text(row.detail).font(.system(size: 12)).foregroundStyle(.white.opacity(0.62)).lineLimit(1)
+                HStack(alignment: .center, spacing: Design.Space.l) {
+                    VStack(alignment: .leading, spacing: Design.Space.xxs) {
+                        Text(row.title).font(Design.Font.ui(.title)).foregroundStyle(Design.onDarkColor(.primary))
+                        Text(row.detail).font(Design.Font.ui(.detail)).foregroundStyle(Design.onDarkColor(.secondary)).lineLimit(1)
                     }
-                    Spacer(minLength: 8)
-                    HStack(spacing: 3) {
+                    Spacer(minLength: Design.Space.m)
+                    HStack(spacing: Design.Space.xxs) {
                         ForEach(Array((bindings.action(row.action)?.primary?.caps ?? []).enumerated()), id: \.offset) { _, cap in
                             KeyCap(text: cap == "⇥" ? "TAB" : cap)
                         }
                     }
                 }
-                .frame(height: 72)
+                .frame(height: Metrics.row)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 30)
-        .frame(width: 475, height: 462, alignment: .topLeading)
+        .padding(.horizontal, Design.Space.pane)
+        .frame(width: Metrics.size.width, height: Metrics.size.height, alignment: .topLeading)
     }
 }
 
@@ -104,15 +124,15 @@ private struct ViewAllButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Text("View All").font(.system(size: 14))
-                Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .medium))
+            HStack(spacing: Design.Space.m) {
+                Text("View All").font(Design.Font.ui(.body))
+                Image(systemName: "arrow.up.right").font(.system(size: Design.Icon.small, weight: .medium))
             }
-            .foregroundStyle(.white.opacity(0.92))
-            .frame(width: 96, height: 28)
+            .foregroundStyle(Design.onDarkColor(.primary))
+            .frame(width: Metrics.viewAllWidth, height: Design.Space.control)
             .background(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous)
-                .fill(Color.white.opacity(hover ? 0.12 : 0.08)))
-            .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 1))
+                .fill(Design.fillOnDarkColor(hover ? .pressed : .selected)))
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(Color.shortcutsHairline, lineWidth: Design.Space.hair))
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
@@ -125,16 +145,16 @@ private struct KeyCap: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(Color.white.opacity(0.06))
+            RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(Design.fillOnDarkColor(.hover))
             RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous)
-                .fill(Color.white.opacity(0.13))
-                .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 0.75))
-                .frame(height: 26)
+                .fill(Design.fillOnDarkColor(.pressed))
+                .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(Color.shortcutsHairline, lineWidth: Metrics.capRim))
+                .frame(height: Metrics.capFace)
             Text(text)
-                .font(.system(size: text.count > 1 ? 10 : 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-                .frame(height: 26)
+                .font(Design.Font.ui(text.count > 1 ? .micro : .body, .semibold, design: .rounded))
+                .foregroundStyle(Design.onDarkColor(.primary))
+                .frame(height: Metrics.capFace)
         }
-        .frame(width: text.count > 1 ? 34 : 28, height: 28)
+        .frame(width: text.count > 1 ? Metrics.capWide : Design.Space.control, height: Design.Space.control)
     }
 }

@@ -142,24 +142,24 @@ final class MediaTile: NSView, NSDraggingSource {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = Design.Radius.control
         layer?.cornerCurve = .continuous
         picture.borderColor = NSColor.white.cgColor
         picture.borderWidth = MediaGridMetrics.frame
         picture.backgroundColor = NSColor.white.cgColor
         picture.contentsGravity = .resizeAspectFill
         picture.masksToBounds = false
-        picture.shadowColor = NSColor.black.cgColor
-        picture.shadowOpacity = 0.18
-        picture.shadowRadius = 3
-        picture.shadowOffset = CGSize(width: 0, height: -1)
+        picture.shadowColor = Design.Shadow.cardColor.cgColor
+        picture.shadowOpacity = 1
+        picture.shadowRadius = Design.Shadow.cardRadius
+        picture.shadowOffset = CGSize(width: 0, height: -Design.Shadow.cardOffset)
         layer?.addSublayer(picture)
         play.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Video")?
-            .withSymbolConfiguration(.init(pointSize: 22, weight: .regular))
+            .withSymbolConfiguration(Design.Icon.configuration(Design.Icon.large, weight: .regular))
         play.contentTintColor = .white
         play.imageScaling = .scaleNone
         play.wantsLayer = true
-        play.shadow = { let sh = NSShadow(); sh.shadowColor = NSColor.black.withAlphaComponent(0.35); sh.shadowBlurRadius = 4; return sh }()
+        play.shadow = { let sh = NSShadow(); sh.shadowColor = Design.Shadow.panelColor; sh.shadowBlurRadius = Design.Space.xs; return sh }()
         play.isHidden = true
         addSubview(play)
     }
@@ -187,7 +187,7 @@ final class MediaTile: NSView, NSDraggingSource {
     }
 
     private func refresh() {
-        layer?.backgroundColor = ink.withAlphaComponent(hovering ? 0.08 : 0.04).cgColor
+        layer?.backgroundColor = ink.withAlphaComponent((hovering ? Design.Fill.selected : .subtle).rawValue).cgColor
     }
 
     override func layout() {
@@ -246,33 +246,33 @@ struct MediaOptInCard: View {
     var body: some View {
         VStack(spacing: 0) {
             Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.primary.opacity(0.75))
+                .font(.system(size: Design.Icon.large, weight: .medium))
+                .foregroundStyle(.secondary)
                 .frame(width: 44, height: 44)
-                .background(Circle().fill(Color.primary.opacity(0.07)))
-            Text("Your Media in the Library").font(.system(size: 13, weight: .semibold))
-                .padding(.top, 12)
+                .background(Circle().fill(Design.fill(.hover)))
+            Text("Your Media in the Library").font(Design.Font.ui(.body, .semibold))
+                .padding(.top, Design.Space.l)
             Text("Screenshots, pictures and videos from your Mac, one click away.")
-                .font(.system(size: 11.5)).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                .font(Design.Font.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
+                .padding(.top, Design.Space.xs)
             Button(action: show) {
-                Text("Show Media").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).frame(height: 30)
+                Text("Show Media").font(Design.Font.ui(.detail, .semibold)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: Design.Space.control)
                     .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.accent))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .padding(.top, 14)
             Label("Stays on this Mac. Only you can see it.", systemImage: "lock.fill")
-                .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                .font(Design.Font.ui(.micro)).foregroundStyle(.tertiary)
                 .labelStyle(.titleAndIcon)
                 .padding(.top, 10)
         }
-        .padding(16)
+        .padding(Design.Space.xl)
         .frame(width: width)
-        .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(Color.primary.opacity(0.04)))
-        .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Color.primary.opacity(0.07), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(Design.fill(.subtle)))
+        .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Design.hairline, lineWidth: Design.Space.hair))
         .environment(\.colorScheme, dark ? .dark : .light)
     }
 }

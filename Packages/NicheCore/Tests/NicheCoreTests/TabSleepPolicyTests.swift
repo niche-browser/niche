@@ -42,6 +42,23 @@ struct TabSleepPolicyTests {
         #expect(TabSleepThreshold.allCases.map(\.seconds) == [900, 1800, 3600, 7200, 14400, 28800])
     }
 
+    /// A favorite is an app the user comes back to (Gmail, a calendar): the clock never closes or
+    /// freezes its page, however long it was out of sight. 13 Nov 2026: a Gmail favorite hidden
+    /// 664 min was discarded and took 22 s to come back. A Mac short of memory still may close it.
+    @Test func theClockLeavesFavoritesAwake() {
+        let mail = TabSleepPolicy.Page(id: UUID(), hiddenAt: now.addingTimeInterval(-664 * 60), favorite: true)
+        let old = TabSleepPolicy.Page(id: UUID(), hiddenAt: now.addingTimeInterval(-600 * 60))
+        let p = [TabSleepPolicy.Page(id: visible, hiddenAt: nil), mail, old]
+        #expect(TabSleepPolicy.timer(.fourHours).candidates(p, visible: [visible], protectedRecent: 1, now: now) == [old.id])
+        #expect(TabSleepPolicy.timer(.fifteenMinutes).candidates(p, visible: [visible], now: now) == [old.id])
+        #expect(TabSleepPolicy.memoryPressure(.warning).candidates(p, visible: [visible], now: now) == [mail.id, old.id])
+        // A favorite takes none of the places kept for the tabs used last.
+        #expect(TabSleepPolicy.recentlyShown(p, visible: [visible], count: 2) == [visible, old.id])
+        #expect(TabSleepPolicy.freezes(mail, recent: [], before: now.addingTimeInterval(-30 * 60)) == false)
+        #expect(TabSleepPolicy.freezes(old, recent: [], before: now.addingTimeInterval(-30 * 60)))
+        #expect(TabSleepPolicy.freezes(old, recent: [old.id], before: now.addingTimeInterval(-30 * 60)) == false)
+    }
+
     /// At 4 hours a page hidden 3 h 59 min stays and one hidden 4 h 1 min is a candidate, unless
     /// it is among the 10 tabs used last.
     @Test(.bug("https://github.com/niche-browser/niche/issues/153"), .bug("https://github.com/niche-browser/niche/issues/136")) func fourHoursKeepsTheTenUsedLast() {

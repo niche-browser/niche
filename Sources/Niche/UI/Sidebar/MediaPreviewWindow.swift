@@ -9,6 +9,15 @@ import CoreImage
 /// in Preview" hands it to the Mac's app for it.
 @MainActor
 final class MediaPreviewController {
+    /// The panel's own colours: it lies on the picture, not on the window.
+    fileprivate enum Palette {
+        /// Under the blurred picture until it is drawn, and the wash that lightens it.
+        static let ground = NSColor(white: 0.82, alpha: 1)
+        static let wash = NSColor.white.withAlphaComponent(0.28)
+        /// The header's slate veil.
+        static let header = NSColor(red: 0.18, green: 0.22, blue: 0.26, alpha: 0.42)
+    }
+
     static let shared = MediaPreviewController()
     /// A file was hidden from the preview: the grid reads again.
     static let hidden = Notification.Name("NicheMediaHidden")
@@ -56,7 +65,7 @@ private final class MediaPreviewOverlay: NSWindow {
         isReleasedWhenClosed = false
         animationBehavior = .none
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.45).cgColor
+        root.layer?.backgroundColor = Design.scrim.cgColor
         root.onClickOutside = { [weak self] in self?.close(animated: true) }
         contentView = root
         root.addSubview(panel)
@@ -86,11 +95,11 @@ private final class MediaPreviewOverlay: NSWindow {
             guard let self, !self.closing, e.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return e }
             return self.handle(e) ? nil : e
         }
-        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let reduce = Design.Motion.reduced
         let c = MediaPreview.curve
         let timing = CAMediaTimingFunction(controlPoints: c.0, c.1, c.2, c.3)
         let dim = CABasicAnimation(keyPath: "backgroundColor")
-        dim.fromValue = NSColor.black.withAlphaComponent(0).cgColor
+        dim.fromValue = NSColor.clear.cgColor
         dim.toValue = root.layer?.backgroundColor
         dim.duration = MediaPreview.openDuration
         dim.timingFunction = timing
@@ -149,7 +158,7 @@ private final class MediaPreviewOverlay: NSWindow {
         let c = MediaPreview.curve
         CATransaction.begin()
         CATransaction.setCompletionBlock(finish)
-        let back = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : startTransform()
+        let back = Design.Motion.reduced ? nil : startTransform()
         let shrink = CABasicAnimation(keyPath: "transform")
         shrink.toValue = NSValue(caTransform3D: back ?? CATransform3DMakeScale(0.96, 0.96, 1))
         let fade = CABasicAnimation(keyPath: "opacity")
@@ -162,7 +171,7 @@ private final class MediaPreviewOverlay: NSWindow {
         group.isRemovedOnCompletion = false
         layer.add(group, forKey: "close")
         let undim = CABasicAnimation(keyPath: "backgroundColor")
-        undim.toValue = NSColor.black.withAlphaComponent(0).cgColor
+        undim.toValue = NSColor.clear.cgColor
         undim.duration = MediaPreview.closeDuration
         undim.fillMode = .forwards
         undim.isRemovedOnCompletion = false
@@ -253,19 +262,19 @@ private final class MediaPreviewPanel: NSView {
         layer?.cornerRadius = MediaPreview.cornerRadius
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
-        layer?.backgroundColor = NSColor(white: 0.82, alpha: 1).cgColor
+        layer?.backgroundColor = MediaPreviewController.Palette.ground.cgColor
         backdrop.contentsGravity = .resizeAspectFill
         layer?.addSublayer(backdrop)
-        wash.backgroundColor = NSColor.white.withAlphaComponent(0.28).cgColor
+        wash.backgroundColor = MediaPreviewController.Palette.wash.cgColor
         layer?.addSublayer(wash)
         header.wantsLayer = true
-        header.layer?.backgroundColor = NSColor(red: 0.18, green: 0.22, blue: 0.26, alpha: 0.42).cgColor
+        header.layer?.backgroundColor = MediaPreviewController.Palette.header.cgColor
         addSubview(header)
-        name.font = .systemFont(ofSize: 13, weight: .semibold)
-        name.textColor = NSColor.white.withAlphaComponent(0.92)
+        name.font = Design.Font.ns(.body, .semibold)
+        name.textColor = Design.onDark(.primary)
         name.lineBreakMode = .byTruncatingMiddle
-        age.font = .systemFont(ofSize: 13)
-        age.textColor = NSColor.white.withAlphaComponent(0.55)
+        age.font = Design.Font.ns(.body)
+        age.textColor = Design.onDark(.secondary)
         for v in [closeButton, backButton, forwardButton, name, age, moreButton, openButton] as [NSView] { header.addSubview(v) }
         closeButton.action = { [weak self] _ in self?.onClose() }
         backButton.action = { [weak self] _ in self?.onStep(-1) }
@@ -277,7 +286,7 @@ private final class MediaPreviewPanel: NSView {
         }
         picture.imageScaling = .scaleProportionallyUpOrDown
         picture.wantsLayer = true
-        picture.layer?.cornerRadius = 4
+        picture.layer?.cornerRadius = Design.Radius.small
         picture.layer?.masksToBounds = true
         addSubview(picture)
     }
@@ -301,7 +310,7 @@ private final class MediaPreviewPanel: NSView {
             v.controlsStyle = .floating
             v.player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
             v.wantsLayer = true
-            v.layer?.cornerRadius = 4
+            v.layer?.cornerRadius = Design.Radius.small
             v.layer?.masksToBounds = true
             addSubview(v)
             player = v
@@ -381,7 +390,7 @@ private final class MediaPreviewPanel: NSView {
 /// A header control: a glyph (✕ ‹ › ⋯) or a filled button with a title and a trailing glyph.
 private final class HeaderButton: NSView {
     var action: (HeaderButton) -> Void = { _ in }
-    var isEnabled = true { didSet { alphaValue = isEnabled ? 1 : 0.35 } }
+    var isEnabled = true { didSet { alphaValue = isEnabled ? 1 : Design.Opacity.disabled } }
     private let glyph = NSImageView()
     private let text = NSTextField(labelWithString: "")
     private let filled: Bool
@@ -391,15 +400,15 @@ private final class HeaderButton: NSView {
         self.filled = filled
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = Design.Radius.row
         layer?.cornerCurve = .continuous
         glyph.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
-            .withSymbolConfiguration(.init(pointSize: title == nil ? 15 : 13, weight: .semibold))
-        glyph.contentTintColor = NSColor.white.withAlphaComponent(0.9)
+            .withSymbolConfiguration(Design.Icon.configuration(title == nil ? Design.Icon.bar : Design.Icon.regular, weight: .semibold))
+        glyph.contentTintColor = Design.onDark(.primary)
         addSubview(glyph)
         if let title { setTitle(title) }
-        text.font = .systemFont(ofSize: 13, weight: .semibold)
-        text.textColor = NSColor.white.withAlphaComponent(0.9)
+        text.font = Design.Font.ns(.body, .semibold)
+        text.textColor = Design.onDark(.primary)
         addSubview(text)
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -419,8 +428,9 @@ private final class HeaderButton: NSView {
     var fittingWidth: CGFloat { text.stringValue.isEmpty ? 36 : ceil(text.intrinsicContentSize.width) + 12 + 6 + 14 + 10 }
 
     private func refresh() {
-        let base: CGFloat = filled ? 0.14 : 0
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(base + (hovering && isEnabled ? 0.1 : 0)).cgColor
+        let hot = hovering && isEnabled
+        let fill: NSColor = filled ? Design.fillOnDark(hot ? .strong : .pressed) : (hot ? Design.fillOnDark(.selected) : .clear)
+        layer?.backgroundColor = fill.cgColor
     }
 
     override func layout() {

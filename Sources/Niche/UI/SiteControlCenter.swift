@@ -31,7 +31,13 @@ enum SiteControlCenterMetrics {
     static let width: CGFloat = 236
     static let inset: CGFloat = 10
     static let tile = CGSize(width: 48, height: 32)
-    static let gap: CGFloat = 8
+    static let gap: CGFloat = Design.Space.m
+    /// A setting's circle and the footer's controls.
+    static let control: CGFloat = 32
+    /// The pin inside the 14 pt badge.
+    static let pinGlyph: CGFloat = 8
+    /// How much a fill brightens under the pointer (SwiftUI's .brightness(0.04)).
+    static let hoverLift: CGFloat = 0.04
 }
 
 /// The popover's content: built in one pass from the store and the extension list, and built
@@ -153,7 +159,7 @@ final class SiteControlCenterView: NSView {
                 return tile
             }
             let add = SiteTile(colors: colors, help: "Add Extension", action: actions.addExtension)
-            add.setGlyph(SidebarSymbols.image("plus", size: 14, weight: .medium), tint: colors.text)
+            add.setGlyph(Design.Icon.symbol("plus", size: Design.Icon.bar), tint: colors.text)
             tiles.append(add)
             for (i, t) in tiles.enumerated() {
                 t.frame = NSRect(x: CGFloat(i % 4) * (M.tile.width + M.gap), y: 27 + CGFloat(i / 4) * (M.tile.height + M.gap),
@@ -219,30 +225,62 @@ final class SiteControlCenterView: NSView {
 /// `dark` is macOS's appearance, not the space's: like Arc's menus, the popover follows the Mac (#171).
 struct SiteControlCenterColors {
     let dark: Bool
-    var background: NSColor { dark ? NSColor(hex: "#272728") : NSColor(hex: "#F4F4F5") }
-    var tile: NSColor { dark ? .white.withAlphaComponent(0.07) : .black.withAlphaComponent(0.05) }
-    var tileHover: NSColor { dark ? .white.withAlphaComponent(0.09) : .black.withAlphaComponent(0.08) }
-    var text: NSColor { dark ? NSColor(hex: "#DCDCDC") : NSColor(hex: "#232325") }
-    var header: NSColor { dark ? NSColor(hex: "#D4D4D5") : NSColor(hex: "#2A2A2C") }
-    var secondary: NSColor { dark ? NSColor(hex: "#979798") : NSColor(hex: "#6E6E73") }
-    var divider: NSColor { dark ? .white.withAlphaComponent(0.1) : .black.withAlphaComponent(0.1) }
-    var footerFill: NSColor { dark ? NSColor(hex: "#363536") : .black.withAlphaComponent(0.05) }
-    var moreFill: NSColor { dark ? NSColor(hex: "#403F40") : .black.withAlphaComponent(0.08) }
+    /// One colour for a light Mac and one for a dark one.
+    private typealias Pair = (light: NSColor, dark: NSColor)
+    private func pick(_ pair: Pair) -> NSColor { dark ? pair.dark : pair.light }
+    private enum Tone {
+        static let background: Pair = (NSColor(hex: "#F4F4F5"), NSColor(hex: "#272728"))
+        static let text: Pair = (NSColor(hex: "#232325"), NSColor(hex: "#DCDCDC"))
+        static let header: Pair = (NSColor(hex: "#2A2A2C"), NSColor(hex: "#D4D4D5"))
+        static let secondary: Pair = (NSColor(hex: "#6E6E73"), NSColor(hex: "#979798"))
+        static let footerFill: Pair = (Design.barFill(.subtle, onLight: true), NSColor(hex: "#363536"))
+        static let moreFill: Pair = (Design.barFill(.hover, onLight: true), NSColor(hex: "#403F40"))
+        static let accent: Pair = (NSColor(hex: "#232325"), NSColor(hex: "#F0F1FE"))
+        static let inactive: Pair = (NSColor(hex: "#C7C7CC"), NSColor(hex: "#6A6A6F"))
+        static let pinHover: Pair = (NSColor(hex: "#8E8E93"), NSColor(hex: "#7F7E85"))
+        static let glyphOnAccent: Pair = (.white, NSColor(hex: "#232325"))
+        static let glyphOnInactive: Pair = (NSColor(hex: "#3A3A3C"), NSColor(hex: "#232325"))
+        /// The action button's gradient, top then bottom, at rest and under the pointer.
+        static let actionLight = [NSColor(hex: "#FDFDFD"), NSColor(hex: "#EDEDED")]
+        static let actionLightHover = [NSColor(hex: "#FFFFFF"), NSColor(hex: "#F2F2F2")]
+        static let actionDark = [NSColor(hex: "#363636"), NSColor(hex: "#212121")]
+        static let actionDarkHover = [NSColor(hex: "#3C3C3C"), NSColor(hex: "#272727")]
+        static let actionHighlight: Pair = (.white, NSColor(hex: "#69696A"))
+        static let actionOutline: Pair = (Design.barFill(.pressed, onLight: true), NSColor(hex: "#141115"))
+    }
+
+    var background: NSColor { pick(Tone.background) }
+    var tile: NSColor { Design.barFill(.subtle, onLight: !dark) }
+    var tileHover: NSColor { Design.barFill(.hover, onLight: !dark) }
+    var text: NSColor { pick(Tone.text) }
+    var header: NSColor { pick(Tone.header) }
+    var secondary: NSColor { pick(Tone.secondary) }
+    var divider: NSColor { Design.barFill(.hover, onLight: !dark) }
+    var footerFill: NSColor { pick(Tone.footerFill) }
+    var moreFill: NSColor { pick(Tone.moreFill) }
     /// Pinned badge and active setting circles.
     /// Light themes invert Arc's dark-theme pair: a near-white badge vanishes on light tiles.
-    var accent: NSColor { dark ? NSColor(hex: "#F0F1FE") : NSColor(hex: "#232325") }
-    var inactive: NSColor { dark ? NSColor(hex: "#6A6A6F") : NSColor(hex: "#C7C7CC") }
-    var pinHover: NSColor { dark ? NSColor(hex: "#7F7E85") : NSColor(hex: "#8E8E93") }
-    var glyphOnAccent: NSColor { dark ? NSColor(hex: "#232325") : .white }
-    var glyphOnInactive: NSColor { dark ? NSColor(hex: "#232325") : NSColor(hex: "#3A3A3C") }
+    var accent: NSColor { pick(Tone.accent) }
+    var inactive: NSColor { pick(Tone.inactive) }
+    var pinHover: NSColor { pick(Tone.pinHover) }
+    var glyphOnAccent: NSColor { pick(Tone.glyphOnAccent) }
+    var glyphOnInactive: NSColor { pick(Tone.glyphOnInactive) }
     /// The pin glyph: cut out of the badge in the panel colour (dark), white on light themes.
     var pinGlyph: NSColor { dark ? background : .white }
     func actionFill(hovered: Bool) -> [NSColor] {
-        dark ? [NSColor(hex: hovered ? "#3C3C3C" : "#363636"), NSColor(hex: hovered ? "#272727" : "#212121")]
-             : [NSColor(hex: hovered ? "#FFFFFF" : "#FDFDFD"), NSColor(hex: hovered ? "#F2F2F2" : "#EDEDED")]
+        dark ? (hovered ? Tone.actionDarkHover : Tone.actionDark) : (hovered ? Tone.actionLightHover : Tone.actionLight)
     }
-    var actionHighlight: NSColor { dark ? NSColor(hex: "#69696A") : .white }
-    var actionOutline: NSColor { dark ? NSColor(hex: "#141115") : .black.withAlphaComponent(0.14) }
+    var actionHighlight: NSColor { pick(Tone.actionHighlight) }
+    /// Where the highlight's gradient ends.
+    var actionHighlightClear: NSColor { actionHighlight.withAlphaComponent(Design.Opacity.hidden) }
+    var actionOutline: NSColor { pick(Tone.actionOutline) }
+    /// `fill` under the pointer: SwiftUI's .brightness(0.04).
+    func brightened(_ fill: NSColor) -> NSColor {
+        let c = fill.usingColorSpace(.sRGB) ?? fill
+        let lift = SiteControlCenterMetrics.hoverLift
+        return NSColor(RGB(Double(min(1, c.redComponent + lift)), Double(min(1, c.greenComponent + lift)), Double(min(1, c.blueComponent + lift))),
+                       alpha: c.alphaComponent)
+    }
 }
 
 /// A view that tracks the pointer and acts on release, the base of the popover's controls.
@@ -283,14 +321,14 @@ private final class SiteSectionView: SiteHoverView {
     init(title: String, hoverText: String?, colors: SiteControlCenterColors, onHeaderClick: @escaping () -> Void) {
         self.onHeaderClick = onHeaderClick
         manage = hoverText.map { t in
-            let l = NSTextField.sidebarLabel(size: 12, weight: .semibold)
+            let l = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue, weight: .semibold)
             l.stringValue = t
             l.textColor = colors.secondary
             l.alignment = .right
             return l
         }
         super.init(frame: .zero)
-        let label = NSTextField.sidebarLabel(size: 14, weight: .bold)
+        let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .bold)
         label.stringValue = title
         label.textColor = colors.header
         label.frame = NSRect(x: -SidebarText.inset, y: 0, width: 200, height: 17)
@@ -325,7 +363,7 @@ private class SiteTile: SiteHoverView {
         super.init(frame: .zero)
         onClick = action
         wantsLayer = true
-        layer?.cornerRadius = 7
+        layer?.cornerRadius = Design.Radius.inset
         layer?.cornerCurve = .continuous
         glyph.imageScaling = .scaleProportionallyDown
         addSubview(glyph)
@@ -400,7 +438,7 @@ private final class SiteExtensionTile: SiteTile {
         if let icon {
             setGlyph(icon, tint: nil, size: 16)
         } else {
-            setGlyph(SidebarSymbols.image("puzzlepiece.extension.fill", size: 13), tint: colors.secondary)
+            setGlyph(Design.Icon.symbol("puzzlepiece.extension.fill", size: Design.Icon.regular), tint: colors.secondary)
         }
     }
 
@@ -415,7 +453,7 @@ private final class SiteExtensionTile: SiteTile {
             edge.lineWidth = 1
             edge.stroke()
             guard let pin = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: 8, weight: .bold).applying(.init(paletteColors: [glyph]))) else { return true }
+                .withSymbolConfiguration(Design.Icon.configuration(SiteControlCenterMetrics.pinGlyph, weight: .bold).applying(.init(paletteColors: [glyph]))) else { return true }
             let t = NSAffineTransform()
             t.translateX(by: r.midX, yBy: r.midY)
             t.rotate(byDegrees: -45)
@@ -450,11 +488,11 @@ private final class SiteActionButton: SiteHoverView {
         super.init(frame: .zero)
         onClick = action
         wantsLayer = true
-        fill.cornerRadius = 7
+        fill.cornerRadius = Design.Radius.inset
         fill.cornerCurve = .continuous
         fill.masksToBounds = true
         layer?.addSublayer(fill)
-        highlight.colors = [colors.actionHighlight.cgColor, colors.actionHighlight.withAlphaComponent(0).cgColor]
+        highlight.colors = [colors.actionHighlight.cgColor, colors.actionHighlightClear.cgColor]
         highlight.locations = [0, 1]
         highlightMask.fillColor = nil
         highlightMask.strokeColor = NSColor.black.cgColor
@@ -465,7 +503,7 @@ private final class SiteActionButton: SiteHoverView {
         outline.strokeColor = colors.actionOutline.cgColor
         outline.lineWidth = 0.5
         layer?.addSublayer(outline)
-        glyph.image = SidebarSymbols.image(symbol, size: 15)
+        glyph.image = Design.Icon.symbol(symbol, size: Design.Icon.bar)
         glyph.contentTintColor = colors.text
         glyph.imageScaling = .scaleNone
         addSubview(glyph)
@@ -496,8 +534,8 @@ private final class SiteActionButton: SiteHoverView {
         highlight.frame = bounds
         highlight.startPoint = CGPoint(x: 0.5, y: 0)
         highlight.endPoint = CGPoint(x: 0.5, y: 0.5)
-        highlightMask.path = CGPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: 6.5, cornerHeight: 6.5, transform: nil)
-        outline.path = CGPath(roundedRect: bounds, cornerWidth: 7, cornerHeight: 7, transform: nil)
+        highlightMask.path = CGPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: Design.Radius.inset - 0.5, cornerHeight: Design.Radius.inset - 0.5, transform: nil)
+        outline.path = CGPath(roundedRect: bounds, cornerWidth: Design.Radius.inset, cornerHeight: Design.Radius.inset, transform: nil)
         CATransaction.commit()
         glyph.frame = bounds
     }
@@ -510,21 +548,21 @@ private final class SiteSettingRow: SiteHoverView {
         wantsLayer = true
         let circle = NSView(frame: NSRect(x: 0, y: 0.5, width: 32, height: 32))
         circle.wantsLayer = true
-        circle.layer?.cornerRadius = 16
+        circle.layer?.cornerRadius = Design.Radius.pill(SiteControlCenterMetrics.control)
         circle.layer?.backgroundColor = (active ? colors.accent : colors.inactive).cgColor
         let glyph = NSImageView(frame: circle.bounds)
-        glyph.image = SidebarSymbols.image(symbol, size: 13, weight: .semibold)
+        glyph.image = Design.Icon.symbol(symbol, size: Design.Icon.regular, weight: .semibold)
         glyph.contentTintColor = active ? colors.glyphOnAccent : colors.glyphOnInactive
         glyph.imageScaling = .scaleNone
         circle.addSubview(glyph)
         addSubview(circle)
         // VStack(spacing: 0) of 17 + 16, 8 pt after the circle and 8 pt before the Spacer.
-        let t = NSTextField.sidebarLabel(size: 14, weight: .semibold)
+        let t = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
         t.stringValue = title
         t.textColor = colors.text
         t.frame = NSRect(x: 40 - SidebarText.inset, y: 0, width: 160 + 2 * SidebarText.inset, height: 17)
         addSubview(t)
-        let s = NSTextField.sidebarLabel(size: 13)
+        let s = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue)
         s.stringValue = subtitle
         s.textColor = colors.secondary
         s.frame = NSRect(x: 40 - SidebarText.inset, y: 17, width: 160 + 2 * SidebarText.inset, height: 16)
@@ -544,14 +582,14 @@ private final class SiteSettingRow: SiteHoverView {
 private final class SiteProtectedMediaCard: NSView {
     init(service: String, width: CGFloat, colors: SiteControlCenterColors, learnMore: @escaping () -> Void) {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 10))
-        let header = NSTextField.sidebarLabel(size: 14, weight: .bold)
+        let header = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .bold)
         header.stringValue = "Protected Media"
         header.textColor = colors.header
         header.frame = NSRect(x: -SidebarText.inset, y: 0, width: width + SidebarText.inset, height: 17)
         addSubview(header)
         var y: CGFloat = 25
         let body = NSTextField(wrappingLabelWithString: "\(service) plays with Safari’s engine, which has the DRM it needs. Here, that means:")
-        body.font = .systemFont(ofSize: 13)
+        body.font = Design.Font.ns(.body)
         body.textColor = colors.text
         body.isSelectable = false
         body.preferredMaxLayoutWidth = width
@@ -562,13 +600,13 @@ private final class SiteProtectedMediaCard: NSView {
         for (symbol, text) in [("person.crop.circle", "You sign in here once"), ("puzzlepiece.extension", "Extensions don’t run here"),
                                ("hammer", "Web Inspector instead of DevTools")] {
             let glyph = NSImageView(frame: NSRect(x: 0, y: y, width: 18, height: 18))
-            glyph.image = SidebarSymbols.image(symbol, size: 13, weight: .medium)
+            glyph.image = Design.Icon.symbol(symbol, size: Design.Icon.regular)
             glyph.contentTintColor = colors.secondary
             glyph.imageScaling = .scaleNone
             addSubview(glyph)
             // Wraps rather than truncates: the popover is narrow (236 pt) and the facts must read whole.
             let label = NSTextField(wrappingLabelWithString: text)
-            label.font = .systemFont(ofSize: 13)
+            label.font = Design.Font.ns(.body)
             label.textColor = colors.text
             label.isSelectable = false
             let textW = width - 26
@@ -594,7 +632,7 @@ private final class SiteProtectedMediaCard: NSView {
 
 /// "Learn more": secondary text that turns the text colour under the pointer.
 private final class SiteLinkLabel: SiteHoverView {
-    private let label = NSTextField.sidebarLabel(size: 13, weight: .semibold)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
     private let colors: SiteControlCenterColors
 
     init(text: String, colors: SiteControlCenterColors, action: @escaping () -> Void) {
@@ -629,14 +667,14 @@ private final class SiteSecurityPill: SiteHoverView {
         super.init(frame: .zero)
         if let action { onClick = action }
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = Design.Radius.row
         layer?.cornerCurve = .continuous
         layer?.backgroundColor = colors.footerFill.cgColor
         let lock = NSImageView()
-        lock.image = SidebarSymbols.image(secure ? "lock.fill" : "lock.open.fill", size: 12, weight: .semibold)
+        lock.image = Design.Icon.symbol(secure ? "lock.fill" : "lock.open.fill", size: Design.Icon.small, weight: .semibold)
         lock.contentTintColor = colors.text
         lock.imageScaling = .scaleNone
-        let label = NSTextField.sidebarLabel(size: 14, weight: .semibold)
+        let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
         label.stringValue = secure ? "Secure" : "Not Secure"
         label.textColor = colors.text
         let lw = lock.image?.size.width ?? 10
@@ -657,8 +695,7 @@ private final class SiteSecurityPill: SiteHoverView {
     override func refresh() {
         // The More button's hover: SwiftUI's .brightness(0.04).
         let c = colors.footerFill.usingColorSpace(.sRGB) ?? colors.footerFill
-        layer?.backgroundColor = (hovered && clickable ? NSColor(srgbRed: min(1, c.redComponent + 0.04), green: min(1, c.greenComponent + 0.04),
-                                                                  blue: min(1, c.blueComponent + 0.04), alpha: c.alphaComponent) : c).cgColor
+        layer?.backgroundColor = (hovered && clickable ? colors.brightened(c) : c).cgColor
     }
 }
 
@@ -670,9 +707,9 @@ private final class SiteMoreButton: SiteHoverView {
         self.colors = colors
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 16
+        layer?.cornerRadius = Design.Radius.pill(SiteControlCenterMetrics.control)
         let glyph = NSImageView(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
-        glyph.image = SidebarSymbols.image("ellipsis", size: 13, weight: .bold)
+        glyph.image = Design.Icon.symbol("ellipsis", size: Design.Icon.regular, weight: .bold)
         glyph.contentTintColor = colors.text
         glyph.imageScaling = .scaleNone
         addSubview(glyph)
@@ -699,8 +736,7 @@ private final class SiteMoreButton: SiteHoverView {
     override func refresh() {
         // SwiftUI's .brightness(0.04) on hover.
         let c = colors.moreFill.usingColorSpace(.sRGB) ?? colors.moreFill
-        layer?.backgroundColor = (hovered ? NSColor(srgbRed: min(1, c.redComponent + 0.04), green: min(1, c.greenComponent + 0.04),
-                                                    blue: min(1, c.blueComponent + 0.04), alpha: c.alphaComponent) : c).cgColor
+        layer?.backgroundColor = (hovered ? colors.brightened(c) : c).cgColor
     }
 }
 
