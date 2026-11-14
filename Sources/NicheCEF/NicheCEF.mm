@@ -36,6 +36,7 @@
 #include "include/cef_urlrequest.h"
 #include "include/cef_version.h"
 #include "NicheContentBlocker.h"
+#include "NicheProtocolPolicy.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -1156,8 +1157,7 @@ public:
     void OnProtocolExecution(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
                              bool& allow_os_execution) override {
         // niche:// is Niche's own scripting scheme; a page must not drive it.
-        std::string url = request->GetURL().ToString();
-        allow_os_execution = url.compare(0, 4, "niche:") != 0;
+        allow_os_execution = niche_protocol::AllowsOSExecution(request->GetURL().ToString());
     }
 
 private:
@@ -1375,11 +1375,16 @@ public:
         RunPageScript(frame, "",
             // What the page paints along its top edge comes first, so the bar and the page read as
             // one surface: YouTube's theme-color is #212121 over a #0F0F0F page, a seam under the bar.
-            // The first opaque background under a point 2 px down the middle; a page with nothing
-            // there (a hero image, a transparent header) falls back to its theme-color, then its body.
+            // The first opaque background colour under a point 2 px down the middle. A gradient or
+            // a picture painted there is skipped for the colour it sits on, its own element's or one
+            // below (amsterdam-dance-event.nl: a yellow glow over a black section over a grey body is
+            // black). The body and the root come last whatever their place in that list: their colour
+            // is the canvas behind everything, and a section stacked below the body's own box still
+            // paints over it. A page with nothing there falls back to its theme-color, then its body.
             "(function(send){function probe(){try{var c='';"
             "try{var es=document.elementsFromPoint(Math.max(1,innerWidth/2),2);for(var k=0;k<es.length&&!c;k++){"
-            "var t=getComputedStyle(es[k]);var bc=t.backgroundColor;if(t.backgroundImage&&t.backgroundImage!=='none'){break;}"
+            "if(es[k]===document.body||es[k]===document.documentElement)continue;"
+            "var t=getComputedStyle(es[k]);var bc=t.backgroundColor;"
             "if(bc&&bc.indexOf('rgb')===0&&bc!=='rgba(0, 0, 0, 0)'){var parts=bc.split(',');if(parts.length<4||parseFloat(parts[3])>0.5){c=bc;}}}}catch(e){}"
             "var ms=c?[]:document.querySelectorAll('meta[name=\"theme-color\"]');"
             "for(var i=0;i<ms.length;i++){if(!ms[i].getAttribute('media')){c=ms[i].getAttribute('content')||'';if(c)break;}}"

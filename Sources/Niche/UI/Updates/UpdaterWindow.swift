@@ -4,7 +4,7 @@ import SwiftUI
 /// Arc's UpdaterWindowController: a small window without a title that opens for Check for
 /// Updates… Measured on Arc 1.170 in its up-to-date state (window capture and AX tree, 26 Oct):
 /// 270 × 342, window background, the app icon 64 pt in an 84 pt frame at y 53, the name in
-/// 24 pt bold (frame y 147, 30 tall), the version 11 pt (y 175) and the status line 13 pt
+/// 20 pt bold (Arc's is 24 pt; frame y 147, 30 tall), the version 11 pt (y 175) and the status line 13 pt
 /// (y 209) in white 50%, and one 170 × 48 button at y 256, 38 above the bottom, radius 6
 /// (continuous, fitted to the corner's anti-aliasing), filled with UpdaterButtonBackgroundColor
 /// (white, black in dark mode), with a 13 pt bold label. The other states never showed on this
@@ -53,14 +53,14 @@ struct UpdaterWindowView: View {
                 .padding(10)
                 .padding(.top, 53)
             Text(title)
-                .font(.system(size: 24, weight: .bold))
+                .font(Design.Font.ui(.pane, .bold))
                 .frame(height: 30)
                 .padding(.top, 10)
             Text(subtitle)
-                .font(.system(size: 11))
+                .font(Design.Font.caption)
                 .foregroundStyle(Color(nsColor: .updaterSecondary))
                 .frame(height: 16)
-                .padding(.top, -2)
+                .padding(.top, -Design.Space.xxs)
             content
         }
         .frame(width: 270)
@@ -117,7 +117,7 @@ struct UpdaterWindowView: View {
 
     private func status(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 13))
+            .font(Design.Font.body)
             .foregroundStyle(Color(nsColor: .updaterSecondary))
             .multilineTextAlignment(.center)
             .frame(width: 208)
@@ -128,10 +128,10 @@ struct UpdaterWindowView: View {
     }
 
     private func progress(_ value: Double?, _ label: String) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Design.Space.s) {
             // Each step glides into the next instead of snapping.
-            if let value { ProgressView(value: value).animation(.linear(duration: 0.25), value: value) } else { ProgressView().progressViewStyle(.linear) }
-            Text(label).font(.system(size: 11).monospacedDigit()).foregroundStyle(Color(nsColor: .updaterSecondary))
+            if let value { ProgressView(value: value).animation(.linear(duration: Design.Motion.standard), value: value) } else { ProgressView().progressViewStyle(.linear) }
+            Text(label).font(Design.Font.caption.monospacedDigit()).foregroundStyle(Color(nsColor: .updaterSecondary))
                 .contentTransition(.identity)
         }
         .controlSize(.small)
@@ -161,12 +161,13 @@ private struct UpdaterButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
 
     func makeBody(configuration: Configuration) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous)
         configuration.label
-            .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(.primary.opacity(enabled ? 0.94 : 0.4))
+            .font(Design.Font.ui(.body, .bold))
+            .foregroundStyle(Design.inkColor(.primary).opacity(enabled ? 1 : Design.Opacity.disabled))
             .frame(width: 170, height: 48)
-            .background(shape.fill(Color(nsColor: .updaterButton)).shadow(color: .black.opacity(0.1), radius: 5))
+            .background(shape.fill(Color(nsColor: .updaterButton))
+                .shadow(color: Color(nsColor: Design.Shadow.cardColor), radius: Design.Shadow.cardRadius, y: Design.Shadow.cardOffset))
             .contentShape(shape)
             .opacity(configuration.isPressed ? 0.75 : 1)
     }
@@ -180,11 +181,11 @@ private struct LaterButton: View {
     var body: some View {
         Button(title, action: action)
             .buttonStyle(.plain)
-            .font(.system(size: 13))
+            .font(Design.Font.body)
             .foregroundStyle(Color(nsColor: .updaterSecondary))
             .keyboardShortcut(.cancelAction)
-            .padding(.top, 12)
-            .padding(.bottom, -12)
+            .padding(.top, Design.Space.l)
+            .padding(.bottom, -Design.Space.l)
     }
 }
 
@@ -201,7 +202,7 @@ private struct ReleaseNotesView: View {
                 .padding(10)
         }
         .frame(width: 230, height: 150)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.fill(.subtle)))
     }
 
     private static func render(_ html: String) -> AttributedString {
@@ -225,9 +226,7 @@ private struct ReleaseNotesView: View {
 private extension NSColor {
     /// The version and status lines: white 50% in dark mode (Arc measures 0.50, a touch under
     /// secondaryLabelColor's 0.55).
-    static let updaterSecondary = NSColor(name: nil) { appearance in
-        NSColor(white: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 1 : 0, alpha: 0.5)
-    }
+    static let updaterSecondary = NSColor.dynamic(light: NSColor(white: 0, alpha: 0.5), dark: NSColor(white: 1, alpha: 0.5))
     static let updaterButton = NSColor(name: "UpdaterButtonBackgroundColor") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .black : .white
     }

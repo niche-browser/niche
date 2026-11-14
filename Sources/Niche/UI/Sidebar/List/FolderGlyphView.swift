@@ -47,15 +47,18 @@ final class FolderGlyphView: NSView {
     private let dots = CAShapeLayer()
     private var expanded = false
 
+    /// Where the shades end: black at 0.36 across the back panel, 0.15 across the front (Arc).
+    private static let backShadeEnd = NSColor.black.withAlphaComponent(0.36)
+    private static let frontShadeEnd = NSColor.black.withAlphaComponent(0.15)
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        // Arc: black from clear to 0.36 across the back, to 0.15 across the front.
-        backShade.colors = [NSColor.black.withAlphaComponent(0).cgColor, NSColor.black.withAlphaComponent(0.36).cgColor]
+        backShade.colors = [NSColor.clear.cgColor, Self.backShadeEnd.cgColor]
         backShade.startPoint = CGPoint(x: 0, y: 0)
         backShade.endPoint = CGPoint(x: 0.6, y: 1)
         backShade.mask = backShadeMask
-        frontShade.colors = [NSColor.black.withAlphaComponent(0).cgColor, NSColor.black.withAlphaComponent(0.15).cgColor]
+        frontShade.colors = [NSColor.clear.cgColor, Self.frontShadeEnd.cgColor]
         frontShade.startPoint = CGPoint(x: 0.1, y: 0)
         frontShade.endPoint = CGPoint(x: 0.9, y: 1)
         frontShade.mask = frontShadeMask

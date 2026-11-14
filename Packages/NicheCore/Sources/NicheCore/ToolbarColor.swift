@@ -9,4 +9,11 @@ public enum ToolbarColor {
     public static func hex(reported: String?, remembered: String?) -> String? {
         [reported, remembered].lazy.compactMap { $0 }.first { HexColor.components($0) != nil }
     }
+
+    /// The same, then the ground the page has drawn so far (its body or root colour, known while
+    /// it still loads): the bar is the page's colour before there is a top edge to read. Nil is
+    /// the canvas a page starts on.
+    public static func hex(reported: String?, remembered: String?, ground: String?) -> String? {
+        hex(reported: reported, remembered: remembered) ?? ground.flatMap { HexColor.components($0) != nil ? $0 : nil }
+    }
 }

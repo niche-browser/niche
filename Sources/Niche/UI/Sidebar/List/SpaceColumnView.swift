@@ -1,6 +1,18 @@
 import AppKit
 import SwiftUI
 
+/// Colours of the favorites that are their own thing, not an ink or a plate.
+private enum Palette {
+    /// The empty Favorites card on a light theme: a white wash over the space's colour, stronger
+    /// while a tab is dragged over it.
+    static let emptyCardOnLight = NSColor.white.withAlphaComponent(0.16)
+    static let emptyCardOnLightTargeted = NSColor.white.withAlphaComponent(0.32)
+    /// The open favorite's tile on a light theme: a white highlight over the space's colour.
+    static let selectedTileOnLight = NSColor.white.withAlphaComponent(0.38)
+    /// A dragged favorite's card: white at about two thirds over the sidebar (Arc 1.171, 4 Nov).
+    static let dragCard = NSColor.white.withAlphaComponent(0.67)
+}
+
 /// One space's page in the pager: Arc's favorites grid and space header, fixed, over the
 /// space's tab list, which scrolls (Arc 1.170). All AppKit: a space switch or swipe moves this
 /// view's layer and nothing in it lays out or re-renders.
@@ -42,7 +54,7 @@ final class SpaceColumnView: NSView {
     private func relayout(animated: Bool) {
         guard animated, window != nil else { needsLayout = true; return }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
+            ctx.duration = Design.Motion.duration(Design.Motion.fast)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             ctx.allowsImplicitAnimation = true
             place(animated: true)
@@ -111,27 +123,27 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
     private let store: SidebarStore
     private let ui: SidebarUIState
     private let actions: SidebarActions
-    private let emoji = NSTextField.sidebarLabel(size: 14)
-    private let title = NSTextField.sidebarLabel(size: 13, weight: .semibold)
+    private let emoji = NSTextField.sidebarLabel(size: Design.Icon.bar)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
     /// An Icon-tab glyph in the emoji's place.
     private let symbol = NSImageView()
     private let chevron = NSImageView()
     /// Holds the chevron at a fixed 20 pt frame, so it turns about its own centre while layout
     /// moves the box.
     private let chevronBox = NSView()
-    private lazy var more = SidebarGlyphButton(symbol: "ellipsis", size: 24, height: 24, iconSize: 13, weight: .semibold, help: "", colors: colors) { [weak self] in
+    private lazy var more = SidebarGlyphButton(symbol: "ellipsis", size: 24, height: 24, iconSize: Design.Icon.regular, help: "", colors: colors) { [weak self] in
         self?.showMenu(NSApp.currentEvent)
     }
     /// Rename Space…: the name turns into a field and the ••• into Arc's "Done".
-    private let done = NSTextField.sidebarLabel(size: 10, weight: .semibold)
+    private let done = NSTextField.sidebarLabel(size: Design.TextSize.micro.rawValue, weight: .semibold)
     private var renameField: NSTextField?
     /// A Blank Window's header (Arc 1.172, #220): "This Window" with no icon or chevron, and
     /// "Move to…" at its end while the pointer is over the sidebar, which sends the window's tabs
     /// to a space.
     private var blank = false
-    private let moveTo = NSTextField.sidebarLabel(size: 11, weight: .medium)
-    /// Arc's pressed "Move to…": a pill behind it while its menu is open (white 10 % over the dark
-    /// sidebar, 27.5 pt tall, 11 pt before the text and 12.5 pt after it).
+    private let moveTo = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue, weight: .medium)
+    /// Arc's pressed "Move to…": a pill behind it while its menu is open (the selected plate over
+    /// the dark sidebar, 27.5 pt tall, 11 pt before the text and 12.5 pt after it).
     private let moveToPill = NSView()
     private var columnHovering = false { didSet { if columnHovering != oldValue { refresh() } } }
     private var hovering = false { didSet { if hovering != oldValue { refresh() } } }
@@ -154,10 +166,10 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
         self.actions = actions
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = Design.Radius.card
         layer?.cornerCurve = .continuous
-        // Pixel-fitted to Arc's 2x capture (chevron.down 12.5 bold, ellipsis 13 semibold; #57).
-        chevron.image = SidebarSymbols.image("chevron.down", size: 12.5, weight: .bold)
+        // The chevron and the ••• are a row's glyphs, at the bar's weight.
+        chevron.image = SidebarSymbols.image("chevron.down", size: Design.Icon.regular)
         chevron.imageScaling = .scaleNone
         chevron.wantsLayer = true
         chevron.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
@@ -168,7 +180,7 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
         moveTo.stringValue = "Move to…"
         moveTo.isHidden = true
         moveToPill.wantsLayer = true
-        moveToPill.layer?.cornerRadius = 8
+        moveToPill.layer?.cornerRadius = Design.Radius.row
         moveToPill.layer?.cornerCurve = .continuous
         moveToPill.isHidden = true
         for v in [emoji, symbol, title, chevronBox, more, done, moveToPill, moveTo] { addSubview(v) }
@@ -202,7 +214,7 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
         withObservationTracking {
             guard let space = store.space(spaceID) else { return }
             emoji.stringValue = space.emoji
-            let picture = space.symbol.map { SpaceIconCatalog.image($0, size: 13) }
+            let picture = space.symbol.map { SpaceIconCatalog.image($0, size: Design.Icon.regular) }
             symbol.image = picture?.image
             symbolColored = picture?.colored ?? false
             newSymbol = space.symbol
@@ -234,8 +246,8 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
 
     private func refresh() {
         let lit = hovering || menuOpen || renameField != nil
-        // The space's name leads its column: near the primary ink, a step under the selected tab.
-        title.textColor = colors.isDark ? NSColor.white.withAlphaComponent(0.8) : colors.textPrimary.withAlphaComponent(0.85)
+        // The space's name leads its column, in the primary ink.
+        title.textColor = colors.ink(.primary)
         done.textColor = colors.textTertiary
         chevron.contentTintColor = colors.textSecondary
         more.tint = colors.textSecondary
@@ -252,15 +264,15 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
         moveTo.textColor = colors.textTertiary
         moveTo.isHidden = !blank || !(columnHovering || hovering || menuOpen)
         moveToPill.isHidden = !blank || !menuOpen
-        moveToPill.layer?.backgroundColor = (colors.isDark ? NSColor.white.withAlphaComponent(0.1) : colors.hoverFill).cgColor
+        moveToPill.layer?.backgroundColor = (colors.isDark ? colors.plate(.selected) : colors.hoverFill).cgColor
         if blank {
             chevron.alphaValue = 0
             layer?.backgroundColor = .clear
             needsLayout = true
             return
         }
-        // Arc's dark header fill is white 0.10, a little lighter than its rows' (1 Nov).
-        let fill = colors.isDark ? NSColor.white.withAlphaComponent(0.1) : colors.hoverFill
+        // Arc's dark header fill is a little lighter than its rows' (1 Nov): the selected plate.
+        let fill = colors.isDark ? colors.plate(.selected) : colors.hoverFill
         layer?.backgroundColor = (lit ? fill : .clear).cgColor
         needsLayout = true
     }
@@ -269,18 +281,20 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
     /// and turns it a quarter over about 0.12 s (a 60 fps capture, 1 Nov). The turn is AppKit's own
     /// rotation: one set on the layer was reset by AppKit's layer geometry, so a space that opened
     /// collapsed showed the chevron pointing down.
+    private static let chevronTurn: TimeInterval = 0.12
+
     private func turnChevron() {
         let degrees: CGFloat = collapsed ? 90 : 0
         guard window != nil else { chevron.frameCenterRotation = degrees; return }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.12
+            ctx.duration = Design.Motion.duration(Self.chevronTurn)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             chevron.animator().frameCenterRotation = degrees
         }
     }
 
     /// Arc 1.171, 2x captures (1 Nov): a 14.5 pt emoji centred in the icon's 26 pt box 5 pt in (its
-    /// line box sits 0.75 pt low), the chevron (13 pt semibold) in the icon's place, the name (13 pt
+    /// line box sits 0.75 pt low), the chevron in the icon's place, the name (13 pt
     /// semibold) 36 pt in, the ••• (24 pt fill in a 26 pt frame) centred 18.5 pt from the trailing edge.
     /// The name stops 2 pt before that frame, or 8.5 pt from the edge while the button is hidden.
     override func layout() {
@@ -374,7 +388,7 @@ final class SpaceHeaderView: NSView, NSTextFieldDelegate {
                 guard store.isBlank(space: spaceID) else { return }
                 actions.moveBlankWindow(space.id)
             }
-            if let sym = space.symbol { item.image = SidebarSymbols.image(sym, size: 13, weight: .medium) }
+            if let sym = space.symbol { item.image = SidebarSymbols.image(sym, size: Design.Icon.regular) }
             m.addItem(item)
         }
         return m
@@ -678,10 +692,9 @@ final class FavoritesGridView: NSView {
 
     /// The pinned extensions' buttons, in pin order; none while the toolbar shows them. Arc 1.171
     /// (4 Nov) draws each cell like a favorite tile, the tile's fill at rest and its hover fill,
-    /// the 18 pt icon centred, and names it in a tooltip (its toolbar pins have none, #106).
+    /// the icon centred, and names it in a tooltip (its toolbar pins have none, #106).
     private func showExtensions(_ pins: [Pin], palette: SpacePalette?, protectedMedia: String?) {
         let colors = palette.map(SidebarColors.init) ?? SidebarColors()
-        let dark = palette?.isDark ?? false
         let ids = pins.map(\.id)
         for (id, b) in extensionButtons where !ids.contains(id) {
             b.removeFromSuperview()
@@ -698,10 +711,9 @@ final class FavoritesGridView: NSView {
             // On a WebKit page they dim and say why (docs/protected-media.md).
             b.configure(symbol: nil, image: ext.badged(p.icon, p.badge, tint: colors.textSecondary),
                         help: protectedMedia.map(ExtensionStore.offOnProtectedMedia) ?? p.name, enabled: protectedMedia == nil,
-                        width: 28, iconSize: 18, tint: colors.textSecondary,
-                        hover: dark ? NSColor.white.withAlphaComponent(0.15) : NSColor.black.withAlphaComponent(0.09))
+                        width: 28, iconSize: Design.Icon.image, tint: colors.textSecondary, hover: colors.tileHover)
             b.restFill = palette.map { NSColor($0.pillFill) } ?? .clear
-            b.cornerRadius = 10
+            b.cornerRadius = Design.Radius.control
             b.iconRowHeight = PinnedExtensionGrid.cellHeight
             let id = p.id
             b.action = { [weak self] in self?.actions.runExtension(id) }
@@ -782,13 +794,15 @@ final class FavoritesGridView: NSView {
         }
     }
 
+    /// Arc 1.171 (60 fps capture, 4 Nov): the tiles slide over ~0.15 s, fast at first.
+    private static let slotSlide: TimeInterval = 0.15
+
     private func dropChanged(from old: Drop?) {
         let w = bounds.width
         guard window != nil, w > 0 else { needsLayout = true; return }
         let grid = grid(forWidth: w)
-        // Arc 1.171 (60 fps capture, 4 Nov): the tiles slide over ~0.15 s, fast at first.
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
+            ctx.duration = Design.Motion.duration(Self.slotSlide)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             placeTiles(grid, top: extensionGrid(forWidth: w).favoritesOffset, animated: true)
         }
@@ -910,13 +924,14 @@ class FavoritesDropTarget: NSView {
 final class FavoritesDropStrip: FavoritesDropTarget {
     var hasFavorites = true
     private let border = CAShapeLayer()
-    private let label = NSTextField.sidebarLabel(size: 11, weight: .medium)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue, weight: .medium)
+    private static let corner = Design.Radius.control
 
     var height: CGFloat { targeted ? 36 : (hasFavorites ? 6 : 8) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = Self.corner
         border.fillColor = nil
         border.lineWidth = 1
         border.lineDashPattern = [4, 3]
@@ -932,7 +947,7 @@ final class FavoritesDropStrip: FavoritesDropTarget {
     override func refresh() {
         guard let p = palette else { return }
         let colors = SidebarColors(p)
-        border.strokeColor = colors.textTertiary.withAlphaComponent(targeted ? 0.6 : 0).cgColor
+        border.strokeColor = (targeted ? colors.ink(.tertiary) : .clear).cgColor
         layer?.backgroundColor = (targeted ? colors.hoverFill : .clear).cgColor
         label.textColor = colors.textSecondary
         label.isHidden = !targeted
@@ -941,7 +956,7 @@ final class FavoritesDropStrip: FavoritesDropTarget {
     override func layout() {
         super.layout()
         border.frame = bounds
-        border.path = CGPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: 10, cornerHeight: 10, transform: nil)
+        border.path = CGPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: Self.corner, cornerHeight: Self.corner, transform: nil)
         let lh = label.intrinsicContentSize.height
         label.frame = NSRect(x: 0, y: (bounds.height - lh) / 2, width: bounds.width, height: lh)
     }
@@ -960,7 +975,7 @@ final class FavoritesEmptyCard: FavoritesDropTarget {
     private let border = CAShapeLayer()
     private let content = FlippedView()
     private let badge = NSImageView()
-    private let title = NSTextField.sidebarLabel(size: 13, weight: .semibold)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
     private let subtitle = NSTextField(wrappingLabelWithString: "")
     private let close = FavoritesEmptyCardClose()
 
@@ -981,7 +996,7 @@ final class FavoritesEmptyCard: FavoritesDropTarget {
         title.stringValue = "Drag to add Favorites"
         title.alignment = .left
         title.lineBreakMode = .byTruncatingTail
-        subtitle.font = .systemFont(ofSize: 11)
+        subtitle.font = Design.Font.ns(.caption)
         subtitle.maximumNumberOfLines = 1
         subtitle.lineBreakMode = .byTruncatingTail
         close.onPress = { [weak self] in self?.onDismiss() }
@@ -998,29 +1013,32 @@ final class FavoritesEmptyCard: FavoritesDropTarget {
     override func refresh() {
         guard let p = palette else { return }
         let dark = p.isDark
+        let colors = SidebarColors(p)
         // The badge is the darkest ink on a light theme (the toolbar's shade) and the brightest on a
         // dark one; the star inside takes the other end, with a glow of its colour on dark themes.
         let ink = NSColor(dark ? p.textPrimary : p.toolbarFill)
         let star = NSColor(dark ? p.toolbarFill : p.folderFill)
-        let text = dark ? NSColor.white.withAlphaComponent(0.85) : NSColor(p.textPrimary)
-        let lighter = targeted ? 0.32 : 0.16
-        fill.fillColor = (dark ? NSColor.white.withAlphaComponent(targeted ? 0.1 : 0.045) : NSColor.white.withAlphaComponent(lighter)).cgColor
-        border.strokeColor = targeted ? ink.withAlphaComponent(0.45).cgColor : NSColor.clear.cgColor
+        let text = dark ? Design.onDark(.primary) : colors.textPrimary
+        let detail = text.withAlphaComponent(text.alphaComponent * Design.Opacity.dimmed)
+        let wash = dark ? colors.plate(targeted ? .selected : .subtle)
+            : (targeted ? Palette.emptyCardOnLightTargeted : Palette.emptyCardOnLight)
+        fill.fillColor = wash.cgColor
+        border.strokeColor = (targeted ? colors.ink(.tertiary) : .clear).cgColor
         border.lineDashPattern = nil
         content.alphaValue = targeted ? 0.5 : 1
         badge.image = NSImage(systemSymbolName: "star.circle.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+            .withSymbolConfiguration(Design.Icon.configuration(Design.Icon.image)
                 .applying(NSImage.SymbolConfiguration(paletteColors: [star, ink])))
         badge.shadow?.shadowColor = dark ? star : .clear
-        badge.shadow?.shadowBlurRadius = 6
+        badge.shadow?.shadowBlurRadius = Design.Shadow.cardRadius
         title.textColor = text
         let para = NSMutableParagraphStyle()
         para.alignment = .left
         para.lineBreakMode = .byTruncatingTail
         subtitle.attributedStringValue = NSAttributedString(string: "Top sites, one click away",
-                                                            attributes: [.font: NSFont.systemFont(ofSize: 11), .paragraphStyle: para,
-                                                                         .foregroundColor: text.withAlphaComponent(text.alphaComponent * 0.7)])
-        close.color = text.withAlphaComponent(text.alphaComponent * 0.7)
+                                                            attributes: [.font: Design.Font.ns(.caption), .paragraphStyle: para,
+                                                                         .foregroundColor: detail])
+        close.color = detail
         needsLayout = true
     }
 
@@ -1030,10 +1048,11 @@ final class FavoritesEmptyCard: FavoritesDropTarget {
         let card = NSRect(x: 0, y: 0, width: w, height: Self.fillHeight)
         fill.frame = bounds
         border.frame = bounds
-        fill.path = CGPath(roundedRect: card, cornerWidth: 12, cornerHeight: 12, transform: nil)
+        let corner = Design.Radius.card
+        fill.path = CGPath(roundedRect: card, cornerWidth: corner, cornerHeight: corner, transform: nil)
         // The card sits at the top of the space pager, which clips its pages for swipes, so the
         // drop line runs on the fill's edge rather than outside it.
-        border.path = CGPath(roundedRect: card.insetBy(dx: 0.5, dy: 0.5), cornerWidth: 11.5, cornerHeight: 11.5, transform: nil)
+        border.path = CGPath(roundedRect: card.insetBy(dx: 0.5, dy: 0.5), cornerWidth: corner - 0.5, cornerHeight: corner - 0.5, transform: nil)
         content.frame = card
         // Badge on the left, title over one line of detail beside it, × on the right, all centred
         // on the card's height.
@@ -1056,7 +1075,7 @@ final class FavoritesEmptyCardClose: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        glyph.image = SidebarSymbols.image("xmark", size: 10, weight: .semibold)
+        glyph.image = SidebarSymbols.image("xmark", size: Design.Icon.small)
         glyph.imageScaling = .scaleNone
         glyph.autoresizingMask = [.width, .height]
         addSubview(glyph)
@@ -1104,7 +1123,8 @@ struct FavoriteTileModel: Equatable {
 }
 
 enum FavoriteTileMetrics {
-    static let corner: CGFloat = 13
+    /// A 40 pt tile: a control's corner, as Dia rounds its own.
+    static let corner = Design.Radius.control
     /// The cut between a split's cells (AppTrayItemMaskShape.lineWidth).
     static let cut: CGFloat = 2
 
@@ -1123,7 +1143,7 @@ enum FavoriteTileMetrics {
     }
 }
 
-/// A favorite tile. Arc 1.170: 13 pt circular corners; the active tile is the hover fill with a
+/// A favorite tile, with a card's corners. As in Arc 1.170 the active tile is the hover fill with a
 /// 2 pt darker rim; inactive tiles sit ~4.5% darker than the sidebar. A picked tile colour keeps
 /// its hue in every state; hover and selection shade it.
 final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
@@ -1146,6 +1166,7 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
     private var hoveredCell: Int? { didSet { if hoveredCell != oldValue { ArcTooltipController.shared.mouseExited(self) } } }
     private var hovering = false { didSet { if hovering != oldValue { refresh() } } }
     private var press: NSEvent?
+    private static let unreadSize: CGFloat = 6
 
     init(itemID: UUID, spaceID: UUID, grid: FavoritesGridView) {
         self.itemID = itemID
@@ -1163,10 +1184,10 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
         rim.zPosition = 5
         layer?.addSublayer(rim)
         cutMask.fillRule = .evenOdd
-        unreadDot.cornerRadius = 3
+        unreadDot.cornerRadius = Design.Radius.pill(Self.unreadSize)
         layer?.addSublayer(unreadDot)
-        countdown.fontSize = 9
-        countdown.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        countdown.fontSize = Design.TextSize.micro.rawValue
+        countdown.font = Design.Font.ns(.micro, .semibold)
         countdown.alignmentMode = .right
         countdown.contentsScale = 2
         countdown.isHidden = true
@@ -1216,6 +1237,9 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
         guard let m = model, let palette else { return }
         let dark = tileIsDark
         let colors = SidebarColors(palette)
+        // The tile's own ink and plates: a picked colour can be dark on a light sidebar, or the reverse.
+        var tile = colors
+        tile.isDark = dark
         // The hover fill shows at once and eases back to the tile's own (Design.Motion.fast).
         let left = shownHover && !hovering && window != nil && !Design.Motion.reduced
         shownHover = hovering
@@ -1237,22 +1261,20 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
         CATransaction.setDisableActions(true)
         if let hex = m.tileColor {
             layer?.backgroundColor = NSColor(hex: hex).cgColor
-            shade.backgroundColor = (m.selected || hovering ? (dark ? NSColor.white.withAlphaComponent(0.12) : NSColor.black.withAlphaComponent(0.07)) : .clear).cgColor
+            shade.backgroundColor = (m.selected || hovering ? tile.plate(dark ? .pressed : .hover) : .clear).cgColor
         } else {
-            let fill: NSColor = m.selected ? (palette.isDark ? NSColor.white.withAlphaComponent(0.13) : NSColor.white.withAlphaComponent(0.38))
-                : (hovering ? (palette.isDark ? NSColor.white.withAlphaComponent(0.15) : NSColor.black.withAlphaComponent(0.09)) : NSColor(palette.pillFill))
+            let fill: NSColor = m.selected ? (palette.isDark ? colors.plate(.pressed) : Palette.selectedTileOnLight)
+                : (hovering ? colors.tileHover : colors.pillFill)
             layer?.backgroundColor = fill.cgColor
             shade.backgroundColor = NSColor.clear.cgColor
         }
         rim.borderWidth = m.selected ? 2 : 0
-        rim.borderColor = (dark ? NSColor.white.withAlphaComponent(0.14) : NSColor.black.withAlphaComponent(0.17)).cgColor
-        var faviconColors = colors
-        faviconColors.isDark = dark
-        for (f, c) in zip(favicons, m.cells) { f.show(c.icon, flip: c.icon != nil && c.glyphDark == dark, colors: faviconColors) }
+        rim.borderColor = tile.rule.cgColor
+        for (f, c) in zip(favicons, m.cells) { f.show(c.icon, flip: c.icon != nil && c.glyphDark == dark, colors: tile) }
         unreadDot.isHidden = !(m.unread && !m.selected)
-        unreadDot.backgroundColor = (m.tileColor == nil ? colors.textPrimary : (dark ? NSColor.white : NSColor.black)).withAlphaComponent(0.6).cgColor
-        let ink = (m.tileColor == nil ? colors.textPrimary : (dark ? NSColor.white : NSColor.black)).withAlphaComponent(0.7)
-        countdown.string = countdownText.map { NSAttributedString(string: $0, attributes: [.font: NSFont.systemFont(ofSize: 9, weight: .semibold), .foregroundColor: ink]) }
+        let ink = tile.ink(.secondary)
+        unreadDot.backgroundColor = ink.cgColor
+        countdown.string = countdownText.map { NSAttributedString(string: $0, attributes: [.font: Design.Font.ns(.micro, .semibold), .foregroundColor: ink]) }
         countdown.isHidden = countdownText == nil
         if countdownText != nil { unreadDot.isHidden = true }
         if m.focus != (focusRing != nil) {
@@ -1290,7 +1312,7 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
             cutMask.frame = bounds
             cutMask.path = path
         }
-        unreadDot.frame = CGRect(x: bounds.width - 5 - 6, y: 5, width: 6, height: 6)
+        unreadDot.frame = CGRect(x: bounds.width - 5 - Self.unreadSize, y: 5, width: Self.unreadSize, height: Self.unreadSize)
         countdown.frame = CGRect(x: 4, y: 3, width: bounds.width - 9, height: 12)
         focusRing?.frame = bounds
         CATransaction.commit()
@@ -1439,14 +1461,14 @@ final class FavoriteTileView: NSView, ArcTooltipTarget, NSDraggingSource {
             outside.windingRule = .evenOdd
             outside.addClip()
             let shadow = NSShadow()
-            shadow.shadowColor = NSColor.black.withAlphaComponent(0.18)
+            shadow.shadowColor = Design.Shadow.cardColor
             shadow.shadowBlurRadius = 4
             shadow.shadowOffset = NSSize(width: 0, height: -1)
             shadow.set()
             NSColor.black.setFill()
             shape.fill()
             NSGraphicsContext.restoreGraphicsState()
-            NSColor.white.withAlphaComponent(0.67).setFill()
+            Palette.dragCard.setFill()
             shape.fill()
             for (f, rep) in icons { rep?.draw(in: f.offsetBy(dx: pad, dy: pad), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil) }
             return true

@@ -106,7 +106,7 @@ final class LoadingIndicatorView: NSView {
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = opacity
         fade.toValue = 1
-        fade.duration = 0.15
+        fade.duration = Design.Motion.fast
         track.add(fade, forKey: "fade")
         let g = generation
         DispatchQueue.main.asyncAfter(deadline: .now() + LoadingIndicator.expandDuration) { [weak self] in
@@ -142,7 +142,7 @@ final class LoadingIndicatorView: NSView {
             let fade = CABasicAnimation(keyPath: "opacity")
             fade.fromValue = 0
             fade.toValue = 1
-            fade.duration = 0.15
+            fade.duration = Design.Motion.fast
             track.add(fade, forKey: "fade")
         }
     }

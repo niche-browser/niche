@@ -9,6 +9,17 @@ enum SettingsMetrics {
     static let toolbarHeight: CGFloat = 76
     /// The column the title and cards share, centred in wide windows.
     static let contentWidth: CGFloat = 640
+    /// The tinted symbol plate in front of a row's label.
+    static let glyphPlate: CGFloat = 26
+    /// Where a divider starts under a row that leads with a symbol plate: at its text.
+    static let glyphDividerInset = Design.Space.rowInset + glyphPlate + Design.Space.l
+    /// Text inset inside a field or a list row.
+    static let fieldInset: CGFloat = 10
+    /// The ring round a field while it has the keyboard.
+    static let focusRing: CGFloat = 1.5
+    /// The lift under a card in a light window; a dark one has none.
+    static let cardShadow = Color.black.opacity(0.04)
+    static let cardShadowRadius: CGFloat = 2
 }
 
 /// A grouped card: rows share one surface, divided by `SettingsCardDivider`.
@@ -22,24 +33,25 @@ struct SettingsCard<Content: View>: View {
             .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(Design.surface))
             .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous)
                 .strokeBorder(Design.hairline, lineWidth: scheme == .dark ? 1 : 0.5))
-            .shadow(color: .black.opacity(scheme == .dark ? 0 : 0.04), radius: 2, y: 1)
+            .shadow(color: scheme == .dark ? .clear : SettingsMetrics.cardShadow,
+                    radius: SettingsMetrics.cardShadowRadius, y: Design.Space.hair)
     }
 }
 
-/// One card row: label on the left, controls on the right, at least 52 pt tall.
+/// One card row: label on the left, controls on the right, at least 44 pt tall.
 struct SettingsCardRow<Leading: View, Trailing: View>: View {
     @ViewBuilder let leading: Leading
     @ViewBuilder let trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Design.Space.l) {
             leading
-            Spacer(minLength: 16)
-            HStack(spacing: 8) { trailing }
+            Spacer(minLength: Design.Space.xl)
+            HStack(spacing: Design.Space.m) { trailing }
         }
         .font(Design.Font.body)
         .padding(.horizontal, Design.Space.rowInset)
-        .padding(.vertical, 10)
+        .padding(.vertical, Design.Space.m)
         .frame(minHeight: Design.Space.rowHeight)
     }
 }
@@ -50,7 +62,7 @@ struct SettingsLabel: View {
     var detail: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Design.Space.xxs) {
             Text(title).font(Design.Font.body)
             if let detail, !detail.isEmpty {
                 Text(detail).font(Design.Font.detail).foregroundStyle(.secondary)
@@ -68,7 +80,7 @@ struct SettingsIconLabel: View {
     let color: Color
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Design.Space.l) {
             SettingsGlyph(symbol: symbol, color: color)
             SettingsLabel(title: title, detail: detail)
         }
@@ -95,7 +107,7 @@ struct SettingsSwitch: View {
     let title: String
     @Binding var isOn: Bool
     var body: some View {
-        Toggle(title, isOn: $isOn).toggleStyle(.switch).labelsHidden().controlSize(.regular)
+        Toggle(title, isOn: $isOn).toggleStyle(.switch).labelsHidden().controlSize(.small)
     }
 }
 
@@ -119,7 +131,8 @@ struct SettingsPickerRow<Value: Hashable, Options: View>: View {
 extension View {
     /// A pop-up menu at the row controls' height.
     func settingsMenu() -> some View {
-        labelsHidden().pickerStyle(.menu).controlSize(.large).fixedSize()
+        labelsHidden().pickerStyle(.menu).controlSize(.regular).fixedSize()
+            .frame(minHeight: Design.Space.control)
     }
 }
 
@@ -143,20 +156,20 @@ struct SettingsButtonStyle: ButtonStyle {
                 .font(Design.Font.control)
                 .lineLimit(1)
                 .foregroundStyle(prominent ? Color.white : Color.primary)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, Design.Space.l)
                 .frame(minHeight: Design.Space.control)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(fill))
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .opacity(enabled ? 1 : 0.45)
+                .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(fill))
+                .contentShape(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous))
+                .opacity(enabled ? 1 : Design.Opacity.disabled)
                 .onHover { hovered = enabled && $0 }
-                .animation(.easeOut(duration: 0.12), value: hovered)
+                .animation(.easeOut(duration: Design.Motion.fast), value: hovered)
                 .fixedSize()
         }
 
         private var fill: Color {
             let pressed = configuration.isPressed
             if prominent { return Design.accent.opacity(pressed ? 0.8 : hovered ? 0.9 : 1) }
-            return Color.primary.opacity(pressed ? 0.16 : hovered ? 0.12 : 0.08)
+            return Design.fill(pressed ? .strong : hovered ? .pressed : .selected)
         }
     }
 }
@@ -172,7 +185,7 @@ struct SettingsCardDivider: View {
     var inset: CGFloat = Design.Space.rowInset
     var body: some View {
         Rectangle().fill(Design.hairline)
-            .frame(height: 1)
+            .frame(height: Design.Space.hair)
             .padding(.leading, inset)
     }
 }
@@ -185,7 +198,7 @@ struct SettingsHeader: View {
         Text(text).font(Design.Font.section)
             .foregroundStyle(.secondary)
             .padding(.leading, Design.Space.rowInset)
-            .padding(.bottom, 8)
+            .padding(.bottom, Design.Space.m)
             .accessibilityAddTraits(.isHeader)
     }
 }
@@ -198,7 +211,7 @@ struct SettingsFootnote: View {
     var body: some View {
         Text(text).font(Design.Font.detail).foregroundStyle(.secondary)
             .padding(.horizontal, Design.Space.rowInset)
-            .padding(.top, 8)
+            .padding(.top, Design.Space.m)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -210,10 +223,10 @@ struct SettingsGlyph: View {
     let color: Color
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: Design.Icon.regular, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 26, height: 26)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(color.gradient))
+            .frame(width: SettingsMetrics.glyphPlate, height: SettingsMetrics.glyphPlate)
+            .background(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(color.gradient))
             .accessibilityHidden(true)
     }
 }
@@ -226,7 +239,7 @@ struct SettingsCardPane<Content: View>: View {
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: SettingsMetrics.contentWidth, alignment: .leading)
                 .padding(.horizontal, Design.Space.pane)
-                .padding(.top, 4)
+                .padding(.top, Design.Space.xs)
                 .padding(.bottom, Design.Space.pane)
                 .frame(maxWidth: .infinity)
         }
@@ -264,10 +277,11 @@ struct SettingsTextField: View {
             .font(Design.Font.body)
             .focused($focused)
             .onSubmit(onSubmit)
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(focused ? Design.accent.opacity(0.7) : Design.hairline, lineWidth: focused ? 1.5 : 1))
+            .padding(.horizontal, SettingsMetrics.fieldInset)
+            .frame(height: Design.Space.control)
+            .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.fill(.hover)))
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
+                .strokeBorder(focused ? Design.accent.opacity(0.7) : Design.hairline,
+                              lineWidth: focused ? SettingsMetrics.focusRing : Design.Space.hair))
     }
 }

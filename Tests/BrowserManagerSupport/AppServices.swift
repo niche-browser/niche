@@ -53,7 +53,11 @@ enum TestRoot { case today }
     func setFaviconKey(_ id: UUID, _ key: String) { items[id]?.tab?.faviconKey = key }
     /// The URLs a finished load counted as visits, in order.
     var visits: [String] = []
-    func recordVisit(url: String, title: String) { visits.append(url) }
+    func recordVisit(url: String, title: String, profileID: UUID? = nil) { visits.append(url) }
+    func profileID(item: UUID) -> UUID? { nil }
+    /// The favorites of a test: the clock leaves their pages awake.
+    var favorites: Set<UUID> = []
+    func isFavorite(_ id: UUID) -> Bool { favorites.contains(id) }
     func clearHistory(_ range: BrowsingDataClear.Range) {}
     func selectTab(_ id: UUID, window: UUID?) {}
     func markUnread(_ id: UUID, _ unread: Bool) {}

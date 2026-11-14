@@ -5,7 +5,8 @@ import Foundation
 /// rewrites the page. This script runs in Niche's isolated world in every page (PageScript) and
 /// returns at once anywhere but the store. There it:
 /// - says "Add to Niche" / "Remove from Niche" on the install button (`relabel`);
-/// - hides the "Switch to Chrome?" card (a dialog holding `#promo-header`, or a link to
+/// - hides the "Switch to Chrome?" card (the box around the frame named `callout` in Google's
+///   header bar since 13 Nov 2026; before that a dialog holding `#promo-header`, or a link to
 ///   google.com/chrome) and the "Switch to Chrome to install extensions and themes" banner (the
 ///   block around its Install Chrome button);
 /// and does both again whenever the store redraws. It watches the document itself, not its body,
@@ -27,7 +28,7 @@ public enum WebStoreBranding {
           const name = \(name);
           const relabel = \(relabel);
           const style = document.createElement('style');
-          style.textContent = 'div[role="dialog"]:has(#promo-header), div[role="dialog"]:has(a[href*="google.com/chrome/"]) { display: none !important; }';
+          style.textContent = 'div[role="dialog"]:has(#promo-header), div[role="dialog"]:has(a[href*="google.com/chrome/"]), div:has(> iframe[name="callout"]) { display: none !important; }';
           const hideBanner = button => {
             let e = button;
             while (e.parentElement && !/Switch to Chrome to install/.test(e.textContent)) e = e.parentElement;
@@ -37,6 +38,12 @@ public enum WebStoreBranding {
           };
           const fix = () => {
             if (!style.isConnected && document.documentElement) (document.head || document.documentElement).appendChild(style);
+            // The card is a frame from another origin: nothing in it can be read, so its name
+            // is what tells it. Its box lies over the install button, so the box goes, not the frame.
+            for (const f of document.querySelectorAll('iframe')) {
+              const box = f.getAttribute('name') === 'callout' ? f.parentElement : null;
+              if (box && box !== document.body && box !== document.documentElement) box.style.setProperty('display', 'none', 'important');
+            }
             for (const b of document.querySelectorAll('button')) {
               const label = b.getAttribute('aria-label') || '';
               if (/^Switch to Chrome/.test(label) || b.textContent.trim() === 'Install Chrome') { hideBanner(b); continue; }

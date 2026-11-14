@@ -14,6 +14,8 @@ enum SpacesManagerMetrics {
     static let plus: CGFloat = 29
     static let plusGap: CGFloat = 34
     static let trail: CGFloat = 37.5
+    /// A glyph button on a card: the brush, the move handle, the ••• menu.
+    static let glyphButton: CGFloat = 26
     /// What the page keeps beside the Spaces page, whatever the window's width (Arc 1.171).
     static let pageRoom: CGFloat = 56
 
@@ -34,10 +36,10 @@ final class SpacesManagerView: NSView {
     private var cards: [UUID: SpaceManagerCard] = [:]
     private var order: [UUID] = []
     private lazy var plus: NSButton = {
-        let b = NSButton(image: SidebarSymbols.image("plus", size: 14, weight: .bold) ?? NSImage(), target: self, action: #selector(newSpace))
+        let b = NSButton(image: SidebarSymbols.image("plus", size: Design.Icon.bar, weight: .bold) ?? NSImage(), target: self, action: #selector(newSpace))
         b.isBordered = false
         b.wantsLayer = true
-        b.layer?.cornerRadius = SpacesManagerMetrics.plus / 2
+        b.layer?.cornerRadius = Design.Radius.pill(SpacesManagerMetrics.plus)
         b.layer?.backgroundColor = accent.fill.cgColor
         b.contentTintColor = accent.ink
         b.toolTip = "New Space"
@@ -46,8 +48,8 @@ final class SpacesManagerView: NSView {
     }()
 
     /// The + takes the window's space colours (Arc 1.172.1, 8 Nov 2026: a cream disc with a dark +
-    /// in an olive space; the blue one measured 1 Nov was a blue space's).
-    var accent: (fill: NSColor, ink: NSColor) = (NSColor(hex: "#2147F5"), .white) {
+    /// in an olive space; the blue one measured 1 Nov was a blue space's). Until it has them it is Niche's orange.
+    var accent: (fill: NSColor, ink: NSColor) = (Design.accentNS, Design.onDark()) {
         didSet { plus.layer?.backgroundColor = accent.fill.cgColor; plus.contentTintColor = accent.ink }
     }
 
@@ -111,7 +113,7 @@ final class SpacesManagerView: NSView {
         let to = min(max(0, from + Int((d.dx / pitch).rounded())), order.count - 1)
         if to != from, let target = store.spaceOrder.firstIndex(of: order[to]) { store.moveSpace(id, to: target) }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
+            ctx.duration = Design.Motion.duration(Design.Motion.fast)
             ctx.allowsImplicitAnimation = true
             needsLayout = true
             layoutSubtreeIfNeeded()
@@ -144,12 +146,12 @@ private final class SpaceManagerCard: NSView {
     private let ui: SidebarUIState
     private let actions: SidebarActions
     private let background: PaletteBackgroundView
-    private let emoji = NSTextField.sidebarLabel(size: 14.5)
+    private let emoji = NSTextField.sidebarLabel(size: Design.Icon.bar)
     private let symbol = NSImageView()
     private var symbolColored = false
-    private let title = NSTextField.sidebarLabel(size: 13, weight: .semibold)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
     private let list: SpaceListView
-    private lazy var brush = SidebarGlyphButton(symbol: "paintbrush.pointed.fill", size: 26, iconSize: 13, help: "Edit Theme Color",
+    private lazy var brush = SidebarGlyphButton(symbol: "paintbrush.pointed.fill", size: SpacesManagerMetrics.glyphButton, iconSize: Design.Icon.regular, help: "Edit Theme Color",
                                                 colors: colors) { [weak self] in
         guard let self, let s = self.store.space(self.spaceID) else { return }
         self.actions.editSpaceThemeBeside(s, self)
@@ -158,7 +160,7 @@ private final class SpaceManagerCard: NSView {
     private let move = SpaceMoveHandle()
     var onMove: ((CGFloat) -> Void)?
     var onMoveEnd: (() -> Void)?
-    private lazy var more = SidebarGlyphButton(symbol: "ellipsis", size: 26, iconSize: 13, help: "", colors: colors) { [weak self] in
+    private lazy var more = SidebarGlyphButton(symbol: "ellipsis", size: SpacesManagerMetrics.glyphButton, iconSize: Design.Icon.regular, help: "", colors: colors) { [weak self] in
         self?.showMenu()
     }
     private var colors = SidebarColors()
@@ -176,7 +178,7 @@ private final class SpaceManagerCard: NSView {
         move.onDrag = { [weak self] dx in self?.onMove?(dx) }
         move.onEnd = { [weak self] in self?.onMoveEnd?() }
         wantsLayer = true
-        layer?.cornerRadius = 14
+        layer?.cornerRadius = Design.Radius.card
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
         symbol.imageScaling = .scaleNone
@@ -192,7 +194,7 @@ private final class SpaceManagerCard: NSView {
         withObservationTracking {
             guard let s = store.space(spaceID) else { return }
             emoji.stringValue = s.emoji
-            let picture = s.symbol.map { SpaceIconCatalog.image($0, size: 13) }
+            let picture = s.symbol.map { SpaceIconCatalog.image($0, size: Design.Icon.regular) }
             symbol.image = picture?.image
             symbolColored = picture?.colored ?? false
             title.stringValue = s.title
@@ -204,7 +206,7 @@ private final class SpaceManagerCard: NSView {
         title.textColor = colors.textSecondary
         symbol.contentTintColor = symbolColored ? nil : colors.textSecondary
         for b in [brush, more] { b.colors = colors }
-        move.tint = colors.isDark ? NSColor.white.withAlphaComponent(0.55) : colors.glyph
+        move.tint = colors.isDark ? Design.onDark(.secondary) : colors.glyph
         needsLayout = true
     }
 
@@ -224,18 +226,19 @@ private final class SpaceManagerCard: NSView {
     override func layout() {
         super.layout()
         let w = bounds.width, h = bounds.height
+        let button = SpacesManagerMetrics.glyphButton
         background.frame = bounds
         let es = emoji.intrinsicContentSize
         let ew = ceil(emoji.attributedStringValue.size().width)
         emoji.frame = NSRect(x: 25.5 - ew / 2 - SidebarText.inset, y: 25 - es.height / 2, width: ew + 2 * SidebarText.inset, height: es.height)
-        symbol.frame = NSRect(x: 12.5, y: 12, width: 26, height: 26)
+        symbol.frame = NSRect(x: 12.5, y: 12, width: button, height: button)
         let th = title.intrinsicContentSize.height
-        title.frame = NSRect(x: 44 - SidebarText.inset, y: 25 - th / 2, width: max(0, 213 - 13 - 44) + 2 * SidebarText.inset, height: th)
-        brush.frame = NSRect(x: 213 - 13, y: 12, width: 26, height: 26)
+        title.frame = NSRect(x: 44 - SidebarText.inset, y: 25 - th / 2, width: max(0, 213 - button / 2 - 44) + 2 * SidebarText.inset, height: th)
+        brush.frame = NSRect(x: 213 - button / 2, y: 12, width: button, height: button)
         // The first pinned row is centred 64 pt down: rows are 41 pt, 3 pt into the list.
         list.frame = NSRect(x: 0, y: 40.5, width: w, height: max(0, h - 40.5 - 42))
-        move.frame = NSRect(x: 22 - 13, y: h - 21 - 13, width: 26, height: 26)
-        more.frame = NSRect(x: 217.5 - 13, y: h - 21 - 13, width: 26, height: 26)
+        move.frame = NSRect(x: 22 - button / 2, y: h - 21 - button / 2, width: button, height: button)
+        more.frame = NSRect(x: 217.5 - button / 2, y: h - 21 - button / 2, width: button, height: button)
     }
 }
 
@@ -249,7 +252,7 @@ private final class SpaceMoveHandle: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        glyph.image = SidebarSymbols.image("arrow.up.and.down.and.arrow.left.and.right", size: 13, weight: .medium)
+        glyph.image = SidebarSymbols.image("arrow.up.and.down.and.arrow.left.and.right", size: Design.Icon.regular, weight: .medium)
         glyph.imageScaling = .scaleNone
         glyph.autoresizingMask = [.width, .height]
         addSubview(glyph)

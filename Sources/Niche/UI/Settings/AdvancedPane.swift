@@ -28,7 +28,7 @@ struct AdvancedPane: View {
                 } trailing: {
                     Button("Import…") { actions.importData() }
                 }
-                SettingsCardDivider(inset: 54)
+                SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
                     SettingsIconLabel(title: "Export", detail: "Favorites, pinned tabs and folders as a bookmarks file.",
                                       symbol: "square.and.arrow.up", color: .indigo)
@@ -43,14 +43,14 @@ struct AdvancedPane: View {
                 } trailing: {
                     Button("Open") { nav.show(.performance) }
                 }
-                SettingsCardDivider(inset: 54)
+                SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
                     SettingsIconLabel(title: "Data folder", detail: "Profiles, settings and logs.", symbol: "folder.fill", color: .gray)
                         .help(AppPaths.supportDir.path)
                 } trailing: {
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([AppPaths.supportDir]) }
                 }
-                SettingsCardDivider(inset: 54)
+                SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
                     SettingsIconLabel(title: "Browser engine", detail: "Chromium \(NicheCEFRuntime.chromiumVersion())",
                                       symbol: "cpu", color: .teal)

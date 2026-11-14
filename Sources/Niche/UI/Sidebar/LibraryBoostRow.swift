@@ -1,18 +1,24 @@
 import AppKit
 
 /// A boost on Library ▸ Boosts, as Arc 1.172.1 draws it (the maintainer's Arc, 8 Nov 2026, 2x stills):
-/// the site's icon on a 43 pt light tile with a white rim, the boost's name (14 pt) over its site;
+/// the site's icon on a 43 pt light tile with a white rim, the boost's name (13 pt) over its site;
 /// under the pointer a rounded card and a 36 × 22 pt switch 8 pt from the right (on: the theme's
 /// dark shade with a light knob). A boost that's off keeps its row but its tile dims under a
 /// diagonal stroke. Right-click: Rename, Delete.
+private enum Palette {
+    /// The icon's tile, light on any sidebar, and the halo that lifts the strike off the icon.
+    static let tile = NSColor(white: 0.93, alpha: 1)
+    static let strikeHalo = NSColor.white.withAlphaComponent(0.55)
+}
+
 final class BoostRowCell: NSView, NSTextFieldDelegate {
     private let card = FlippedView()
     private let tile = NSView()
     private let icon = NSImageView()
     private let strike = CAShapeLayer()
     private let strikeHalo = CAShapeLayer()
-    private let title = NSTextField.sidebarLabel(size: 14)
-    private let detail = NSTextField.sidebarLabel(size: 12.5)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
+    private let detail = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue)
     private let toggle = BoostSwitch()
     private var editor: NSTextField?
     private var boost: Boost?
@@ -25,24 +31,24 @@ final class BoostRowCell: NSView, NSTextFieldDelegate {
     override init(frame: NSRect) {
         super.init(frame: frame)
         card.wantsLayer = true
-        card.layer?.cornerRadius = 12
+        card.layer?.cornerRadius = Design.Radius.card
         card.layer?.cornerCurve = .continuous
         addSubview(card)
         tile.wantsLayer = true
-        tile.layer?.cornerRadius = 12
+        tile.layer?.cornerRadius = Design.Radius.card
         tile.layer?.cornerCurve = .continuous
         tile.layer?.borderWidth = 3
         tile.layer?.borderColor = NSColor.white.cgColor
-        tile.layer?.backgroundColor = NSColor(white: 0.93, alpha: 1).cgColor
-        tile.layer?.shadowColor = NSColor.black.cgColor
-        tile.layer?.shadowOpacity = 0.12
-        tile.layer?.shadowRadius = 2
-        tile.layer?.shadowOffset = CGSize(width: 0, height: -1)
+        tile.layer?.backgroundColor = Palette.tile.cgColor
+        tile.layer?.shadowColor = Design.Shadow.cardColor.cgColor
+        tile.layer?.shadowOpacity = 1
+        tile.layer?.shadowRadius = Design.Shadow.cardRadius
+        tile.layer?.shadowOffset = CGSize(width: 0, height: -Design.Shadow.cardOffset)
         icon.imageScaling = .scaleProportionallyUpOrDown
         tile.addSubview(icon)
         strikeHalo.lineCap = .round
         strikeHalo.lineWidth = 6.5
-        strikeHalo.strokeColor = NSColor.white.withAlphaComponent(0.55).cgColor
+        strikeHalo.strokeColor = Palette.strikeHalo.cgColor
         strike.lineCap = .round
         strike.lineWidth = 3.5
         card.addSubview(tile)
@@ -65,12 +71,12 @@ final class BoostRowCell: NSView, NSTextFieldDelegate {
         self.ink = ink
         self.hoverFill = hoverFill
         icon.image = image ?? NSImage(systemSymbolName: "paintbrush.pointed", accessibilityDescription: nil)
-        icon.contentTintColor = image == nil ? NSColor.black.withAlphaComponent(0.5) : nil
+        icon.contentTintColor = image == nil ? Design.onLight(.secondary) : nil
         title.stringValue = b.name
         title.lineBreakMode = .byTruncatingTail
-        title.textColor = ink.withAlphaComponent(0.85)
+        title.textColor = ink.withAlphaComponent(Design.Emphasis.primary.rawValue)
         detail.stringValue = b.host
-        detail.textColor = ink.withAlphaComponent(0.5)
+        detail.textColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         toggle.set(on: b.enabled, tint: tint, knob: knob, ink: ink)
         setAccessibilityLabel("\(b.name), \(b.host)\(b.enabled ? "" : ", off")")
         refresh()
@@ -82,10 +88,10 @@ final class BoostRowCell: NSView, NSTextFieldDelegate {
         card.layer?.backgroundColor = (hovering || editor != nil ? hoverFill : .clear).cgColor
         toggle.isHidden = !(hovering || editor != nil)
         tile.alphaValue = 1
-        icon.alphaValue = b.enabled ? 1 : 0.5
+        icon.alphaValue = b.enabled ? 1 : Design.Opacity.dimmed
         strike.isHidden = b.enabled
         strikeHalo.isHidden = b.enabled
-        strike.strokeColor = NSColor.black.withAlphaComponent(0.5).cgColor
+        strike.strokeColor = Design.onLight(.secondary).cgColor
     }
 
     private func flip() {
@@ -154,7 +160,7 @@ final class BoostRowCell: NSView, NSTextFieldDelegate {
         strike.path = line
         strikeHalo.frame = tile.bounds
         strikeHalo.path = line
-        tile.layer?.shadowPath = CGPath(roundedRect: tile.bounds, cornerWidth: 12, cornerHeight: 12, transform: nil)
+        tile.layer?.shadowPath = CGPath(roundedRect: tile.bounds, cornerWidth: Design.Radius.card, cornerHeight: Design.Radius.card, transform: nil)
         CATransaction.commit()
         toggle.frame = NSRect(x: card.bounds.width - 8 - 36, y: ((h - 22) / 2).rounded(), width: 36, height: 22)
         let x = tile.frame.maxX + 10
@@ -190,8 +196,8 @@ private final class BoostSwitch: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.addSublayer(knob)
-        knob.shadowColor = NSColor.black.cgColor
-        knob.shadowOpacity = 0.2
+        knob.shadowColor = Design.Shadow.cardColor.cgColor
+        knob.shadowOpacity = 1
         knob.shadowRadius = 1
         knob.shadowOffset = CGSize(width: 0, height: -0.5)
         setAccessibilityElement(true)
@@ -203,7 +209,7 @@ private final class BoostSwitch: NSView {
 
     func set(on: Bool, tint: NSColor, knob color: NSColor, ink: NSColor) {
         self.on = on
-        layer?.backgroundColor = (on ? tint : ink.withAlphaComponent(0.16)).cgColor
+        layer?.backgroundColor = (on ? tint : ink.withAlphaComponent(Design.Fill.strong.rawValue)).cgColor
         knob.backgroundColor = color.cgColor
         setAccessibilityValue(on)
         needsLayout = true
@@ -211,9 +217,9 @@ private final class BoostSwitch: NSView {
 
     override func layout() {
         super.layout()
-        layer?.cornerRadius = bounds.height / 2
+        layer?.cornerRadius = Design.Radius.pill(bounds.height)
         let d = bounds.height - 4
-        knob.cornerRadius = d / 2
+        knob.cornerRadius = Design.Radius.pill(d)
         knob.frame = NSRect(x: on ? bounds.width - 2 - d : 2, y: 2, width: d, height: d)
     }
 

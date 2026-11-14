@@ -661,7 +661,10 @@ public struct WindowSession: Codable, Equatable, Identifiable {
 }
 
 public struct WindowPrefs: Codable, Equatable {
-    public var sidebarWidth: Double = 328
+    /// The sidebar's width in a new profile. Arc's 328 pt read as bulk beside 13 pt rows.
+    public static let newSidebarWidth: Double = 280
+    /// A new profile's sidebar is 280 pt; a file saved without the key keeps the 328 pt it was drawn at.
+    public var sidebarWidth: Double = WindowPrefs.newSidebarWidth
     public var expandedFolders: Set<UUID> = []
     public var collapsedPinnedSpaces: Set<UUID> = []
     /// Arc's topAppsEmptyStateDismissedForProfiles: favorites containers whose empty-state card
@@ -683,7 +686,7 @@ public struct WindowPrefs: Codable, Equatable {
     /// How much wider than the tab sidebar the user dragged the Library (LibraryWidth); nil: the default.
     public var libraryExtraWidth: Double?
 
-    public init(sidebarWidth: Double = 328, expandedFolders: Set<UUID> = [], collapsedPinnedSpaces: Set<UUID> = [],
+    public init(sidebarWidth: Double = WindowPrefs.newSidebarWidth, expandedFolders: Set<UUID> = [], collapsedPinnedSpaces: Set<UUID> = [],
                 favoritesEmptyStateDismissed: Set<UUID> = [], peekedFolders: [UUID: [UUID]] = [:],
                 windows: [WindowSession] = [WindowSession()], littleWindowSize: String? = nil, libraryExtraWidth: Double? = nil) {
         self.sidebarWidth = sidebarWidth
@@ -702,12 +705,16 @@ public struct HistoryEntry: Codable, Equatable {
     public var title: String
     public var lastVisit: Date
     public var visitCount: Int
+    /// The profile the page was visited on; nil is Default, and every visit saved before
+    /// history knew its profile (SpaceSeparation). Left out of the file when nil.
+    public var profileID: UUID?
 
-    public init(url: String, title: String, lastVisit: Date, visitCount: Int) {
+    public init(url: String, title: String, lastVisit: Date, visitCount: Int, profileID: UUID? = nil) {
         self.url = url
         self.title = title
         self.lastVisit = lastVisit
         self.visitCount = visitCount
+        self.profileID = profileID
     }
 }
 

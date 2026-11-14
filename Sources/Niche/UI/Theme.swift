@@ -49,8 +49,8 @@ struct SpacePalette {
     func folderColors(_ style: FolderIconStyle?) -> (tint: Color, fill: Color, back: Color) {
         switch style {
         case nil: return (folderTint, folderFill, folderBack)
-        case .white?: return (.white.opacity(0.92), .white.opacity(0.22), .white.opacity(0.22))
-        case .black?: return (.black.opacity(0.8), .black.opacity(0.12), .black.opacity(0.12))
+        case .white?: return (Design.onDarkColor(.primary), Design.onDarkColor(.quaternary), Design.onDarkColor(.quaternary))
+        case .black?: return (Design.onLightColor(.primary), Color.black.opacity(Design.Fill.pressed.rawValue), Color.black.opacity(Design.Fill.pressed.rawValue))
         }
     }
 }
@@ -123,9 +123,9 @@ extension SpaceTheme {
         return SpacePalette(
             isDark: dark,
             gradientColors: stops,
-            textPrimary: dark ? .white.opacity(0.92) : SpaceTheme.inkColor(self.accent ?? base[0]),
-            textSecondary: dark ? .white.opacity(0.6) : .black.opacity(0.5),
-            textTertiary: dark ? .white.opacity(0.38) : .black.opacity(0.38),
+            textPrimary: dark ? Design.onDarkColor(.primary) : SpaceTheme.inkColor(self.accent ?? base[0]),
+            textSecondary: dark ? Design.onDarkColor(.secondary) : Design.onLightColor(.secondary),
+            textTertiary: dark ? Design.onDarkColor(.tertiary) : Design.onLightColor(.tertiary),
             // Arc 1.170 live: a hovered row darkens ~4.5% (220/210/171 → 210/200/163), it does not lighten.
             hoverFill: dark ? .white.opacity(0.07) : .black.opacity(0.045),
             // Dark: Arc's 0.13 sat too near the favourite tiles' 0.08 to read as the open tab; 0.18
@@ -488,15 +488,19 @@ final class PagedGradientView: NSView {
     }
 }
 
-/// Layout constants measured from Arc 1.168 at 2x (see docs).
+/// The window's layout: the sidebar, its rows, the bar above a page and the page's card. Shapes
+/// and steps come from `Design`; what is left is each part's own size.
 enum NicheMetrics {
     static let sidebarMinWidth: CGFloat = 220
     static let sidebarMaxWidth: CGFloat = 520
-    static let sidebarDefaultWidth: CGFloat = 328
-    static let rowHeight: CGFloat = 40
-    static let rowSpacing: CGFloat = 1
-    static let rowCorner: CGFloat = 10
-    static let favicon: CGFloat = 16
+    /// A new window's sidebar. Arc's 328 pt read as bulk beside a 13 pt row; a window that was
+    /// resized keeps its own width.
+    static let sidebarDefaultWidth: CGFloat = 280
+    /// A tab's row: 13 pt text with the same air above and below as a toolbar button has.
+    static let rowHeight: CGFloat = 36
+    static let rowSpacing: CGFloat = Design.Space.hair
+    static let rowCorner: CGFloat = Design.Radius.row
+    static let favicon: CGFloat = Design.Icon.image
     /// A nested row's step in (Arc 1.171, measured at 1x: favicon 26 → 42, text 45 → 61; GitHub #139).
     static let indent: CGFloat = 16
     /// Arc 1.171 at 1x (GitHub #139): a row's fill starts 8 pt in from the sidebar's edge and its
@@ -504,7 +508,7 @@ enum NicheMetrics {
     static let rowInset: CGFloat = 8
     static let rowLeading: CGFloat = 10
     static let contentInset: CGFloat = 10
-    static let contentCornerRadius: CGFloat = 6
+    static let contentCornerRadius: CGFloat = Design.Radius.row
     static let toolbarHeight: CGFloat = 32
     /// Arc's developer-mode bar is taller (Arc 1.170 at 2x: 80 px against 64).
     static let developerToolbarHeight: CGFloat = 40

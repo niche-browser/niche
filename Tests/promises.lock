@@ -5,7 +5,7 @@
 #2     Tests/StoreTests.swift::windowsShareTheSidebar  9d351f248862
 #4     Tests/BrowserManagerLifecycleTests.swift::embeddedPageHandoffCase  81c5bd4fc4f4
 #4     Tests/StoreTests.swift::windowsShareTheSidebar  9d351f248862
-#12    Packages/NicheCore/Tests/NicheCoreTests/FavoritesLayoutTests.swift::fourFavoritesMatchArc  f8073aad6df0
+#12    Packages/NicheCore/Tests/NicheCoreTests/FavoritesLayoutTests.swift::fourFavoritesMatchArc  2a239c055c62
 #12    Packages/NicheCore/Tests/NicheCoreTests/PeekTriggerTests.swift::pinnedTabPeeksAtOtherHosts  39ca0601f90a
 #12    Packages/NicheCore/Tests/NicheCoreTests/PeekTriggerTests.swift::shiftClickPeeksFromAnyTab  6f7985d191f4
 #12    Packages/NicheCore/Tests/NicheCoreTests/PeekTriggerTests.swift::todayTabsLoadUnlessEveryTabIsOn  cf286dab7277
@@ -15,7 +15,7 @@
 #24    Packages/NicheCore/Tests/NicheCoreTests/ShippedThemesTests.swift::edgeToEdgeIsOffUnlessChosen  fcdb8b7fc653
 #24    Tests/FloatingSidebarTests.swift::geometry  be69a5b5124d
 #28    Tests/BrowserManagerLifecycleTests.swift::audiblePageStaysAwakeCase  124ac2fe284e
-#29    Packages/NicheCore/Tests/NicheCoreTests/FavoritesLayoutTests.swift::columnsByCountMatchArc  660b0f3ce158
+#29    Packages/NicheCore/Tests/NicheCoreTests/FavoritesLayoutTests.swift::columnsByCountMatchArc  27ff210e0554
 #30    Packages/NicheCore/Tests/NicheCoreTests/ArcThemeImportTests.swift::solidThemeKeepsItsColour  93c654258f01
 #30    Packages/NicheCore/Tests/NicheCoreTests/ArcThemeImportTests.swift::unknownStyleFallsBackToThePalettesMidTone  97b076c188a6
 #30    Tests/Scenarios/solid-spaces.scenario  98f9dc4199bb
@@ -268,7 +268,7 @@
 #171   Packages/NicheCore/Tests/NicheCoreTests/ArcThemeImportTests.swift::autoThemeWithOneHalfKeepsItsLook  01583e822512
 #171   Packages/NicheCore/Tests/NicheCoreTests/ArcThemeImportTests.swift::singleWithoutAppearanceKeepsItsSide  cd244989981a
 #172   Tests/StoreTests.swift::littleWindowProfile  cbb20edf1af3
-#176   Packages/NicheCore/Tests/NicheCoreTests/FavoritesLayoutTests.swift::slotUnderThePointer  1552536193ad
+#176   Packages/NicheCore/Tests/NicheCoreTests/FavoritesLayoutTests.swift::slotUnderThePointer  cd3d334e407c
 #176   Packages/NicheCore/Tests/NicheCoreTests/FavoritesLayoutTests.swift::tilesMoveAlongPastTheOpenSlot  33d905c8225e
 #178   Packages/NicheCore/Tests/NicheCoreTests/ShippedWindowsTests.swift::anAutoSpaceRingsTheFocusedPaneInOneColour  a52b85fa90d2
 #178   Packages/NicheCore/Tests/NicheCoreTests/ToolbarCompositionTests.swift::anEmptyPaneHasGreyedNavigationAndClose  4d23361c593c
@@ -372,7 +372,7 @@
 #237   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::emptySweepSaysWhy  086c579fc403
 #237   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::passLogIsOneLine  4fa5b8c1ef0f
 #237   Packages/NicheCore/Tests/NicheCoreTests/TabSleepPolicyTests.swift::pressureSweepCadence  60de3a3f6195
-#237   Tests/BrowserManagerLifecycleTests.swift::discardedPageColoursCase  90cb62a0c2b9
+#237   Tests/BrowserManagerLifecycleTests.swift::discardedPageColoursCase  02048c877efd
 #241   Packages/NicheCore/Tests/NicheCoreTests/PageViewInsetsTests.swift::placesTheViewBelowTheBarInTheCard  fb9d259389d8
 #241   Packages/NicheCore/Tests/NicheCoreTests/PageViewInsetsTests.swift::readsTheBarAboveThePageInEitherSuperview  239b16822b2a
 #241   Tests/Scenarios/debugger-infobar.scenario  b557f35ebec5

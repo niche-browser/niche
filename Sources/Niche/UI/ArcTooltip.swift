@@ -169,7 +169,7 @@ final class ArcTooltipController {
         shownFor = nil
         lastHiddenAt = Date()
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.06
+            ctx.duration = Design.Motion.exit
             p.animator().alphaValue = 0
         }, completionHandler: {
             p.parent?.removeChildWindow(p)
@@ -352,8 +352,13 @@ extension View {
 /// A space icon's tip adds its profile in a pill between the text and the caps.
 final class ArcTooltipLabel: NSView {
     static let maxTextWidth: CGFloat = 280
-    private static let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+    private static let font = Design.Font.ns(.detail, .medium)
+    /// A one-line tip is a capsule this tall.
+    private static let height: CGFloat = 28
     private static let cap: CGFloat = 19
+    /// A key cap's darker edge, and its face 1 pt inside it.
+    private static let capRadius: CGFloat = Design.Radius.small
+    private static let faceRadius: CGFloat = Design.Radius.small - 1
     private static let capGap: CGFloat = 3
     private static let textToCaps: CGFloat = 6
     private static let capsTrailing: CGFloat = 10
@@ -373,7 +378,8 @@ final class ArcTooltipLabel: NSView {
         /// Little Arc's tip, whatever space is focused.
         static let little = Colors(fill: NSColor(LittlePalette.tooltip), title: NSColor(LittlePalette.tooltipText),
                                    cap: NSColor(LittlePalette.tooltipCap), capGlyph: NSColor(LittlePalette.tooltipCapGlyph),
-                                   capEdge: NSColor(red: 119 / 255, green: 122 / 255, blue: 211 / 255, alpha: 1))
+                                   capEdge: littleCapEdge)
+        private static let littleCapEdge = NSColor(red: 119 / 255, green: 122 / 255, blue: 211 / 255, alpha: 1)
     }
 
     static func width(of text: String) -> CGFloat {
@@ -381,7 +387,7 @@ final class ArcTooltipLabel: NSView {
     }
 
     private let title = NSTextField(wrappingLabelWithString: "")
-    private let sub = NSTextField.sidebarLabel(size: 11)
+    private let sub = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
     private var caps: [NSView] = []
     private var pill: ProfilePill?
     private let multiline: Bool
@@ -394,7 +400,7 @@ final class ArcTooltipLabel: NSView {
         // Two or more lines get a rounded rectangle (Niche's choice; Arc's multi-line tip wasn't observed).
         layer?.backgroundColor = colors.fill.cgColor
         layer?.borderColor = colors.fill.blended(withFraction: 0.1, of: .white)?.cgColor
-        layer?.cornerRadius = multiline ? 10 : 14
+        layer?.cornerRadius = multiline ? Design.Radius.control : Design.Radius.pill(Self.height)
         title.font = Self.font
         title.textColor = colors.title
         title.stringValue = text
@@ -405,7 +411,7 @@ final class ArcTooltipLabel: NSView {
         addSubview(title)
         if let subtitle {
             sub.stringValue = subtitle
-            sub.textColor = colors.title.withAlphaComponent(0.6)
+            sub.textColor = colors.title.withAlphaComponent(Design.Emphasis.secondary.rawValue)
             addSubview(sub)
         }
         if let badge, !multiline {
@@ -417,15 +423,15 @@ final class ArcTooltipLabel: NSView {
             let edge = NSView()
             edge.wantsLayer = true
             edge.layer?.backgroundColor = colors.capEdge.cgColor
-            edge.layer?.cornerRadius = 4.5
+            edge.layer?.cornerRadius = Self.capRadius
             edge.layer?.cornerCurve = .continuous
             let face = NSView(frame: NSRect(x: 1, y: 2.5, width: Self.cap - 2, height: Self.cap - 3.5))
             face.wantsLayer = true
             face.layer?.backgroundColor = colors.cap.cgColor
-            face.layer?.cornerRadius = 3.5
+            face.layer?.cornerRadius = Self.faceRadius
             face.layer?.cornerCurve = .continuous
             edge.addSubview(face)
-            let glyph = NSTextField.sidebarLabel(size: 10, weight: .bold)
+            let glyph = NSTextField.sidebarLabel(size: Design.TextSize.micro.rawValue, weight: .bold)
             glyph.stringValue = k
             glyph.textColor = colors.capGlyph
             glyph.alignment = .center
@@ -459,7 +465,7 @@ final class ArcTooltipLabel: NSView {
         let keysW = caps.isEmpty ? 0 : CGFloat(caps.count) * Self.cap + CGFloat(caps.count - 1) * Self.capGap
         let pillW = pill.map { ProfilePill.gap + $0.frame.width } ?? 0
         let contentH = max(textH, caps.isEmpty ? 0 : Self.cap)
-        let h = max(28, contentH + (multiline ? 12 : 0))
+        let h = max(Self.height, contentH + (multiline ? 12 : 0))
         let trailing: CGFloat = !caps.isEmpty ? Self.capsTrailing : pill != nil ? ProfilePill.trailing : 10
         let w = 10 + textW + pillW + (caps.isEmpty ? 0 : Self.textToCaps + keysW) + trailing
         setFrameSize(NSSize(width: ceil(w), height: ceil(h)))
@@ -509,7 +515,7 @@ final class ProfilePill: NSView {
     private static let leading: CGFloat = 6
     private static let nameGap: CGFloat = 3
     private static let nameTrailing: CGFloat = 6
-    private static let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+    private static let font = Design.Font.ns(.caption, .medium)
 
     init(name: String, fill: NSColor, ink: NSColor) {
         let font = Self.font
@@ -523,7 +529,7 @@ final class ProfilePill: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: w, height: Self.height))
         wantsLayer = true
         layer?.backgroundColor = fill.cgColor
-        layer?.cornerRadius = Self.height / 2
+        layer?.cornerRadius = Design.Radius.pill(Self.height)
         let face = ProfileAvatarView(frame: NSRect(x: Self.leading, y: (Self.height - Self.avatar) / 2, width: Self.avatar, height: Self.avatar))
         face.ink = ink
         addSubview(face)
@@ -540,12 +546,14 @@ final class ProfilePill: NSView {
 /// 10 %, two upright eyes and a smile at full ink. Redrawn from the image's 2x pixels.
 final class ProfileAvatarView: NSView {
     var ink = NSColor.black { didSet { needsDisplay = true } }
+    /// The disc behind the face: the ink at 10 % (Arc's image).
+    private static let discAlpha: CGFloat = 26 / 255
 
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         let k = bounds.width / 14
-        ink.withAlphaComponent(26 / 255).setFill()
+        ink.withAlphaComponent(Self.discAlpha).setFill()
         NSBezierPath(ovalIn: bounds).fill()
         ink.setFill()
         for x in [4.5, 8.0] {

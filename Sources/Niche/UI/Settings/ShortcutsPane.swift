@@ -1,6 +1,23 @@
 import AppKit
 import SwiftUI
 
+/// The Shortcuts pane's own geometry.
+private enum Metrics {
+    /// The action list's column.
+    static let listWidth: CGFloat = 300
+    /// The plate behind the empty detail's symbol.
+    static let emptyPlate: CGFloat = 44
+    /// The recorder field: tall enough for full-size key caps.
+    static let recorderHeight: CGFloat = 40
+    /// The dot that pulses while a shortcut is recorded: its size, how far it dims, and one beat.
+    static let recordingDot: CGFloat = 7
+    static let pulseDim: CGFloat = 0.35
+    static let pulse: TimeInterval = 0.7
+    /// A key cap's side: in a list row, and in the recorder.
+    static let capCompact: CGFloat = 18
+    static let cap: CGFloat = 26
+}
+
 /// Every menu action and its keyboard shortcut: a searchable list grouped under the menus, and a
 /// detail column to record a new shortcut for the selected action.
 struct ShortcutsPane: View {
@@ -13,16 +30,14 @@ struct ShortcutsPane: View {
     /// or clicking elsewhere takes it away, and the pane never opens with it focused.
     @FocusState private var searchFocused: Bool
 
-    private static let listWidth: CGFloat = 300
-    private static let rowHeight: CGFloat = 32
     private static let sections: [(MenuSection, String)] = [
         (.app, "Niche"), (.file, "File"), (.edit, "Edit"), (.view, "View"), (.spaces, "Spaces"),
         (.tabs, "Tabs"), (.archive, "Archive"), (.window, "Window"),
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: Design.Space.l) {
+            HStack(spacing: Design.Space.m) {
                 SettingsSearchField(text: $query, focused: $searchFocused)
                 iconMenu("line.3.horizontal.decrease", help: "Filter", active: customizedOnly || conflictingOnly) {
                     Toggle("Customized Shortcuts", isOn: $customizedOnly)
@@ -32,14 +47,14 @@ struct ShortcutsPane: View {
                     Button("Reset All Shortcuts") { bindings.resetOverrides() }
                 }
             }
-            HStack(alignment: .top, spacing: 20) {
+            HStack(alignment: .top, spacing: Design.Space.xxl) {
                 list
                 detail
             }
         }
         .frame(maxWidth: SettingsMetrics.contentWidth)
         .padding(.horizontal, Design.Space.pane)
-        .padding(.top, 4)
+        .padding(.top, Design.Space.xs)
         .padding(.bottom, Design.Space.pane)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .contentShape(Rectangle())
@@ -82,28 +97,28 @@ struct ShortcutsPane: View {
     }
 
     private var list: some View {
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 1) {
-                ForEach(visible, id: \.title) { group in
-                    Text(group.title)
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
-                        .padding(.leading, 10)
-                        .padding(.top, 12)
-                        .padding(.bottom, 4)
-                    ForEach(group.actions) { a in row(a) }
+        SettingsCard {
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: Design.Space.hair) {
+                    ForEach(visible, id: \.title) { group in
+                        Text(group.title)
+                            .font(Design.Font.ui(.caption, .semibold)).foregroundStyle(.tertiary)
+                            .padding(.leading, SettingsMetrics.fieldInset)
+                            .padding(.top, Design.Space.l)
+                            .padding(.bottom, Design.Space.xs)
+                        ForEach(group.actions) { a in row(a) }
+                    }
+                    if visible.isEmpty {
+                        Text("No matching actions").font(Design.Font.detail).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity).padding(.top, Design.Space.xxxl)
+                    }
                 }
-                if visible.isEmpty {
-                    Text("No matching actions").font(Design.Font.detail).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity).padding(.top, 24)
-                }
+                .padding(Design.Space.s)
             }
-            .padding(6)
+            .frame(maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous))
         }
-        .frame(width: Self.listWidth)
-        .frame(maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(Design.surface))
-        .clipShape(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Design.hairline))
+        .frame(width: Metrics.listWidth)
     }
 
     private func row(_ a: KeyAction) -> some View {
@@ -117,15 +132,15 @@ struct ShortcutsPane: View {
 
     @ViewBuilder private var detail: some View {
         if let a = selectedID.flatMap({ bindings.action($0) }) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: Design.Space.m) {
                 HStack(alignment: .center) {
-                    Text(a.name).font(.system(size: 17, weight: .semibold))
+                    Text(a.name).font(Design.Font.ui(.headline, .semibold))
                     Spacer()
                     Menu {
                         Button("Reset to Default") { bindings.resetShortcuts(for: a.id) }.disabled(!bindings.isOverridden(a.id))
                         Button("Remove Shortcut") { bindings.setShortcuts([], for: a.id) }.disabled(a.shortcuts.isEmpty)
                     } label: {
-                        SettingsIconTile(symbol: "ellipsis", active: false, size: 26)
+                        SettingsIconTile(symbol: "ellipsis", active: false, size: Design.Space.controlCompact)
                     }
                     .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
                     .help("Shortcut options")
@@ -135,7 +150,7 @@ struct ShortcutsPane: View {
                     .font(Design.Font.body).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 ShortcutRecorder(action: a)
-                    .padding(.top, 6)
+                    .padding(.top, Design.Space.s)
                 Text("Click the field, then press the new keys. Esc cancels, ⌫ removes the shortcut.")
                     .font(Design.Font.detail).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -147,21 +162,21 @@ struct ShortcutsPane: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.top, 8)
+            .padding(.top, Design.Space.m)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         } else {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: Design.Space.m) {
                 Image(systemName: "command")
-                    .font(.system(size: 22, weight: .medium)).foregroundStyle(.tertiary)
-                    .frame(width: 44, height: 44)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06)))
+                    .font(.system(size: Design.Icon.large, weight: .medium)).foregroundStyle(.tertiary)
+                    .frame(width: Metrics.emptyPlate, height: Metrics.emptyPlate)
+                    .background(RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous).fill(Design.fill(.hover)))
                 Text("Perform common actions faster, from anywhere in Niche.")
                     .font(Design.Font.body)
                 Text("Select an action to change its keyboard shortcut.")
                     .font(Design.Font.body).foregroundStyle(.secondary)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 8)
+            .padding(.top, Design.Space.m)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
@@ -172,19 +187,19 @@ struct ShortcutsPane: View {
 struct SettingsIconTile: View {
     let symbol: String
     let active: Bool
-    var size: CGFloat = 30
+    var size: CGFloat = Design.Space.control
     @State private var hovered = false
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: Design.Icon.regular, weight: .semibold))
             .foregroundStyle(active ? Design.accent : Color.secondary)
             .frame(width: size, height: size)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(active ? Design.accent.opacity(0.14) : Color.primary.opacity(hovered ? 0.12 : 0.06)))
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
+                .fill(active ? Design.accent.opacity(0.14) : Design.fill(hovered ? .pressed : .hover)))
+            .contentShape(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous))
             .onHover { hovered = $0 }
-            .animation(.easeOut(duration: 0.12), value: hovered)
+            .animation(.easeOut(duration: Design.Motion.fast), value: hovered)
     }
 }
 
@@ -197,16 +212,16 @@ private struct ShortcutListRow: View {
 
     var body: some View {
         Button(action: select) {
-            HStack(spacing: 8) {
+            HStack(spacing: Design.Space.m) {
                 Text(action.name).font(Design.Font.body).foregroundStyle(.primary).lineLimit(1)
-                Spacer(minLength: 8)
+                Spacer(minLength: Design.Space.m)
                 if let s = action.primary { KeyCaps(caps: s.caps, compact: true) }
             }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: Design.Radius.row - 2, style: .continuous)
+            .padding(.horizontal, SettingsMetrics.fieldInset)
+            .frame(height: Design.Space.control)
+            .background(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous)
                 .fill(selected ? Design.accent.opacity(0.16) : (hovered ? Design.rowHover : .clear)))
-            .overlay(RoundedRectangle(cornerRadius: Design.Radius.row - 2, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous)
                 .strokeBorder(selected ? Design.accent.opacity(0.35) : .clear))
             .contentShape(Rectangle())
         }
@@ -222,15 +237,16 @@ struct KeyCaps: View {
     var compact = false
 
     var body: some View {
-        HStack(spacing: compact ? 3 : 4) {
+        let side = compact ? Metrics.capCompact : Metrics.cap
+        HStack(spacing: compact ? Design.Space.xxs : Design.Space.xs) {
             ForEach(Array(caps.enumerated()), id: \.offset) { _, cap in
                 Text(cap)
-                    .font(.system(size: compact ? 11 : 13, weight: .medium, design: .rounded))
+                    .font(Design.Font.ui(compact ? .caption : .body, .medium, design: .rounded))
                     .foregroundStyle(compact ? .secondary : .primary)
-                    .frame(minWidth: compact ? 18 : 26, minHeight: compact ? 18 : 26)
-                    .padding(.horizontal, cap.count > 1 ? 4 : 0)
-                    .background(RoundedRectangle(cornerRadius: compact ? 4 : 6, style: .continuous)
-                        .fill(Color.primary.opacity(compact ? 0.07 : 0.1)))
+                    .frame(minWidth: side, minHeight: side)
+                    .padding(.horizontal, cap.count > 1 ? Design.Space.xs : 0)
+                    .background(RoundedRectangle(cornerRadius: compact ? Design.Radius.small : Design.Radius.inset, style: .continuous)
+                        .fill(Design.fill(compact ? .hover : .selected)))
             }
         }
         .accessibilityElement(children: .ignore)
@@ -248,13 +264,14 @@ struct ShortcutRecorder: View {
     @State private var monitor: Any?
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Design.Space.m) {
             Button {
                 recording ? stop() : start()
             } label: {
                 HStack {
                     if recording {
-                        Circle().fill(Design.accent).frame(width: 7, height: 7).opacity(pulse ? 0.35 : 1)
+                        Circle().fill(Design.accent).frame(width: Metrics.recordingDot, height: Metrics.recordingDot)
+                            .opacity(pulse ? Metrics.pulseDim : 1)
                         Text("Press the new shortcut…").font(Design.Font.body).foregroundStyle(Design.accent)
                     } else if action.shortcuts.isEmpty {
                         Text("Record Shortcut").font(Design.Font.body).foregroundStyle(.secondary)
@@ -263,12 +280,13 @@ struct ShortcutRecorder: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 40)
+                .padding(.horizontal, SettingsMetrics.fieldInset)
+                .frame(height: Metrics.recorderHeight)
                 .frame(maxWidth: .infinity)
                 .background(RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous).fill(Design.surface))
                 .overlay(RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous)
-                    .strokeBorder(recording ? Design.accent : Design.hairline, lineWidth: recording ? 1.5 : 1))
+                    .strokeBorder(recording ? Design.accent : Design.hairline,
+                                  lineWidth: recording ? SettingsMetrics.focusRing : Design.Space.hair))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -276,7 +294,7 @@ struct ShortcutRecorder: View {
             .accessibilityValue(action.shortcuts.map(\.display).joined(separator: ", "))
             if !action.shortcuts.isEmpty && !recording {
                 Button { bindings.setShortcuts([], for: action.id) } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 15)).foregroundStyle(.tertiary)
+                    Image(systemName: "xmark.circle.fill").font(.system(size: Design.Icon.bar)).foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
                 .help("Remove shortcut")
@@ -289,7 +307,7 @@ struct ShortcutRecorder: View {
 
     private func start() {
         recording = true
-        withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true }
+        withAnimation(.easeInOut(duration: Metrics.pulse).repeatForever(autoreverses: true)) { pulse = true }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
             handle(e)
             return nil
@@ -318,8 +336,8 @@ struct SettingsSearchField: View {
     var focused: FocusState<Bool>.Binding
 
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+        HStack(spacing: Design.Space.s) {
+            Image(systemName: "magnifyingglass").font(.system(size: Design.Icon.regular, weight: .medium)).foregroundStyle(.secondary)
             TextField("Search", text: $text)
                 .textFieldStyle(.plain)
                 .font(Design.Font.body)
@@ -333,11 +351,12 @@ struct SettingsSearchField: View {
                 .accessibilityLabel("Clear search")
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .strokeBorder(focused.wrappedValue ? Design.accent.opacity(0.7) : Design.hairline, lineWidth: focused.wrappedValue ? 1.5 : 1))
+        .padding(.horizontal, SettingsMetrics.fieldInset)
+        .frame(height: Design.Space.control)
+        .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.fill(.hover)))
+        .overlay(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
+            .strokeBorder(focused.wrappedValue ? Design.accent.opacity(0.7) : Design.hairline,
+                          lineWidth: focused.wrappedValue ? SettingsMetrics.focusRing : Design.Space.hair))
     }
 }
 

@@ -20,7 +20,7 @@ struct FaviconView: View {
                 .renderingMode(flip ? .template : .original)
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .foregroundStyle(dark ? Color.white.opacity(0.92) : Color.black.opacity(0.85))
+                .foregroundStyle(dark ? Design.onDarkColor(.primary) : Design.onLightColor(.primary))
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
         } else {

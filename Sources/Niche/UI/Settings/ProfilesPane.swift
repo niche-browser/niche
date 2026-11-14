@@ -2,6 +2,15 @@ import AppKit
 import NicheCEF
 import SwiftUI
 
+private enum Metrics {
+    /// A profile's round monogram plate.
+    static let monogram: CGFloat = 28
+    /// Where the dividers start under the profile rows: at their text, past the monogram.
+    static let monogramDividerInset = Design.Space.rowInset + monogram + Design.Space.l
+    /// The download location menu: every profile's is the same width.
+    static let downloadMenuWidth: CGFloat = 220
+}
+
 /// The profiles and the spaces using each, then each profile's downloads, website languages and
 /// Chromium pages. A space picks its profile in Edit Space. Only a profile no space uses can be
 /// deleted, and never Default.
@@ -16,7 +25,7 @@ struct ProfilesPane: View {
                             footnote: "Each profile keeps its own logins, cookies and site data. Assign one to a space from the space’s menu.") {
                 row(name: "Default", profileID: nil) { EmptyView() }
                 ForEach(store.profiles) { p in
-                    SettingsCardDivider(inset: 56)
+                    SettingsCardDivider(inset: Metrics.monogramDividerInset)
                     row(name: p.name, profileID: p.id) {
                         Button("Rename…") { rename(p) }
                         Button("Delete…") { delete(p) }
@@ -58,7 +67,7 @@ struct ProfilesPane: View {
             .id(nav.shown)  // read again each time Settings comes up: Chromium's page may have changed them
             SettingsSection(title: "Your data and settings") {
                 ForEach(Array(Self.dataPages.enumerated()), id: \.offset) { i, page in
-                    if i > 0 { SettingsCardDivider(inset: 54) }
+                    if i > 0 { SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset) }
                     dataRow(page)
                 }
             }
@@ -86,7 +95,7 @@ struct ProfilesPane: View {
                     ForEach(store.profiles) { p in Button(p.name) { actions.openProfilePage(page.url, p.id) } }
                 }
                 .menuStyle(.button)
-                .controlSize(.large)
+                .controlSize(.regular)
                 .fixedSize()
             }
         }
@@ -136,8 +145,8 @@ struct ProfilesPane: View {
                 Divider()
                 Text("Other…").tag(DownloadChoice.other)
             }
-            .labelsHidden().pickerStyle(.menu).controlSize(.large)
-            .frame(width: 220)
+            .labelsHidden().pickerStyle(.menu).controlSize(.regular)
+            .frame(width: Metrics.downloadMenuWidth)
             .help(folder.path)
         }
     }
@@ -146,7 +155,7 @@ struct ProfilesPane: View {
         let summary = BrowserLanguages.summary(languages(profileID: profileID))
         let hasSpace = !store.spaces(usingProfile: profileID).isEmpty
         return SettingsCardRow {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Design.Space.xxs) {
                 Text(name).font(Design.Font.body)
                 Text(summary.isEmpty ? "The browser’s default languages" : summary)
                     .font(Design.Font.detail).foregroundStyle(.secondary).lineLimit(1)
@@ -176,7 +185,7 @@ struct ProfilesPane: View {
         let dialog = AppDialog(title: "Rename your Profile",
                                message: "This won’t affect the names of any of the Spaces associated with this Profile.",
                                actions: [DialogAction("Save"), .cancel], input: profile.name, placeholder: "Profile name", requiresInput: true,
-                               icon: .none, width: 496, buttonSpacing: 30, buttonOutset: 0)
+                               icon: .none, width: 496)
         dialog.present(over: window) { response in
             guard response == .alertFirstButtonReturn, let name = dialog.input else { return }
             store.renameProfile(profile.id, to: name.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -196,9 +205,9 @@ struct ProfilesPane: View {
     private func row<Trailing: View>(name: String, profileID: UUID?, @ViewBuilder trailing: () -> Trailing) -> some View {
         let spaces = store.spaces(usingProfile: profileID)
         return SettingsCardRow {
-            HStack(spacing: 12) {
+            HStack(spacing: Design.Space.l) {
                 ProfileMonogram(name: name)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Design.Space.xxs) {
                     Text(name).font(Design.Font.body)
                     Text(spaces.isEmpty ? "No spaces use it" : "Used by " + spaces.map(\.labeled).joined(separator: ", "))
                         .font(Design.Font.detail).foregroundStyle(.secondary).lineLimit(1)
@@ -215,10 +224,10 @@ private struct ProfileMonogram: View {
     let name: String
     var body: some View {
         Text(String(name.prefix(1)).uppercased())
-            .font(.system(size: 13, weight: .semibold))
+            .font(Design.Font.ui(.body, .semibold))
             .foregroundStyle(.secondary)
-            .frame(width: 28, height: 28)
-            .background(Circle().fill(Color.primary.opacity(0.08)))
+            .frame(width: Metrics.monogram, height: Metrics.monogram)
+            .background(Circle().fill(Design.fill(.selected)))
             .accessibilityHidden(true)
     }
 }

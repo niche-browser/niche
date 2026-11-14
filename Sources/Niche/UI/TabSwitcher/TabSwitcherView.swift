@@ -31,6 +31,23 @@ enum TabSwitcherMetrics {
     }
 }
 
+/// The switcher's own colours (Arc 1.170's, with a light counterpart).
+private enum TabSwitcherPalette {
+    private static let panelLight = NSColor(white: 0.97, alpha: 1)
+    private static let outerLineDark = NSColor.black.withAlphaComponent(0.92)
+    private static let innerLineDark = NSColor.white.withAlphaComponent(0.23)
+    private static let innerLineLight = NSColor.white.withAlphaComponent(0.8)
+    /// A tab never seen since launch: Arc shows an empty #1C1C1C card.
+    private static let emptyCardDark = NSColor(white: 28 / 255, alpha: 1)
+    private static let emptyCardLight = NSColor(white: 0.9, alpha: 1)
+
+    static func panel(dark: Bool) -> NSColor { dark ? Design.panelDark : panelLight }
+    static func outerLine(dark: Bool) -> NSColor { dark ? outerLineDark : Design.barFill(.selected, onLight: true) }
+    static func innerLine(dark: Bool) -> NSColor { dark ? innerLineDark : innerLineLight }
+    static func emptyCard(dark: Bool) -> NSColor { dark ? emptyCardDark : emptyCardLight }
+    static func ink(dark: Bool) -> NSColor { dark ? Design.onDark(.primary) : Design.onLight(.primary) }
+}
+
 /// The switcher panel: a dark rounded slab of cards, each a page thumbnail over its favicon
 /// and title, the selected one on the space's highlight.
 @MainActor
@@ -53,8 +70,8 @@ final class TabSwitcherView: NSView {
             l.cornerCurve = .continuous
             l.borderWidth = 1
             l.shadowColor = NSColor.black.cgColor
-            l.shadowRadius = 24
-            l.shadowOffset = CGSize(width: 0, height: -10)
+            l.shadowRadius = Design.Shadow.panelRadius
+            l.shadowOffset = CGSize(width: 0, height: -Design.Shadow.panelOffset)
             innerLine.borderWidth = 1
             innerLine.cornerRadius = M.cornerRadius - 1
             innerLine.cornerCurve = .continuous
@@ -74,11 +91,11 @@ final class TabSwitcherView: NSView {
         }
         appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         if let l = panel.layer {
-            // Arc: #1C1B1A inside a near-black outer line and a 23% white inner line.
-            l.backgroundColor = (dark ? NSColor(red: 28 / 255, green: 27 / 255, blue: 26 / 255, alpha: 1) : NSColor(white: 0.97, alpha: 1)).cgColor
-            l.borderColor = NSColor.black.withAlphaComponent(dark ? 0.92 : 0.12).cgColor
+            // Arc: a dark slab inside a near-black outer line and a 23% white inner line.
+            l.backgroundColor = TabSwitcherPalette.panel(dark: dark).cgColor
+            l.borderColor = TabSwitcherPalette.outerLine(dark: dark).cgColor
             l.shadowOpacity = dark ? 0.3 : 0.18
-            innerLine.borderColor = NSColor.white.withAlphaComponent(dark ? 0.23 : 0.8).cgColor
+            innerLine.borderColor = TabSwitcherPalette.innerLine(dark: dark).cgColor
         }
         while cards.count < items.count {
             let c = TabSwitcherCardView()
@@ -126,7 +143,7 @@ private final class TabSwitcherCardView: NSView {
     private let thumb = CALayer()
     private let favicon = NSImageView()
     private let placeholder = NSView()
-    private let title = NSTextField.sidebarLabel(size: 14, weight: .medium)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .medium)
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -151,7 +168,7 @@ private final class TabSwitcherCardView: NSView {
         favicon.layer?.masksToBounds = true
         addSubview(favicon)
         placeholder.wantsLayer = true
-        placeholder.layer?.cornerRadius = 4.5
+        placeholder.layer?.cornerRadius = Design.Radius.small
         placeholder.layer?.cornerCurve = .continuous
         addSubview(placeholder)
         addSubview(title)
@@ -168,9 +185,9 @@ private final class TabSwitcherCardView: NSView {
             thumb.contents = image.layerContents(forContentsScale: window?.backingScaleFactor ?? 2)
             thumb.backgroundColor = nil
         } else {
-            // A tab never seen since launch: Arc shows an empty #1C1C1C card.
+            // A tab never seen since launch: Arc shows an empty card.
             thumb.contents = nil
-            thumb.backgroundColor = (dark ? NSColor(white: 28 / 255, alpha: 1) : NSColor(white: 0.9, alpha: 1)).cgColor
+            thumb.backgroundColor = TabSwitcherPalette.emptyCard(dark: dark).cgColor
         }
         CATransaction.commit()
         // Arc's switcher draws a missing favicon as a faint rounded square, not a globe.
@@ -181,7 +198,7 @@ private final class TabSwitcherCardView: NSView {
                 let t = icon.copy() as! NSImage
                 t.isTemplate = true
                 favicon.image = t
-                favicon.contentTintColor = dark ? NSColor.white.withAlphaComponent(0.92) : NSColor.black.withAlphaComponent(0.85)
+                favicon.contentTintColor = TabSwitcherPalette.ink(dark: dark)
             } else {
                 favicon.image = icon
                 favicon.contentTintColor = nil
@@ -189,11 +206,11 @@ private final class TabSwitcherCardView: NSView {
         } else {
             favicon.isHidden = true
             placeholder.isHidden = false
-            placeholder.layer?.backgroundColor = (dark ? NSColor.white.withAlphaComponent(0.14) : NSColor.black.withAlphaComponent(0.1)).cgColor
+            placeholder.layer?.backgroundColor = Design.barFill(.pressed, onLight: !dark).cgColor
         }
-        // Arc's titles measure as SF 14 medium (ink width and cap height match).
+        // Arc's titles measure as SF 14 medium (ink width and cap height match); these are the body size.
         title.stringValue = item.title
-        title.textColor = dark ? .white : NSColor.black.withAlphaComponent(0.85)
+        title.textColor = dark ? .white : Design.onLight(.primary)
         needsLayout = true
     }
 
@@ -263,7 +280,7 @@ extension SpaceTheme {
         let target = OKLab.maxChroma(L: L, hue: hue) * min(1, chroma / 0.03)
         let rgb = OKLab.toRGB(L: L, a: target * cos(hue), b: target * sin(hue))
         let k = 0.8075
-        return NSColor(srgbRed: rgb.r * k, green: rgb.g * k, blue: rgb.b * k, alpha: 1)
+        return NSColor(RGB(rgb.r * k, rgb.g * k, rgb.b * k))
     }
 
     /// Arc's foregroundSecondary (Office 131/137/255, OKLab L 0.68): the developer bar's dividers at 45%,
@@ -275,7 +292,7 @@ extension SpaceTheme {
         let L = 0.68
         let target = OKLab.maxChroma(L: L, hue: hue) * min(1, (lab.a * lab.a + lab.b * lab.b).squareRoot() / 0.03)
         let rgb = OKLab.toRGB(L: L, a: target * cos(hue), b: target * sin(hue))
-        return NSColor(srgbRed: rgb.r, green: rgb.g, blue: rgb.b, alpha: 1)
+        return NSColor(RGB(rgb.r, rgb.g, rgb.b))
     }
 }
 

@@ -101,7 +101,7 @@ final class SidebarUIState {
         settleGeneration &+= 1
         let generation = settleGeneration
         // A spring cut short may never report back: don't leave the strip ignoring clicks.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.endSpaceSettle(generation) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2 * Self.spaceSettleTime) { [weak self] in self?.endSpaceSettle(generation) }
         return generation
     }
 
@@ -112,8 +112,9 @@ final class SidebarUIState {
         HitchMonitor.mark("swipe-settled")
     }
     /// Dia settles pages with a zero-bounce spring that picks up the release speed.
+    static let spaceSettleTime: TimeInterval = 0.4
     var spaceSettleAnimation: Animation {
-        .interpolatingSpring(duration: 0.4, bounce: 0, initialVelocity: spaceSettleVelocity)
+        .interpolatingSpring(duration: Self.spaceSettleTime, bounce: 0, initialVelocity: spaceSettleVelocity)
     }
     /// Tabs picked with ⌘/⇧-click; closing acts on all of them.
     var multiSelection: Set<UUID> = []
@@ -170,6 +171,9 @@ struct TabNavState: Equatable {
     var canGoForward = false
     var isLoading = false
     var themeColor = ""
+    /// The ground the page has drawn ("#RRGGBB", "" until it has): the bar's colour while the
+    /// page loads and its top edge can't be read yet (ToolbarColor).
+    var pageColor = ""
     /// The service a WebKit page plays ("Spotify"; docs/protected-media.md), nil for Chromium's:
     /// its extension buttons dim and the Site Control Center says why.
     var protectedMedia: String?

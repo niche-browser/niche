@@ -153,7 +153,7 @@ final class SidebarView: NSView {
         let clearTop = max(0, h - DownloadsTrayMetrics.listHeight(rows: rows) - 1)
         let fadeTop = max(0, clearTop - DownloadsTrayMetrics.fade)
         CATransaction.begin()
-        CATransaction.setAnimationDuration(open ? 0.18 : 0.13)
+        CATransaction.setAnimationDuration(open ? Design.Motion.standard : Design.Motion.fast)
         if !open { CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut)) }
         trayMask.frame = pager.bounds
         trayMask.locations = [0, NSNumber(value: Double(fadeTop / h)), NSNumber(value: Double(clearTop / h)), 1]
@@ -163,6 +163,9 @@ final class SidebarView: NSView {
         if pager.layer?.mask !== trayMask { pager.layer?.mask = trayMask }
         trayHost.isHidden = rows == 0
     }
+
+    /// The Library's arrival, as short as Arc's.
+    private static let libraryIn: TimeInterval = 0.05
 
     /// The Library takes over the column: in from a little to the left, out to the left past its
     /// rail while the tab list fades back in.
@@ -179,16 +182,16 @@ final class SidebarView: NSView {
                 host.frame = bounds.offsetBy(dx: -24, dy: 0)
             }
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.05
+                ctx.duration = Design.Motion.duration(Self.libraryIn)
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 host.animator().alphaValue = 1
                 host.animator().frame = bounds
                 tabs.animator().alphaValue = 0
             }
             // Faded out isn't gone: the favorites' tracking areas would still show their tooltips and
-            // preview cards through the Library. Hidden once the 0.05 s fade is over (a timer, as an
+            // preview cards through the Library. Hidden once the fade is over (a timer, as an
             // animation's completion can wait while the window is off screen).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.libraryIn + 0.01) { [weak self] in
                 guard let self, self.shownLibrary != nil, self.ui.libraryReveal == nil else { return }
                 self.tabs.isHidden = true
                 NicheLog.note("library covers the tab list")
@@ -197,7 +200,7 @@ final class SidebarView: NSView {
             libraryHost = nil
             tabs.isHidden = false
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.1
+                ctx.duration = Design.Motion.duration(Design.Motion.fast)
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 host.animator().alphaValue = 0
                 host.animator().frame = bounds.offsetBy(dx: -LibraryMetrics.rail, dy: 0)
@@ -380,7 +383,7 @@ final class SidebarTopBarView: NSView {
     }
 
     private func button(_ key: String, symbol: String, help: String, size: CGFloat, height: CGFloat, iconSize: CGFloat,
-                        weight: NSFont.Weight = .regular, active: Bool?, enabled: Bool = true, animated: Bool = false,
+                        weight: NSFont.Weight = Design.Icon.weight, active: Bool?, enabled: Bool = true, animated: Bool = false,
                         action: @escaping () -> Void) -> SidebarGlyphButton {
         let b = buttons[key] ?? {
             let b = SidebarGlyphButton(symbol: symbol, size: size, height: height, iconSize: iconSize, weight: weight, help: help, colors: colors, action: action)
@@ -412,29 +415,31 @@ final class SidebarTopBarView: NSView {
         var shown: [SidebarGlyphButton] = []
         let headerHasToggle = ToolbarComposition.sidebarHeaderHasToggle(toolbarShown: !compact, kind: barKind, inSplit: ui.splitPaneIDs.count > 1)
         if headerHasToggle {
-            shown.append(button("toggle", symbol: "sidebar.left", help: help, size: 32, height: 32, iconSize: 15.5, active: active) { [weak self] in self?.actions.toggleSidebar() })
+            shown.append(button("toggle", symbol: "sidebar.left", help: help, size: 32, height: 32, iconSize: Design.Icon.bar, active: active) { [weak self] in self?.actions.toggleSidebar() })
         }
-        // An incognito or Blank Window has one space of its own: nothing to switch to.
-        if !headerHasToggle, !store.isStandalone(window: ui.windowID) {
+        // The space is named once: here only while the list's own space header is hidden.
+        let space = store.focusedSpace(window: ui.windowID)
+        if ToolbarComposition.sidebarHeaderNamesSpace(headerHasToggle: headerHasToggle, standaloneWindow: store.isStandalone(window: ui.windowID),
+                                                      spaceHeaderHidden: store.hidesSpaceHeader(space.id)) {
             let sw = switcher ?? {
                 let v = SidebarSpaceSwitcher(store: store, ui: ui, actions: actions)
                 addSubview(v)
                 switcher = v
                 return v
             }()
-            sw.show(space: store.focusedSpace(window: ui.windowID), colors: colors, active: active)
+            sw.show(space: space, colors: colors, active: active)
         } else if let sw = switcher {
             sw.removeFromSuperview()
             switcher = nil
         }
         if compact {
-            shown.append(button("back", symbol: "arrow.left", help: "Go Back (⌘[)", size: 32, height: 32, iconSize: 15, active: active, enabled: ui.canGoBack) { [weak self] in self?.actions.goBack() })
-            shown.append(button("forward", symbol: "arrow.right", help: "Go Forward (⌘])", size: 32, height: 32, iconSize: 15, active: active, enabled: ui.canGoForward) { [weak self] in self?.actions.goForward() })
-            shown.append(button("reload", symbol: reloadSymbol, help: "Refresh (⌘R)", size: 32, height: 32, iconSize: 15, active: active, animated: true) { [weak self] in self?.actions.reload() })
+            shown.append(button("back", symbol: "chevron.left", help: "Go Back (⌘[)", size: 32, height: 32, iconSize: Design.Icon.bar, active: active, enabled: ui.canGoBack) { [weak self] in self?.actions.goBack() })
+            shown.append(button("forward", symbol: "chevron.right", help: "Go Forward (⌘])", size: 32, height: 32, iconSize: Design.Icon.bar, active: active, enabled: ui.canGoForward) { [weak self] in self?.actions.goForward() })
+            shown.append(button("reload", symbol: reloadSymbol, help: "Refresh (⌘R)", size: 32, height: 32, iconSize: Design.Icon.bar, active: active, animated: true) { [weak self] in self?.actions.reload() })
         } else if devNav {
-            shown.append(button("dback", symbol: "arrow.left", help: "Go Back (⌘[)", size: 34, height: 28, iconSize: 15, active: nil, enabled: ui.canGoBack) { [weak self] in self?.actions.goBack() })
-            shown.append(button("dforward", symbol: "arrow.right", help: "Go Forward (⌘])", size: 34, height: 28, iconSize: 15, active: nil, enabled: ui.canGoForward) { [weak self] in self?.actions.goForward() })
-            shown.append(button("dreload", symbol: reloadSymbol, help: "Refresh (⌘R)", size: 24, height: 24, iconSize: 15, active: nil, animated: true) { [weak self] in self?.actions.reload() })
+            shown.append(button("dback", symbol: "chevron.left", help: "Go Back (⌘[)", size: 34, height: 28, iconSize: Design.Icon.bar, active: nil, enabled: ui.canGoBack) { [weak self] in self?.actions.goBack() })
+            shown.append(button("dforward", symbol: "chevron.right", help: "Go Forward (⌘])", size: 34, height: 28, iconSize: Design.Icon.bar, active: nil, enabled: ui.canGoForward) { [weak self] in self?.actions.goForward() })
+            shown.append(button("dreload", symbol: reloadSymbol, help: "Refresh (⌘R)", size: 24, height: 24, iconSize: Design.Icon.bar, active: nil, animated: true) { [weak self] in self?.actions.reload() })
         }
         for (k, b) in buttons where !shown.contains(where: { $0 === b }) {
             b.removeFromSuperview()
@@ -534,14 +539,16 @@ final class SidebarTopBarView: NSView {
 
 /// The window's space by the traffic lights: its name and a small chevron on a plate that shows on
 /// hover, and a menu of the spaces under it (the one shown ticked, then New Space…). There while
-/// the toolbar carries the sidebar toggle (`ToolbarComposition.sidebarHeaderHasToggle`).
+/// nothing else names the space (`ToolbarComposition.sidebarHeaderNamesSpace`).
 final class SidebarSpaceSwitcher: NSView {
     static let height: CGFloat = 26
     private let store: SidebarStore
     private let ui: SidebarUIState
     private let actions: SidebarActions
-    private let label = NSTextField.sidebarLabel(size: 13, weight: .semibold)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
     private let chevron = NSImageView()
+    /// The chevron after the name: smaller than any glyph of the scale, so bold to stay legible.
+    private static let chevronSize: CGFloat = 9
     private var colors = SidebarColors()
     private var hovering = false { didSet { if hovering != oldValue { refreshFill() } } }
     private var menuOpen = false { didSet { if menuOpen != oldValue { refreshFill() } } }
@@ -552,9 +559,9 @@ final class SidebarSpaceSwitcher: NSView {
         self.actions = actions
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 7
+        layer?.cornerRadius = Design.Radius.inset
         layer?.cornerCurve = .continuous
-        chevron.image = SidebarSymbols.image("chevron.down", size: 9, weight: .bold)
+        chevron.image = SidebarSymbols.image("chevron.down", size: Self.chevronSize, weight: .bold)
         chevron.imageScaling = .scaleNone
         addSubview(label)
         addSubview(chevron)
@@ -577,7 +584,7 @@ final class SidebarSpaceSwitcher: NSView {
             superview?.needsLayout = true
         }
         // Like the header's buttons, the name steps back while Niche is behind another app.
-        label.textColor = c.textPrimary.withAlphaComponent(c.textPrimary.alphaComponent * (active ? 0.9 : 0.5))
+        label.textColor = active ? c.textPrimary : c.textPrimary.withAlphaComponent(c.textPrimary.alphaComponent * Design.Opacity.dimmed)
         chevron.contentTintColor = c.textTertiary
         setAccessibilityLabel("Space")
         setAccessibilityValue(space.title)
@@ -647,12 +654,14 @@ final class SidebarSpaceSwitcher: NSView {
 private final class DevMenuChevron: NSView {
     private let actions: SidebarActions
     private let image = NSImageView()
+    /// The ⌄ itself: smaller than any glyph of the scale, so bold to stay legible.
+    private static let size: CGFloat = 8
     var tint: NSColor = .tertiaryLabelColor { didSet { image.contentTintColor = tint } }
 
     init(actions: SidebarActions) {
         self.actions = actions
         super.init(frame: .zero)
-        image.image = SidebarSymbols.image("chevron.down", size: 8, weight: .bold)
+        image.image = SidebarSymbols.image("chevron.down", size: Self.size, weight: .bold)
         image.imageScaling = .scaleNone
         image.autoresizingMask = [.width, .height]
         addSubview(image)
@@ -685,7 +694,7 @@ private final class DevMenuChevron: NSView {
 final class SidebarURLPill: NSView {
     var actions: SidebarActions?
     var showAccessories = false { didSet { if showAccessories != oldValue { refreshAccessories(animated: true) } } }
-    private let label = NSTextField.sidebarLabel(size: 13)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     private let tip: ArcTooltipAnchorView
     private var accessories: [NSView] = []
     /// What each of `accessories` is, in order.
@@ -699,7 +708,7 @@ final class SidebarURLPill: NSView {
         tip = ArcTooltipAnchorView(frame: .zero)
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = Design.Radius.control
         layer?.cornerCurve = .continuous
         label.lineBreakMode = .byTruncatingMiddle
         addSubview(label)
@@ -752,16 +761,17 @@ final class SidebarURLPill: NSView {
                 let b = ToolbarGlyphButton()
                 // Arc's pinned extension buttons have no tooltip (#106), unless they can't run here.
                 b.configure(symbol: nil, image: icons[id] ?? nil, help: protectedMedia.map(ExtensionStore.offOnProtectedMedia) ?? "",
-                            enabled: protectedMedia == nil, width: 28, iconSize: 16, tint: colors.textSecondary)
+                            enabled: protectedMedia == nil, width: 28, iconSize: Design.Icon.image, tint: colors.textSecondary,
+                            hover: colors.plate(.hover))
                 b.action = { actions.runExtension(id) }
                 b.menuProvider = { ExtensionStore.shared.entries.first { $0.extensionID == id }.map(ExtensionsMenu.iconMenu) }
                 accessories.append(b)
             case .copyURL:
-                let copy = SidebarGlyphButton(symbol: "link", size: 28, height: 28, iconSize: 14, weight: .regular, help: "Copy URL (⇧⌘C)", colors: colors) { actions.performAction("copyURL") }
+                let copy = SidebarGlyphButton(symbol: "link", size: 28, height: 28, iconSize: Design.Icon.bar, help: "Copy URL (⇧⌘C)", colors: colors) { actions.performAction("copyURL") }
                 copy.active = m.active
                 accessories.append(copy)
             case .extensions:
-                let e = SidebarGlyphButton(symbol: "slider.horizontal.2.square", size: 28, height: 28, iconSize: 15, weight: .regular, help: "Extensions", colors: colors) { actions.showExtensionsMenu() }
+                let e = SidebarGlyphButton(symbol: "slider.horizontal.2.square", size: 28, height: 28, iconSize: Design.Icon.bar, help: "Extensions", colors: colors) { actions.showExtensionsMenu() }
                 e.active = m.active
                 accessories.append(e)
             default:
@@ -774,7 +784,7 @@ final class SidebarURLPill: NSView {
             if animated {
                 v.alphaValue = 0
                 NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.15
+                    ctx.duration = Design.Motion.fast
                     v.animator().alphaValue = 1
                 }
             }
@@ -854,7 +864,7 @@ final class SpaceDockView: NSView {
         self.actions = actions
         library = LibraryButtonView(ui: ui, actions: actions)
         // Arc 1.172: a Blank Window's + shows but does nothing.
-        plus = SidebarGlyphButton(symbol: "plus", size: 28, iconSize: 13, help: "New Space", colors: SidebarColors()) { [store, ui] in
+        plus = SidebarGlyphButton(symbol: "plus", size: 28, iconSize: Design.Icon.regular, help: "New Space", colors: SidebarColors()) { [store, ui] in
             guard !store.isBlank(window: ui.windowID) else { return }
             actions.editSpace(nil)
         }
@@ -1024,7 +1034,7 @@ final class SpaceDockView: NSView {
         reorder = r
         if changed {
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.2
+                ctx.duration = Design.Motion.duration(Design.Motion.standard)
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 placeCells(animated: true, dragX: clamped)
             }
@@ -1043,7 +1053,7 @@ final class SpaceDockView: NSView {
             if index(at: p) == r.from { store.focusSpace(r.id, window: ui.windowID) }
             hovered = index(at: p).map { order[$0] }
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.15
+                ctx.duration = Design.Motion.duration(Design.Motion.fast)
                 placeCells(animated: true)
             }
             refreshCells()
@@ -1052,7 +1062,7 @@ final class SpaceDockView: NSView {
         // `moveSpace` indexes the full space order; land next to the space now in that cell.
         let target = store.spaceOrder.firstIndex(of: order[r.to]) ?? r.to
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
+            ctx.duration = Design.Motion.duration(Design.Motion.fast)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             placeCells(animated: true, dragX: CGFloat(r.to - r.from) * pitch)
             cells[r.id]?.animator().frame.origin.x = (cellXs.first ?? 0) + CGFloat(r.to) * pitch
@@ -1092,7 +1102,7 @@ final class SpaceCellView: NSView, ArcTooltipTarget {
     private let spaceID: UUID
     private let store: SidebarStore
     private let ui: SidebarUIState
-    private let emoji = NSTextField.sidebarLabel(size: 13)
+    private let emoji = NSTextField.sidebarLabel(size: Design.Icon.regular)
     private let emojiHolder = NSView()
     /// An Icon-tab glyph (Space.symbol) in the emoji's place.
     private let symbol = NSImageView()
@@ -1178,9 +1188,9 @@ final class SpaceCellView: NSView, ArcTooltipTarget {
         if symbol.superview == nil { symbol.imageScaling = .scaleNone; emojiHolder.addSubview(symbol) }
     }
 
-    /// Arc's hovered/pressed cell on a dark space: white at ~7.8%, 6 pt corners.
+    /// The hovered or pressed cell, as in Arc: the hover plate, a glyph plate's corners.
     private func refreshFill(_ on: Bool? = nil) {
-        let fill = colors.isDark ? NSColor.white.withAlphaComponent(0.078) : NSColor.black.withAlphaComponent(0.05)
+        let fill = colors.plate(.hover)
         let show = targeted || (on ?? (lit && !selected))
         layer?.backgroundColor = (show ? fill : .clear).cgColor
     }
@@ -1189,15 +1199,15 @@ final class SpaceCellView: NSView, ArcTooltipTarget {
         super.layout()
         emojiHolder.frame = bounds
         // An icon only shows in a cell of 22 pt or more (squeezed cells are dots), so it keeps its size.
-        let size: CGFloat = 13
+        let size = Design.Icon.regular
         if emoji.font?.pointSize != size { emoji.font = .systemFont(ofSize: size) }
         let h = emoji.intrinsicContentSize.height
         emoji.frame = NSRect(x: 0, y: (bounds.height - h) / 2, width: bounds.width, height: h)
         symbol.frame = bounds
-        symbol.symbolConfiguration = .init(pointSize: size - 2, weight: .medium)
+        symbol.symbolConfiguration = Design.Icon.configuration(Design.Icon.small)
         if case .dot(let d) = mark {
             dot.bounds = CGRect(x: 0, y: 0, width: d, height: d)
-            dot.cornerRadius = d / 2
+            dot.cornerRadius = Design.Radius.pill(d)
             dot.position = CGPoint(x: bounds.midX, y: bounds.midY)
         }
     }
@@ -1264,6 +1274,8 @@ final class SpaceCellView: NSView, ArcTooltipTarget {
 /// 8 pt corners, up and to the right of the glyph. It drops in from 6 pt above, overshoots 12 pt
 /// below and settles (Arc 1.170 at 60 fps), and is faint while the window is in the background.
 final class LibraryButtonView: NSView {
+    /// The bin's drop, start to rest, in that capture.
+    private static let dropTime: TimeInterval = 0.4
     private let ui: SidebarUIState
     private let actions: SidebarActions
     private let glyph = NSImageView()
@@ -1272,6 +1284,30 @@ final class LibraryButtonView: NSView {
     private let binImage = CALayer()
     private let binTip: ArcTooltipAnchorView
     private var shownDownload: UInt32?
+    /// The ring round the glyph while files download (DownloadProgressRing): a faint track and
+    /// the accent arc over it, filling as the bytes arrive or turning when the size isn't known.
+    private let ring = NSView()
+    private let ringTrack = CAShapeLayer()
+    private let ringArc = CAShapeLayer()
+    private var shownRing = DownloadProgressRing.hidden
+    private enum Ring {
+        /// Just inside the glyph's hover plate.
+        static let diameter: CGFloat = Design.Icon.plate - Design.Space.xxs
+        static let line: CGFloat = 2
+        /// The arc that turns when a download has no size, and the least a filling ring shows,
+        /// so a download that has just begun is already visible.
+        static let turningArc: CGFloat = 0.28
+        static let least: CGFloat = 0.04
+        /// One turn of that arc.
+        static let turn: TimeInterval = 0.9
+        /// The thumbnail of a file still arriving: this faint, and the part received at full
+        /// strength over it, from the bottom up. Without a size it breathes between the two.
+        static let pending: Float = 0.3
+        static let breath: TimeInterval = 0.8
+    }
+    /// The received part of the thumbnail: the same picture, masked from the bottom up.
+    private let binFill = CALayer()
+    private let binFillMask = CALayer()
     private var hovering = false { didSet { if hovering != oldValue { refresh() } } }
     var colors = SidebarColors() { didSet { if colors != oldValue { glyph.image = LibraryGlyph.image(dark: colors.isDark); refresh() } } }
     static let binOffset = CGSize(width: 9, height: -12)
@@ -1287,7 +1323,7 @@ final class LibraryButtonView: NSView {
         wantsLayer = true
         // Round the glyph's hover fill. Rounding the button itself clips the overhanging thumbnail.
         glyph.wantsLayer = true
-        glyph.layer?.cornerRadius = 7
+        glyph.layer?.cornerRadius = Design.Radius.inset
         glyph.layer?.cornerCurve = .continuous
         glyph.imageScaling = .scaleNone
         glyph.image = LibraryGlyph.image(dark: false)
@@ -1295,16 +1331,36 @@ final class LibraryButtonView: NSView {
         (tip.text, tip.keys) = ArcTooltipLabel.split("View Library (⇧⌘L)")
         tip.placement = .trailing
         addSubview(tip)
+        ring.wantsLayer = true
+        ring.alphaValue = 0
+        for arc in [ringTrack, ringArc] {
+            arc.fillColor = nil
+            arc.lineWidth = Ring.line
+            arc.lineCap = .round
+            arc.actions = ["strokeEnd": NSNull(), "strokeColor": NSNull(), "bounds": NSNull(), "position": NSNull(), "path": NSNull()]
+            ring.layer?.addSublayer(arc)
+        }
+        ringArc.strokeEnd = 0
+        addSubview(ring)
         bin.wantsLayer = true
-        binImage.cornerRadius = 8
+        binImage.cornerRadius = Design.Radius.row
         binImage.cornerCurve = .continuous
         binImage.masksToBounds = true
         binImage.contentsGravity = .resizeAspectFill
         bin.layer?.addSublayer(binImage)
+        binFill.cornerRadius = Design.Radius.row
+        binFill.cornerCurve = .continuous
+        binFill.masksToBounds = true
+        binFill.contentsGravity = .resizeAspectFill
+        binFill.isHidden = true
+        binFillMask.backgroundColor = NSColor.black.cgColor
+        binFill.mask = binFillMask
+        bin.layer?.addSublayer(binFill)
         bin.addSubview(binTip)
         bin.isHidden = true
         addSubview(bin)
         ui.libraryAnchor = self
+        refresh()
         observe()
     }
 
@@ -1314,12 +1370,18 @@ final class LibraryButtonView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     private func observe() {
-        let (download, active) = withObservationTracking { (ui.recentDownload, ui.appActive) } onChange: { [weak self] in
+        let (download, active, live) = withObservationTracking { (ui.recentDownload, ui.appActive, DownloadHistory.shared.live) } onChange: { [weak self] in
             Task { @MainActor in self?.observe() }
         }
+        let progress = DownloadProgressRing.ring(for: live)
+        // The thumbnail carries the progress when there is one; the ring round the glyph otherwise.
+        ring.isHidden = download != nil
+        show(progress)
         guard let download else { bin.isHidden = true; shownDownload = nil; return }
         bin.isHidden = false
         binImage.contents = download.image
+        binFill.contents = download.image
+        fillBin(progress)
         bin.alphaValue = active ? 1 : 0.4
         binTip.text = (download.path as NSString).lastPathComponent
         if shownDownload != download.id {
@@ -1329,32 +1391,137 @@ final class LibraryButtonView: NSView {
     }
 
     private func drop() {
+        // Under Reduce motion the thumbnail is simply there.
+        guard !Design.Motion.reduced else { return }
         let y = CAKeyframeAnimation(keyPath: "transform.translation.y")
         // Flipped view: positive y is down on screen.
         y.values = [-6, 12, 12, -2, 0].map { NSNumber(value: Double($0) * (bin.layer?.isGeometryFlipped == true ? 1 : -1)) }
-        y.keyTimes = [0, 0.15, 0.2, 0.33, 0.4].map { NSNumber(value: $0 / 0.4) }
+        y.keyTimes = [0, 0.15, 0.2, 0.33, 0.4].map { NSNumber(value: $0 / Self.dropTime) }
         y.timingFunctions = [CAMediaTimingFunction(name: .easeInEaseOut), CAMediaTimingFunction(name: .linear),
                              CAMediaTimingFunction(name: .easeInEaseOut), CAMediaTimingFunction(name: .easeInEaseOut)]
-        y.duration = 0.4
+        y.duration = Self.dropTime
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0
         fade.toValue = 1
-        fade.duration = 0.05
+        fade.duration = Design.Motion.exit
         bin.layer?.add(y, forKey: "drop")
         bin.layer?.add(fade, forKey: "fade")
     }
 
+    /// The ring follows the downloads: it appears with the first byte, fills (or turns), and
+    /// closes to a full circle before it fades when the last one ends.
+    private func show(_ next: DownloadProgressRing) {
+        guard next != shownRing else { return }
+        let was = shownRing
+        shownRing = next
+        setAccessibilityValue(next.spoken)
+        let from = ringArc.presentation()?.strokeEnd ?? ringArc.strokeEnd
+        let reduced = Design.Motion.reduced
+        func sweep(to end: CGFloat) {
+            ringArc.strokeEnd = end
+            guard !reduced else { return }
+            let a = CABasicAnimation(keyPath: "strokeEnd")
+            a.fromValue = from
+            a.toValue = end
+            a.duration = Design.Motion.standard
+            a.timingFunction = Design.Motion.curve
+            ringArc.add(a, forKey: "fill")
+        }
+        func fade(to alpha: CGFloat, over duration: TimeInterval) {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Design.Motion.duration(duration)
+                ring.animator().alphaValue = alpha
+            }
+        }
+        switch next {
+        case .hidden:
+            ringArc.removeAnimation(forKey: "turn")
+            // A ring that was filling closes first, so the last thing seen is a whole circle.
+            if case .filled = was { sweep(to: 1) }
+            fade(to: 0, over: Design.Motion.slow)
+        case .turning:
+            ringArc.removeAnimation(forKey: "fill")
+            ringArc.strokeEnd = Ring.turningArc
+            if !reduced, ringArc.animation(forKey: "turn") == nil {
+                let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+                turn.fromValue = 0
+                turn.toValue = 2 * Double.pi
+                turn.duration = Ring.turn
+                turn.repeatCount = .infinity
+                ringArc.add(turn, forKey: "turn")
+            }
+            fade(to: 1, over: Design.Motion.fast)
+        case .filled(let share):
+            ringArc.removeAnimation(forKey: "turn")
+            sweep(to: max(Ring.least, CGFloat(share)))
+            fade(to: 1, over: Design.Motion.fast)
+        }
+    }
+
+    /// The thumbnail fills from the bottom as the file arrives, and is whole when it has.
+    private func fillBin(_ progress: DownloadProgressRing) {
+        let side = bin.bounds.height
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(Design.Motion.duration(Design.Motion.standard))
+        switch progress {
+        case .hidden:
+            binImage.removeAnimation(forKey: "breath")
+            binImage.opacity = 1
+            binFill.isHidden = true
+        case .turning:
+            binFill.isHidden = true
+            if Design.Motion.reduced {
+                binImage.opacity = (1 + Ring.pending) / 2
+            } else if binImage.animation(forKey: "breath") == nil {
+                binImage.opacity = 1
+                let breath = CABasicAnimation(keyPath: "opacity")
+                breath.fromValue = Ring.pending
+                breath.toValue = 1
+                breath.duration = Ring.breath
+                breath.autoreverses = true
+                breath.repeatCount = .infinity
+                breath.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                binImage.add(breath, forKey: "breath")
+            }
+        case .filled(let share):
+            binImage.removeAnimation(forKey: "breath")
+            binImage.opacity = Ring.pending
+            binFill.isHidden = false
+            let height = side * max(Ring.least, CGFloat(share))
+            // From the thumbnail's bottom edge. A layer-backed view's sublayers measure y from the
+            // top here (seen on screen, 13 Nov 2026), unless the layer says it is flipped.
+            let fromTop = bin.layer?.isGeometryFlipped != true
+            binFillMask.frame = CGRect(x: 0, y: fromTop ? side - height : 0, width: bin.bounds.width, height: height)
+        }
+        CATransaction.commit()
+    }
+
     private func refresh() {
         glyph.layer?.backgroundColor = (hovering ? colors.hoverFill : .clear).cgColor
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ringTrack.strokeColor = colors.plate(.strong).cgColor
+        ringArc.strokeColor = Design.accentNS.cgColor
+        CATransaction.commit()
     }
 
     override func layout() {
         super.layout()
         glyph.frame = bounds
         tip.frame = bounds
+        ring.frame = NSRect(x: bounds.midX - Ring.diameter / 2, y: bounds.midY - Ring.diameter / 2, width: Ring.diameter, height: Ring.diameter)
+        // From twelve o'clock, clockwise (the view is flipped, so angles run that way round).
+        let circle = CGMutablePath()
+        circle.addArc(center: CGPoint(x: ring.bounds.midX, y: ring.bounds.midY), radius: (Ring.diameter - Ring.line) / 2,
+                      startAngle: -.pi / 2, endAngle: 1.5 * .pi, clockwise: false)
+        for arc in [ringTrack, ringArc] {
+            arc.frame = ring.bounds
+            arc.path = circle
+        }
         let c = NSPoint(x: bounds.midX + Self.binOffset.width, y: bounds.midY + Self.binOffset.height)
         bin.frame = NSRect(x: c.x - 16, y: c.y - 16, width: 32, height: 32)
         binImage.frame = bin.bounds
+        binFill.frame = bin.bounds
         binTip.frame = bin.bounds
     }
 

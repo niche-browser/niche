@@ -211,8 +211,9 @@ final class SuggestionEngine {
         let tabs = store.commandBarTabs(window: nil)
         i.tabs = tabs.compactMap { tab in tab.tab.map { (tab, Searchable(title: tab.displayTitle, url: $0.url)) } }
         i.openURLs = Set(tabs.compactMap { $0.tab?.url })
-        i.archive = store.archive.prefix(400).compactMap { e in e.item.tab.map { (e, Searchable(title: e.item.displayTitle, url: $0.url)) } }
-        i.history = store.history.values.map { ($0, Searchable(title: $0.title, url: $0.url)) }
+        // The space's own archive and its profile's visits (SpaceSeparation).
+        i.archive = store.commandBarArchive(window: nil).prefix(400).compactMap { e in e.item.tab.map { (e, Searchable(title: e.item.displayTitle, url: $0.url)) } }
+        i.history = store.commandBarHistory(window: nil).map { ($0, Searchable(title: $0.title, url: $0.url)) }
         index = i
         return i
     }
@@ -425,7 +426,7 @@ final class SuggestionEngine {
                               subtitle: [sid.flatMap { store.space($0)?.title } ?? "", Self.humanURL(tab.tab?.url ?? "")].filter { !$0.isEmpty }.joined(separator: " · "),
                               url: tab.tab?.url, faviconKey: tab.tab?.faviconKey, symbol: nil, trailing: "Switch to Tab", score: 0, spaceID: sid)
         }
-        for entry in store.archive.prefix(incognito ? 0 : 2) {
+        for entry in store.commandBarArchive(window: nil).prefix(2) {
             guard let t = entry.item.tab else { continue }
             out.append(Suggestion(id: "arch:\(entry.id)", kind: .archived(entry.id), title: entry.item.displayTitle,
                                   subtitle: "Archived \(Self.relative(entry.archivedAt))", url: t.url, faviconKey: t.faviconKey,

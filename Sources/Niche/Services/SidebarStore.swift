@@ -89,7 +89,7 @@ final class SidebarStore {
         var loaded = settingsStore.load(or: { AppSettings() })
         loaded.migrateToolbarDefault(arcShowsToolbar: ArcImporter.showsToolbar)
         settings = loaded
-        for h in historyFile.load(or: { [] }) { history[h.url] = h }
+        for h in historyFile.load(or: { [] }) { history[SpaceSeparation.historyKey(url: h.url, profileID: h.profileID)] = h }
         ranking = rankingFile.load(or: { RankingData() })
         // A Blank Window's space without its window goes; repair drops what was in it.
         for sid in BlankWindow.orphans(spaces: Array(spaces.values), windows: prefs.windows) {
@@ -417,6 +417,22 @@ final class SidebarStore {
     func commandBarTabs(window id: UUID?) -> [SidebarItem] {
         let sid = focusedSpaceID(window: id)
         return profileTabs(window: id).filter { isInSpace($0.id, sid) }
+    }
+
+    /// The archived tabs the command bar offers: those closed from the space the window shows
+    /// (SpaceSeparation), newest first. An incognito window is offered none.
+    func commandBarArchive(window id: UUID?) -> [ArchivedItem] {
+        let sid = focusedSpaceID(window: id)
+        guard !isIncognito(space: sid) else { return [] }
+        return archive.filter { e in
+            SpaceSeparation.listsArchived(from: e.sourceSpaceID.flatMap { spaces[$0] != nil ? $0 : nil }, in: sid)
+        }
+    }
+
+    /// The visits the command bar offers: those made on the profile of the space the window shows.
+    func commandBarHistory(window id: UUID?) -> [HistoryEntry] {
+        let profile = profile(spaces[focusedSpaceID(window: id)]?.profileID)?.id
+        return history.values.filter { SpaceSeparation.listsVisit(on: $0.profileID, inSpaceOn: profile) }
     }
 
     private func collectSubtree(of space: Space, into ids: inout Set<UUID>) {
@@ -1052,6 +1068,42 @@ final class SidebarStore {
         items[split.id] = sp
         selectTab(tab.id)
         return tab
+    }
+
+    /// What `fillEmptyPane` did with the picked tab.
+    enum PaneFill: Equatable {
+        /// The tab is now the pane, selected; the empty one is gone.
+        case joined
+        /// The tab stayed where it is: the empty pane, still selected, is to load this address.
+        case opens(String)
+    }
+
+    /// A command bar row that is an open tab, picked to fill the empty pane Add Split View made
+    /// (`SplitPaneFill`). Nil when `emptyID` is not an empty pane of a split or the tab has no
+    /// address: the row then does what it does anywhere else.
+    func fillEmptyPane(_ emptyID: UUID, with tabID: UUID, window: UUID? = nil) -> PaneFill? {
+        guard let empty = items[emptyID], empty.isEmptyTab, let split = splitContaining(emptyID),
+              let tab = items[tabID], let url = tab.tab?.url, !url.isEmpty, !tab.isEmptyTab else { return nil }
+        let fill = SplitPaneFill.fill(paneOfThisSplit: tab.parentID == split.id, pinned: isPinned(tabID),
+                                      sameSpace: spaceID(ofItem: tabID) == spaceID(ofItem: emptyID))
+        guard fill == .joins, let at = split.children.firstIndex(of: emptyID) else { return .opens(url) }
+        addToSplit(split.id, tabID: tabID, at: at)
+        // The empty pane goes without a trace: it never had a page. Its width goes to the tab.
+        detach(emptyID)
+        items[emptyID] = nil
+        if var sp = items[split.id], var sd = sp.split {
+            if let factor = sd.widthFactors.removeValue(forKey: emptyID) { sd.widthFactors[tabID] = factor }
+            sp.data = .split(sd)
+            items[split.id] = sp
+        }
+        // Every window showing the empty pane shows the tab in its place.
+        if let sid = spaceID(ofItem: tabID) {
+            for w in prefs.windows where w.selectedTabPerSpace[sid] == emptyID {
+                updateWindow(w.id) { $0.selectedTabPerSpace[sid] = tabID }
+            }
+        }
+        selectTab(tabID, window: window)
+        return .joined
     }
 
     /// Add an existing tab as a pane of a split (Arc: onDropSidebarItem). A
@@ -2314,6 +2366,9 @@ final class SidebarStore {
             drop(l.containerID)
         }
         profileFavorites.removeAll { $0.profileID == id }
+        // And what it browsed.
+        history = history.filter { $0.value.profileID != id }
+        historyFile.save(Array(history.values), delay: 5)
         settings.downloadLocations[DownloadLocation.key(profileID: id)] = nil
         ProfileCleanup.schedule(p.directoryName)
         touch()
@@ -2343,16 +2398,18 @@ final class SidebarStore {
 
     // MARK: History and ranking signals
 
-    func recordVisit(url: String, title: String) {
+    /// `profileID` is the profile the page loaded in (nil is Default): a visit stays with it.
+    func recordVisit(url: String, title: String, profileID: UUID? = nil) {
         guard url.hasPrefix("http") else { return }
-        var e = history[url] ?? HistoryEntry(url: url, title: title, lastVisit: clock.now, visitCount: 0)
+        let key = SpaceSeparation.historyKey(url: url, profileID: profileID)
+        var e = history[key] ?? HistoryEntry(url: url, title: title, lastVisit: clock.now, visitCount: 0, profileID: profileID)
         e.visitCount += 1
         e.lastVisit = clock.now
         if !title.isEmpty { e.title = title }
-        history[url] = e
+        history[key] = e
         if history.count > 5000 {
             let drop = history.values.sorted { $0.lastVisit < $1.lastVisit }.prefix(history.count - 5000)
-            for d in drop { history[d.url] = nil }
+            for d in drop { history[SpaceSeparation.historyKey(url: d.url, profileID: d.profileID)] = nil }
         }
         historyFile.save(Array(history.values), delay: 5)
     }

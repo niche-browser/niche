@@ -673,6 +673,10 @@ enum BrowserManagerLifecycleTests {
                "a discarded page's blank document doesn't replace the tab's colours")
         manager.show(id, focus: false)
         manager.browser(rt.browser, didReportThemeColor: "#303030")
+        // On screen, the bar waits for a picture of the page's top edge (PageTopColor); a page
+        // that gives none keeps the colour its script named.
+        rt.browser.reply(to: "Page.captureScreenshot", with: nil)
+        await drainMainQueue()
         expect(store.item(id)?.tab?.themeColor == "#303030", "the page loaded again on waking reports its colour")
         manager.closeAll()
     }

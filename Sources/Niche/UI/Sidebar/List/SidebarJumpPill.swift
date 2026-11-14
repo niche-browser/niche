@@ -9,6 +9,17 @@ import AppKit
 /// edge (~10 % white) inside a 0.5 pt dark outer edge (~45 % black), no larger shadow;
 /// 10.5 pt in, the 16 pt favicon, 7 pt, a thin 9 pt arrow in #ADACAC, 10.5 pt out. A split
 /// shows its tabs' favicons as a small facepile (Dia's `facepile`).
+/// The pill's own colours, from that capture: it is dark on every theme.
+private enum Palette {
+    /// The capsule, at rest and under the pointer.
+    static let fill = NSColor(srgbRed: 0x1F / 255, green: 0x1C / 255, blue: 0x1C / 255, alpha: 1)
+    static let fillHover = NSColor(srgbRed: 0x2A / 255, green: 0x27 / 255, blue: 0x27 / 255, alpha: 1)
+    /// The dark outer edge.
+    static let outerEdge = NSColor.black.withAlphaComponent(0.45)
+    /// The arrow's grey.
+    static let arrow = NSColor(srgbRed: 0xAD / 255, green: 0xAC / 255, blue: 0xAC / 255, alpha: 1)
+}
+
 @MainActor
 final class SidebarJumpPill: NSView {
     enum Edge { case top, bottom }
@@ -19,8 +30,6 @@ final class SidebarJumpPill: NSView {
     private static let icon: CGFloat = 16
     /// Each further favicon of a split overlaps the one before by this much.
     private static let overlap: CGFloat = 5
-    private static let fill = NSColor(srgbRed: 0x1F / 255, green: 0x1C / 255, blue: 0x1C / 255, alpha: 1)
-    private static let fillHover = NSColor(srgbRed: 0x2A / 255, green: 0x27 / 255, blue: 0x27 / 255, alpha: 1)
 
     var onClick: () -> Void = {}
     private(set) var edge: Edge?
@@ -38,18 +47,18 @@ final class SidebarJumpPill: NSView {
         isHidden = true
         body.wantsLayer = true
         if let l = body.layer {
-            l.cornerRadius = Self.height / 2
+            l.cornerRadius = Design.Radius.pill(Self.height)
             l.cornerCurve = .continuous
             l.borderWidth = 0.5
-            l.borderColor = NSColor.black.withAlphaComponent(0.45).cgColor
+            l.borderColor = Palette.outerEdge.cgColor
             innerEdge.fillColor = nil
-            innerEdge.strokeColor = NSColor.white.withAlphaComponent(0.1).cgColor
+            innerEdge.strokeColor = Design.hairlineOnDark.cgColor
             innerEdge.lineWidth = 0.5
             l.addSublayer(innerEdge)
         }
         addSubview(body)
         arrow.imageScaling = .scaleNone
-        arrow.contentTintColor = NSColor(srgbRed: 0xAD / 255, green: 0xAC / 255, blue: 0xAC / 255, alpha: 1)
+        arrow.contentTintColor = Palette.arrow
         body.addSubview(arrow)
         setAccessibilityRole(.button)
         setAccessibilityLabel("Scroll to the open tab")
@@ -71,7 +80,7 @@ final class SidebarJumpPill: NSView {
     func show(edge newEdge: Edge?, icons items: [(image: NSImage?, flip: Bool, key: String?)], animated: Bool) {
         if let newEdge {
             if Self.signature(items) != shownIcons { setIcons(items) }
-            arrow.image = SidebarSymbols.image(newEdge == .top ? "arrow.up" : "arrow.down", size: 10.5, weight: .light)
+            arrow.image = SidebarSymbols.image(newEdge == .top ? "arrow.up" : "arrow.down", size: Design.Icon.small, weight: .light)
         }
         guard newEdge != edge else { return }
         let appearing = edge == nil
@@ -80,15 +89,15 @@ final class SidebarJumpPill: NSView {
         if let newEdge {
             isHidden = false
             alphaValue = 1
-            guard animated, appearing, let layer = body.layer else { return }
+            guard animated, appearing, !Design.Motion.reduced, let layer = body.layer else { return }
             // In from the edge it points at: fade in while sliding 4 pt, sprung.
             layoutSubtreeIfNeeded()
             let fade = CABasicAnimation(keyPath: "opacity")
             fade.fromValue = 0
             fade.toValue = 1
-            fade.duration = 0.18
+            fade.duration = Design.Motion.standard
             layer.add(fade, forKey: "fade")
-            let move = CASpringAnimation(perceptualDuration: 0.32, bounce: 0.2)
+            let move = CASpringAnimation(perceptualDuration: Design.Motion.slow, bounce: 0.2)
             move.keyPath = "sublayerTransform"
             move.fromValue = CATransform3DMakeTranslation(0, newEdge == .top ? -4 : 4, 0)
             move.toValue = CATransform3DIdentity
@@ -96,7 +105,7 @@ final class SidebarJumpPill: NSView {
             self.layer?.add(move, forKey: "rise")
         } else if animated {
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.15
+                ctx.duration = Design.Motion.fast
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 animator().alphaValue = 0
             } completionHandler: { [weak self] in
@@ -117,7 +126,7 @@ final class SidebarJumpPill: NSView {
         // Mono glyphs flip to white on the dark pill.
         var dark = SidebarColors()
         dark.isDark = true
-        dark.textTertiary = NSColor.white.withAlphaComponent(0.5)
+        dark.textTertiary = Design.onDark(.tertiary)
         icons = items.prefix(3).map { item in
             let v = SidebarFaviconView(size: Self.icon)
             v.show(item.image, flip: item.flip, colors: dark)
@@ -135,9 +144,9 @@ final class SidebarJumpPill: NSView {
     }
 
     private func refreshFill() {
-        body.layer?.backgroundColor = (hovering ? Self.fillHover : Self.fill).cgColor
+        body.layer?.backgroundColor = (hovering ? Palette.fillHover : Palette.fill).cgColor
         for v in icons.dropFirst() {
-            v.layer?.borderColor = (hovering ? Self.fillHover : Self.fill).cgColor
+            v.layer?.borderColor = (hovering ? Palette.fillHover : Palette.fill).cgColor
         }
     }
 
@@ -147,14 +156,14 @@ final class SidebarJumpPill: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         let r = body.bounds.insetBy(dx: 0.75, dy: 0.75)
-        innerEdge.path = CGPath(roundedRect: r, cornerWidth: r.height / 2, cornerHeight: r.height / 2, transform: nil)
+        innerEdge.path = CGPath(roundedRect: r, cornerWidth: Design.Radius.pill(r.height), cornerHeight: Design.Radius.pill(r.height), transform: nil)
         CATransaction.commit()
         var x = Self.padding
         for (i, v) in icons.enumerated() {
             v.frame = NSRect(x: x, y: (bounds.height - Self.icon) / 2, width: Self.icon, height: Self.icon)
             if i > 0 {
                 v.layer?.borderWidth = 1.5
-                v.layer?.borderColor = (hovering ? Self.fillHover : Self.fill).cgColor
+                v.layer?.borderColor = (hovering ? Palette.fillHover : Palette.fill).cgColor
             }
             x += Self.icon - Self.overlap
         }

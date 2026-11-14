@@ -2,6 +2,22 @@ import AppKit
 import Observation
 import SwiftUI
 
+private enum Metrics {
+    /// The mark as a dialog's icon, and the frame it sits in.
+    static let mark: CGFloat = 56
+    static let markFrame: CGFloat = 61
+    /// The application icon's frame: its artwork stops short of its canvas, so it is a point larger
+    /// and sits a point higher than the mark.
+    static let appIconFrame: CGFloat = 62
+    static let appIconDrop: CGFloat = 0.75
+    static let appIconLift: CGFloat = -1
+    /// A long message scrolls: never shorter than this, and this much of the screen stays free.
+    static let scrollMinimum: CGFloat = 140
+    static let screenMargin: CGFloat = 250
+    /// The screen's height when there is no screen to ask.
+    static let screenFallback: CGFloat = 800
+}
+
 @MainActor
 @Observable
 final class AppDialog {
@@ -26,7 +42,7 @@ final class AppDialog {
 
     init(title: String, message: String = "", actions: [DialogAction] = [DialogAction("OK")],
          input: String? = nil, placeholder: String = "", requiresInput: Bool = false, suppressionTitle: String? = nil,
-         icon: Icon = .mark, width: CGFloat = 450, buttonSpacing: CGFloat = 38, buttonOutset: CGFloat = 10.5) {
+         icon: Icon = .mark, width: CGFloat = 450, buttonSpacing: CGFloat = Design.Space.xxxl, buttonOutset: CGFloat = 0) {
         self.title = title
         self.message = message
         self.actions = DialogActions(actions)
@@ -123,11 +139,12 @@ private struct AppDialogView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            DialogScrollContent(width: dialog.width - 77, maximumHeight: max(140, (NSScreen.main?.visibleFrame.height ?? 800) - 250)) {
+            DialogScrollContent(width: dialog.width - 2 * Design.Space.xxxl,
+                                maximumHeight: max(Metrics.scrollMinimum, (NSScreen.main?.visibleFrame.height ?? Metrics.screenFallback) - Metrics.screenMargin)) {
                 details
             }
             // Arc's extra choice ("Quit, and don’t ask again") sits at the card's left edge, the rest at its right.
-            HStack(spacing: 7) {
+            HStack(spacing: Design.Space.m) {
                 buttons(dialog.actions.leadingOrder)
                 Spacer(minLength: 0)
                 buttons(dialog.actions.trailingOrder)
@@ -136,12 +153,10 @@ private struct AppDialogView: View {
             .padding(.horizontal, -dialog.buttonOutset)
             .padding(.top, dialog.buttonSpacing)
         }
-        .padding(.horizontal, 38.5)
-        .padding(.top, 38.5)
-        .padding(.bottom, 28)
+        .padding(Design.Space.xxxl)
         .frame(width: dialog.width)
         .fixedSize(horizontal: false, vertical: true)
-        .modifier(DialogSurface(cornerRadius: 16))
+        .modifier(DialogSurface())
         .onAppear { inputFocused = dialog.input != nil }
     }
 
@@ -152,48 +167,48 @@ private struct AppDialogView: View {
                     if dialog.icon == .application {
                         Image(nsImage: NSApp.applicationIconImage).resizable()
                     } else {
-                        BrandMark(size: 56)
+                        BrandMark(size: Metrics.mark)
                     }
                 }
-                // Arc 1.172.1 (7 Nov 2026, Quit and Delete Space sheets against Niche's, card edge to pixel): the app
-                // icon shows 50.5 pt across from 43.5 pt in, the title's caps start 120 pt down, the buttons end
-                // 26.5 pt from the card's right edge.
-                .frame(width: dialog.icon == .mark ? 61 : 62, height: dialog.icon == .mark ? 61 : 62)
-                .offset(y: dialog.icon == .application ? 0.75 : 0)
-                .padding(.top, dialog.icon == .application ? -1 : 0)
+                // The icon keeps the size of Arc 1.172.1's Quit and Delete Space sheets (7 Nov 2026): the app icon
+                // shows 50.5 pt across.
+                .frame(width: dialog.icon == .mark ? Metrics.markFrame : Metrics.appIconFrame,
+                       height: dialog.icon == .mark ? Metrics.markFrame : Metrics.appIconFrame)
+                .offset(y: dialog.icon == .application ? Metrics.appIconDrop : 0)
+                .padding(.top, dialog.icon == .application ? Metrics.appIconLift : 0)
                 .accessibilityHidden(true)
             }
             Text(dialog.title)
-                .font(.system(size: 17.5, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(Design.Font.ui(.title, .semibold))
+                .foregroundStyle(DialogTheme.title)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, dialog.icon == .none ? 0 : dialog.icon == .application ? 18 : 17.5)
+                .padding(.top, dialog.icon == .none ? 0 : Design.Space.xl)
             if !dialog.message.isEmpty {
                 Text(dialog.message)
-                    .font(.system(size: 14))
-                    .lineSpacing(0.7)
+                    .font(Design.Font.ui(.body))
+                    .lineSpacing(Design.Space.hair)
                     .foregroundStyle(DialogTheme.body)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 16)
+                    .padding(.top, Design.Space.m)
             }
             if dialog.input != nil {
                 TextField(dialog.placeholder, text: Binding(get: { dialog.input ?? "" }, set: { dialog.input = $0 }))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white)
+                    .font(Design.Font.ui(.body))
+                    .foregroundStyle(DialogTheme.title)
                     .focused($inputFocused)
-                    .padding(.horizontal, 12)
-                    .frame(height: 37)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: "#2B2D33")))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(hex: "#4A4D55"), lineWidth: 1))
-                    .padding(.top, 18)
+                    .padding(.horizontal, Design.Space.m)
+                    .frame(height: Design.Space.control)
+                    .background(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(Design.panelDarkRaisedColor))
+                    .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(DialogTheme.outline, lineWidth: 1))
+                    .padding(.top, Design.Space.xl)
             }
             if let title = dialog.suppressionTitle {
                 Toggle(title, isOn: $dialog.isSuppressed)
                     .toggleStyle(.checkbox)
-                    .font(.system(size: 13))
+                    .font(Design.Font.ui(.body))
                     .foregroundStyle(DialogTheme.body)
-                    .padding(.top, 18)
+                    .padding(.top, Design.Space.xl)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -1,8 +1,29 @@
 import SwiftUI
 
+private enum Metrics {
+    /// The cards' width, Arc's.
+    static let width: CGFloat = 450
+    /// One space on the spaces step: its theme as a little window, the gap to its circle and to its
+    /// name, the circle and its tick, and the row's height with all of them.
+    static let choice = CGSize(width: 63, height: 95)
+    static let choiceGap: CGFloat = 14.5
+    static let tick: CGFloat = 16
+    static let tickGlyph: CGFloat = 8.5
+    static let choicesHeight: CGFloat = 155
+    /// The pill's lavender circle and the chevron cut in it.
+    static let pillDot: CGFloat = 14
+    static let pillChevron: CGFloat = 7
+    /// Change Profile's icon: the tile, the room its badge needs around it, the badge, and the glyphs on the tile.
+    static let tile: CGFloat = 62
+    static let tileFrame: CGFloat = 68
+    static let tileBadge: CGFloat = 23
+    static let tileSymbol: CGFloat = 26
+    static let tileEmoji: CGFloat = 30
+}
+
 /// Arc 1.171's "Which Spaces should use this Profile?" (the second step of Create a new Profile),
-/// measured from a 2x capture (3 Nov): a 450 × 506 pt card; each space as a 63 × 95 pt card in its
-/// theme over a 16 pt circle (green with a tick when chosen) and its name, 76 pt apart.
+/// after a 2x capture (3 Nov): a 450 pt card; each space as a 63 × 95 pt card in its
+/// theme over a 16 pt circle (green with a tick when chosen) and its name, 75 pt apart.
 struct ProfileSpacesStep: View {
     let spaces: [Space]
     @Binding var ticked: Set<UUID>
@@ -11,43 +32,43 @@ struct ProfileSpacesStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ProfileAvatar().padding(.top, 38.5)
+            ProfileAvatar()
             Text("Which Spaces should use this Profile?")
-                .font(.system(size: 17.5, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.top, 19)
+                .font(Design.Font.ui(.title, .semibold))
+                .foregroundStyle(DialogTheme.title)
+                .padding(.top, Design.Space.xl)
             Text("These Spaces will start fresh in your brand new Profile — so you’ll have to log back in to websites, re-save your passwords, add extensions, etc. You can always switch back to your previous Profile though if you forgot something!")
-                .font(.system(size: 14))
-                .lineSpacing(0.7)
+                .font(Design.Font.ui(.body))
+                .lineSpacing(Design.Space.hair)
                 .foregroundStyle(NewProfileDialog.body)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 375.5, alignment: .leading)
-                .padding(.top, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, Design.Space.m)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 13) {
+                HStack(alignment: .top, spacing: Design.Space.l) {
                     ForEach(spaces) { s in
                         SpaceChoice(space: s, on: ticked.contains(s.id)) {
                             if ticked.contains(s.id) { ticked.remove(s.id) } else { ticked.insert(s.id) }
                         }
                     }
                 }
-                .padding(.horizontal, 38.5)
+                .padding(.horizontal, Design.Space.xxxl)
             }
-            .padding(.horizontal, -38.5)
-            .frame(height: 155)
-            .padding(.top, 14)
-            HStack(spacing: 7) {
+            .padding(.horizontal, -Design.Space.xxxl)
+            .frame(height: Metrics.choicesHeight)
+            .padding(.top, Design.Space.l)
+            HStack(spacing: Design.Space.m) {
                 Spacer()
                 DialogButton(title: "Back", key: "ESC", enabled: true, primary: false, action: onBack)
                     .keyboardShortcut(.cancelAction)
                 DialogButton(title: "Create Profile", key: "↩", enabled: true, style: .accent, action: onCreate)
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.top, 31)
-            Spacer(minLength: 0)
+            .padding(.top, Design.Space.xxxl)
         }
-        .padding(.horizontal, 38.5)
-        .frame(width: 450, height: 506)
+        .padding(Design.Space.xxxl)
+        .frame(width: Metrics.width)
+        .fixedSize(horizontal: false, vertical: true)
         .modifier(DialogSurface())
     }
 }
@@ -60,30 +81,30 @@ private struct SpaceChoice: View {
 
     var body: some View {
         Button(action: toggle) {
-            VStack(spacing: 14.5) {
+            VStack(spacing: Metrics.choiceGap) {
                 ZStack {
-                    Color(white: space.theme.palette.isDark ? 0.12 : 0.97)
+                    space.theme.palette.isDark ? Design.panelDarkColor : Color.white
                     SpaceBackground(palette: space.theme.palette)
                 }
-                .frame(width: 63, height: 95)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.3), lineWidth: 1))
+                .frame(width: Metrics.choice.width, height: Metrics.choice.height)
+                .clipShape(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(DialogTheme.outline, lineWidth: 1))
                 ZStack {
                     if on {
-                        Circle().fill(Color(hex: "#007C00"))
-                        Image(systemName: "checkmark").font(.system(size: 8.5, weight: .bold)).foregroundStyle(Color(hex: "#062A1E"))
+                        Circle().fill(Design.positive)
+                        Image(systemName: "checkmark").font(.system(size: Metrics.tickGlyph, weight: .bold)).foregroundStyle(Design.onLightColor(.primary))
                     } else {
-                        Circle().strokeBorder(Color(hex: "#5B616F"), lineWidth: 1.5)
+                        Circle().strokeBorder(DialogTheme.faint, lineWidth: 1.5)
                     }
                 }
-                .frame(width: 16, height: 16)
+                .frame(width: Metrics.tick, height: Metrics.tick)
                 Text(space.title)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color(hex: "#C8CAD2"))
+                    .font(Design.Font.ui(.detail))
+                    .foregroundStyle(DialogTheme.body)
                     .lineLimit(1)
-                    .frame(width: 76)
+                    .frame(width: Metrics.choice.width + Design.Space.l)
             }
-            .frame(width: 63)
+            .frame(width: Metrics.choice.width)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -92,7 +113,7 @@ private struct SpaceChoice: View {
     }
 }
 
-/// Arc 1.171's Spaces ▸ Change Profile (3 Nov): "Change <space>’s Profile" on a 450 × 338 pt
+/// Arc 1.171's Spaces ▸ Change Profile (3 Nov): "Change <space>’s Profile" on a 450 pt
 /// card, the space's icon on a blue tile with a profile badge, and a blue pill that picks Default,
 /// another profile or New Profile. Change Profile with New Profile goes on to Create a new Profile.
 struct ChangeProfileDialog: View {
@@ -142,7 +163,7 @@ struct ChangeProfileDialog: View {
         m.addItem(.separator())
         MenuItems.add(m, "New Profile") { choice = .new }
         // SwiftUI's global frame is top-left based in the window; the content view is not flipped.
-        let y = content.isFlipped ? pill.maxY + 4 : content.bounds.height - pill.maxY - 4
+        let y = content.isFlipped ? pill.maxY + Design.Space.xs : content.bounds.height - pill.maxY - Design.Space.xs
         // Next turn of the run loop, so the button's press returns before the menu tracks.
         DispatchQueue.main.async { m.popUp(positioning: nil, at: NSPoint(x: pill.minX, y: y), in: content) }
     }
@@ -156,37 +177,37 @@ struct ChangeProfileDialog: View {
 
     private var picker: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SpaceProfileIcon(space: space).padding(.top, 38)
+            SpaceProfileIcon(space: space)
             (Text("Change ") + Text("\(space.title)’s").bold() + Text(" Profile"))
-                .font(.system(size: 17.5))
-                .foregroundStyle(.white)
-                .padding(.top, 17)
+                .font(Design.Font.ui(.title))
+                .foregroundStyle(DialogTheme.title)
+                .padding(.top, Design.Space.xl)
             Text("Each Profile has different browser data, so you might get logged out of some websites, see different Favorites up top, or need to re-install extensions.")
-                .font(.system(size: 14))
-                .lineSpacing(0.7)
+                .font(Design.Font.ui(.body))
+                .lineSpacing(Design.Space.hair)
                 .foregroundStyle(NewProfileDialog.body)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 375.5, alignment: .leading)
-                .padding(.top, 12)
-            HStack(spacing: 6) {
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, Design.Space.m)
+            HStack(spacing: Design.Space.s) {
                 (Text("\(space.title)’s").bold() + Text(" Profile"))
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color(hex: "#DBDCDF"))
+                    .font(Design.Font.ui(.body))
+                    .foregroundStyle(DialogTheme.title)
                 // An NSMenu under the pill, like Arc's (Default, the other profiles, New Profile).
                 Button(action: showMenu) {
                     // Arc's lavender circle with the chevron cut in the pill's blue, 14 pt.
-                    HStack(spacing: 5) {
+                    HStack(spacing: Design.Space.xs) {
                         ZStack {
-                            Circle().fill(Color(hex: "#BEC0F3"))
-                            Image(systemName: "chevron.down").font(.system(size: 7, weight: .heavy)).foregroundStyle(Color(hex: "#2E36E7"))
+                            Circle().fill(ProfilePalette.pillInk)
+                            Image(systemName: "chevron.down").font(.system(size: Metrics.pillChevron, weight: .heavy)).foregroundStyle(ProfilePalette.pill)
                                 .offset(y: 0.5)
                         }
-                        .frame(width: 14, height: 14)
-                        Text(choiceName).font(.system(size: 14)).foregroundStyle(Color(hex: "#BEC0F3"))
+                        .frame(width: Metrics.pillDot, height: Metrics.pillDot)
+                        Text(choiceName).font(Design.Font.ui(.body)).foregroundStyle(ProfilePalette.pillInk)
                     }
-                    .padding(.horizontal, 8)
-                    .frame(height: 27)
-                    .background(Color(hex: "#2E36E7"), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .padding(.horizontal, Design.Space.m)
+                    .frame(height: Design.Space.controlCompact)
+                    .background(ProfilePalette.pill, in: RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous))
                     .background(GeometryReader { g in Color.clear.onAppear { pill = g.frame(in: .global) }
                         .onChange(of: g.frame(in: .global)) { _, f in pill = f } })
                 }
@@ -197,19 +218,19 @@ struct ChangeProfileDialog: View {
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { showMenu() }
             }
-            .padding(.top, 8)
-            HStack(spacing: 7) {
+            .padding(.top, Design.Space.m)
+            HStack(spacing: Design.Space.m) {
                 Spacer()
                 DialogButton(title: "Cancel", key: "ESC", enabled: true, primary: false, action: onCancel)
                     .keyboardShortcut(.cancelAction)
                 DialogButton(title: "Change Profile", key: "↩", enabled: true, style: .accent, action: confirm)
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.top, 27.5)
-            Spacer(minLength: 0)
+            .padding(.top, Design.Space.xxxl)
         }
-        .padding(.horizontal, 38.5)
-        .frame(width: 450, height: 338)
+        .padding(Design.Space.xxxl)
+        .frame(width: Metrics.width)
+        .fixedSize(horizontal: false, vertical: true)
         .modifier(DialogSurface())
     }
 }
@@ -221,30 +242,30 @@ private struct SpaceProfileIcon: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(hex: "#4049DC"))
+                RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(ProfilePalette.tile)
                 if let symbol = space.symbol {
-                    Image(systemName: symbol).font(.system(size: 26, weight: .medium)).foregroundStyle(.white)
+                    Image(systemName: symbol).font(.system(size: Metrics.tileSymbol, weight: .medium)).foregroundStyle(DialogTheme.title)
                 } else {
-                    Text(space.emoji.isEmpty ? "🌱" : space.emoji).font(.system(size: 30))
+                    Text(space.emoji.isEmpty ? "🌱" : space.emoji).font(.system(size: Metrics.tileEmoji))
                 }
             }
-            .frame(width: 62, height: 62)
-            .frame(width: 68, height: 68, alignment: .topLeading)
+            .frame(width: Metrics.tile, height: Metrics.tile)
+            .frame(width: Metrics.tileFrame, height: Metrics.tileFrame, alignment: .topLeading)
             ZStack {
-                Circle().fill(Color(hex: "#30305D"))
-                Circle().strokeBorder(Color(hex: "#6262A3"), lineWidth: 1.5)
+                Circle().fill(ProfilePalette.face)
+                Circle().strokeBorder(ProfilePalette.ring, lineWidth: 1.5)
                 VStack(spacing: 2.5) {
                     HStack(spacing: 3.5) {
-                        Capsule().fill(Color(hex: "#C4C4DC")).frame(width: 2, height: 5)
-                        Capsule().fill(Color(hex: "#C4C4DC")).frame(width: 2, height: 5)
+                        Capsule().fill(ProfilePalette.features).frame(width: 2, height: 5)
+                        Capsule().fill(ProfilePalette.features).frame(width: 2, height: 5)
                     }
-                    SmileArc().stroke(Color(hex: "#C4C4DC"), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    SmileArc().stroke(ProfilePalette.features, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .frame(width: 10, height: 2.5)
                 }
             }
-            .frame(width: 23, height: 23)
+            .frame(width: Metrics.tileBadge, height: Metrics.tileBadge)
             .overlay(Circle().strokeBorder(NewProfileDialog.card, lineWidth: 2))
         }
-        .frame(width: 68, height: 68)
+        .frame(width: Metrics.tileFrame, height: Metrics.tileFrame)
     }
 }

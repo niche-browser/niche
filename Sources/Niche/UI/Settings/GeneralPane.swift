@@ -68,7 +68,7 @@ struct GeneralPane: View {
             }
             SettingsSection(title: "Updates") {
                 SettingsCardRow {
-                    HStack(spacing: 12) {
+                    HStack(spacing: Design.Space.l) {
                         BrandTile()
                         SettingsLabel(title: "Niche \(Self.version)", detail: updater.lastCheckSummary)
                     }

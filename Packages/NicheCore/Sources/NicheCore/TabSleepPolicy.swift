@@ -11,13 +11,18 @@ public struct TabSleepPolicy: Equatable, Sendable {
     public var hiddenFor: TimeInterval
     /// The tabs on screen and the ones hidden most recently, `protectedRecentTabs` in all, stay.
     public var keepsRecentTabs: Bool
+    /// A favorite's page stays: it is an app the user comes back to, and a cold Gmail takes
+    /// seconds to load. The clock keeps them; a Mac short of memory may still close one.
+    public var keepsFavorites: Bool
     /// At most this many pages are asked in one pass (nil: all of them).
     public var limit: Int?
     public var reason: Reason
 
-    public init(hiddenFor: TimeInterval, keepsRecentTabs: Bool = true, limit: Int? = nil, reason: Reason = .timer) {
+    public init(hiddenFor: TimeInterval, keepsRecentTabs: Bool = true, keepsFavorites: Bool = true, limit: Int? = nil,
+                reason: Reason = .timer) {
         self.hiddenFor = hiddenFor
         self.keepsRecentTabs = keepsRecentTabs
+        self.keepsFavorites = keepsFavorites
         self.limit = limit
         self.reason = reason
     }
@@ -42,11 +47,11 @@ public struct TabSleepPolicy: Equatable, Sendable {
     /// 3 at warning; 9 at critical, so a sweep keeps up with tabs opened faster than the clock
     /// closes them (#237: a burst of YouTube tabs held a 16 GB Mac 7 GB over its memory).
     public static func memoryPressure(_ level: PerfSystemSample.Pressure) -> TabSleepPolicy {
-        TabSleepPolicy(hiddenFor: 5 * 60, keepsRecentTabs: false, limit: level == .critical ? 9 : 3, reason: .memoryPressure)
+        TabSleepPolicy(hiddenFor: 5 * 60, keepsRecentTabs: false, keepsFavorites: false, limit: level == .critical ? 9 : 3, reason: .memoryPressure)
     }
 
     /// A pinned tab that a split pane copied (Arc): its page sleeps at once, the copy shows it.
-    public static let splitCopy = TabSleepPolicy(hiddenFor: 0, keepsRecentTabs: false, limit: 1, reason: .splitCopy)
+    public static let splitCopy = TabSleepPolicy(hiddenFor: 0, keepsRecentTabs: false, keepsFavorites: false, limit: 1, reason: .splitCopy)
 
     /// How often the app's pass runs (AppComposition.tabSleepInterval).
     public static let passInterval: TimeInterval = 60
@@ -128,17 +133,27 @@ public struct TabSleepPolicy: Equatable, Sendable {
         public var id: UUID
         public var hiddenAt: Date?
         public var audibleAt: Date?
+        /// A favorite's page: the clock leaves it awake (`keepsFavorites`).
+        public var favorite: Bool
 
-        public init(id: UUID, hiddenAt: Date?, audibleAt: Date? = nil) {
+        public init(id: UUID, hiddenAt: Date?, audibleAt: Date? = nil, favorite: Bool = false) {
             self.id = id
             self.hiddenAt = hiddenAt
             self.audibleAt = audibleAt
+            self.favorite = favorite
         }
     }
 
-    /// The tabs on screen, then the ones hidden most recently, `count` in all.
+    /// Whether the freezing pass votes to freeze a page: out of sight since before `cutoff`, not
+    /// one of the `recent` tabs, and not a favorite.
+    public static func freezes(_ page: Page, recent: Set<UUID>, before cutoff: Date) -> Bool {
+        !page.favorite && !recent.contains(page.id) && page.hiddenAt.map { $0 < cutoff } == true
+    }
+
+    /// The tabs on screen, then the ones hidden most recently, `count` in all. A favorite takes
+    /// none of the places: the clock keeps it anyway.
     public static func recentlyShown(_ pages: [Page], visible: [UUID], count: Int) -> Set<UUID> {
-        let hidden = pages.compactMap { p in p.hiddenAt.map { (p.id, $0) } }.sorted { $0.1 > $1.1 }.map(\.0)
+        let hidden = pages.compactMap { p in p.favorite ? nil : p.hiddenAt.map { (p.id, $0) } }.sorted { $0.1 > $1.1 }.map(\.0)
         return Set((visible + hidden).prefix(count))
     }
 
@@ -214,7 +229,8 @@ public struct TabSleepPolicy: Equatable, Sendable {
         let kept = keepsRecentTabs ? Self.recentlyShown(pages, visible: visible, count: protectedRecent) : []
         return pages
             .filter { p in
-                guard let hidden = p.hiddenAt, hidden < cutoff, !visible.contains(p.id), !kept.contains(p.id) else { return false }
+                guard let hidden = p.hiddenAt, hidden < cutoff, !visible.contains(p.id), !kept.contains(p.id),
+                      !(keepsFavorites && p.favorite) else { return false }
                 return p.audibleAt.map { $0 < cutoff } ?? true
             }
             .sorted { ($0.hiddenAt!, $0.id.uuidString) < ($1.hiddenAt!, $1.id.uuidString) }

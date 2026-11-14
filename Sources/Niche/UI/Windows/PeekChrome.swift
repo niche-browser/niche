@@ -57,19 +57,19 @@ final class PeekBarView: NSView {
         let fill = hex.map { NSColor(hex: $0) } ?? .white
         let fg = Design.barInk(onLight: light)
         let fgDim = Design.barInkDim(onLight: light)
-        let hover = NSColor.white.withAlphaComponent(0.1)
+        let hover = Design.barFill(.selected, onLight: light)
         layer?.backgroundColor = fill.cgColor
-        back.configure(symbol: "arrow.left", image: nil, help: "Go Back (⌘[)", enabled: state.canGoBack, width: 37, iconSize: 15, tint: fgDim, hover: hover)
-        forward.configure(symbol: "arrow.right", image: nil, help: "Go Forward (⌘])", enabled: state.canGoForward, width: 37, iconSize: 15,
+        back.configure(symbol: "arrow.left", image: nil, help: "Go Back (⌘[)", enabled: state.canGoBack, width: 37, iconSize: Design.Icon.bar, tint: fgDim, hover: hover)
+        forward.configure(symbol: "arrow.right", image: nil, help: "Go Forward (⌘])", enabled: state.canGoForward, width: 37, iconSize: Design.Icon.bar,
                           tint: fgDim, hover: hover)
         reload.configure(symbol: state.isLoading ? "xmark" : "arrow.clockwise", image: nil, help: "Refresh (⌘R)", enabled: true, width: 37,
-                         iconSize: 15, tint: fgDim, hover: hover, animated: true)
+                         iconSize: Design.Icon.bar, tint: fgDim, hover: hover, animated: true)
         let human = SuggestionEngine.humanURL(state.url)
         let host = AppSettings.siteKey(for: state.url) ?? human
         // Arc's Peek shows the path too ("example.com/peek"), dimmed after the host.
         url.isHidden = state.url.isEmpty
         url.show(host: host, path: human.hasPrefix(host) ? String(human.dropFirst(host.count)) : "", url: state.url, developer: false,
-                 fg: fg, fgDim: fgDim, hover: NSColor.white.withAlphaComponent(0.08), copyHover: hover)
+                 fg: fg, fgDim: fgDim, hover: Design.barFill(.hover, onLight: light), copyHover: hover)
         needsLayout = true
     }
 
@@ -125,7 +125,7 @@ final class PeekControlsPanel: NSPanel {
         let all = frames.reduce(NSRect.null) { $0.union($1) }.insetBy(dx: -margin, dy: -margin)
         setFrame(all, display: false)
         let tones = TooltipTones(theme: theme)
-        let fill = NSColor(srgbRed: tones.fill.r, green: tones.fill.g, blue: tones.fill.b, alpha: 1)
+        let fill = NSColor(tones.fill)
         let ink = NSColor(LittlePalette.spaceName(theme))
         for (v, f) in zip(views, frames) {
             v.frame = NSRect(x: f.minX - all.minX, y: f.minY - all.minY, width: f.width, height: f.height)
@@ -158,15 +158,15 @@ final class PeekControlButton: NSView {
 
     func paint(fill: NSColor, ink: NSColor) {
         layer?.backgroundColor = fill.cgColor
-        layer?.cornerRadius = min(bounds.width, bounds.height) / 2
-        glyph.image = SidebarSymbols.image(symbol, size: 15, weight: .semibold)
+        layer?.cornerRadius = Design.Radius.pill(min(bounds.width, bounds.height))
+        glyph.image = Design.Icon.symbol(symbol, size: Design.Icon.bar, weight: .semibold)
         glyph.contentTintColor = ink
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
-        layer?.cornerRadius = min(bounds.width, bounds.height) / 2
+        layer?.cornerRadius = Design.Radius.pill(min(bounds.width, bounds.height))
         glyph.frame = bounds
     }
 

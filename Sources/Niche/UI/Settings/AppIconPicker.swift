@@ -30,10 +30,10 @@ struct AppIconSection: View {
                 }
             }
             .padding(.horizontal, Design.Space.rowInset)
-            .padding(.vertical, 12)
+            .padding(.vertical, Design.Space.l)
             SettingsCardDivider()
             SettingsCardRow {
-                Text("Your own icon").font(.system(size: 13))
+                SettingsLabel(title: "Your own icon")
             } trailing: {
                 if icons.customImage != nil {
                     Button("Remove") { icons.removeCustom(); error = nil }
@@ -42,7 +42,7 @@ struct AppIconSection: View {
             }
         }
         SettingsFootnote("Drop any image on Custom. It’s fitted to the Dock’s rounded tile.")
-        if let error { SettingsFootnote(error).foregroundStyle(.red) }
+        if let error { SettingsFootnote(error).foregroundStyle(Design.danger) }
     }
 
     private func chooseImage() {
@@ -79,20 +79,28 @@ private struct AppIconTile: View {
     private static let canvas = size / AppIconManager.gridBody
     /// The icons' own corners: 14.3 of 64 units.
     private static let corner = size * 14.3 / 64
+    /// The selection ring: its gap from the tile and its stroke.
+    private static let ringGap: CGFloat = 4
+    private static let ringWidth: CGFloat = 2.5
+    /// How far a tile grows under the pointer.
+    private static let hoverScale: CGFloat = 1.04
+    /// The empty Custom tile's dashed edge.
+    private static let dashWidth: CGFloat = 1.5
+    private static let dash: [CGFloat] = [4, 3]
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 0) {
                 icon
                     .frame(width: Self.canvas, height: Self.canvas)
-                    .overlay(RoundedRectangle(cornerRadius: Self.corner + 4, style: .continuous)
-                        .strokeBorder(Design.accent, lineWidth: 2.5)
-                        .frame(width: Self.size + 8, height: Self.size + 8)
+                    .overlay(RoundedRectangle(cornerRadius: Self.corner + Self.ringGap, style: .continuous)
+                        .strokeBorder(Design.accent, lineWidth: Self.ringWidth)
+                        .frame(width: Self.size + 2 * Self.ringGap, height: Self.size + 2 * Self.ringGap)
                         .opacity(selected ? 1 : 0))
-                    .scaleEffect(hovering && !selected ? 1.04 : 1)
-                    .animation(.easeOut(duration: 0.15), value: hovering)
+                    .scaleEffect(hovering && !selected ? Self.hoverScale : 1)
+                    .animation(.easeOut(duration: Design.Motion.duration(Design.Motion.fast)), value: hovering)
                 Text(name)
-                    .font(.system(size: 11))
+                    .font(Design.Font.caption)
                     .foregroundStyle(selected ? Color.primary : Color.secondary)
             }
             .frame(maxWidth: .infinity)
@@ -109,8 +117,8 @@ private struct AppIconTile: View {
             Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
         } else {
             RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
-                .strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                .overlay(Image(systemName: "plus").font(.system(size: 18, weight: .medium)).foregroundStyle(.secondary))
+                .strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: Self.dashWidth, dash: Self.dash))
+                .overlay(Image(systemName: "plus").font(.system(size: Design.Icon.large, weight: .medium)).foregroundStyle(.secondary))
                 .frame(width: Self.size, height: Self.size)
         }
     }

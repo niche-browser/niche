@@ -86,6 +86,14 @@ public struct ToolbarComposition: Equatable, Sendable {
         !toolbarShown || !barCarriesToggle(kind: kind, inSplit: inSplit, sidebarVisible: true)
     }
 
+    /// Whether the sidebar's header names the window's space beside the traffic lights. Only where
+    /// nothing else does: the list's own space header shows the same name right under it, and a
+    /// space named twice reads as a mistake (13 Nov 2026). So the header names it when the bar
+    /// carries the toggle, the window has spaces to switch between, and the space header is hidden.
+    public static func sidebarHeaderNamesSpace(headerHasToggle: Bool, standaloneWindow: Bool, spaceHeaderHidden: Bool) -> Bool {
+        !headerHasToggle && !standaloneWindow && spaceHeaderHidden
+    }
+
     /// The sidebar's URL field while the toolbar is hidden, shown on hover over the header: the
     /// pinned extensions while they leave the address its room (else they go in the grid over the
     /// favorites), Copy Link, then the Site Control Center's sliders (Arc 1.171, GitHub #226).

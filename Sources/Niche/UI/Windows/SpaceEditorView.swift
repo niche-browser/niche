@@ -1,5 +1,13 @@
 import SwiftUI
 
+private enum Metrics {
+    /// The icon gallery under the name.
+    static let iconPickerHeight: CGFloat = 250
+    /// The preview of the space, and one of the two placeholder rows in it.
+    static let previewHeight: CGFloat = 96
+    static let previewRow: CGFloat = 22
+}
+
 /// The profile picked for a space: Default (nil), an existing one, or a new one to make.
 enum SpaceProfileChoice: Hashable {
     case existing(UUID?)
@@ -11,7 +19,7 @@ enum SpaceProfileChoice: Hashable {
 /// Dark). An existing space shows each change at once (`onPreview`); Cancel puts its theme back,
 /// Save writes it.
 struct SpaceEditorView: View {
-    static let width: CGFloat = 24 + SpaceIconPicker.size.width + 20 + 355 + 24
+    static let width: CGFloat = Design.Space.xxxl + SpaceIconPicker.size.width + Design.Space.xxl + SpaceStyleEditor.size.width + Design.Space.xxxl
 
     let existing: Space?
     let profiles: [BrowserProfile]
@@ -43,12 +51,12 @@ struct SpaceEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 18) {
-            Text(existing == nil ? "New Space" : "Edit Space").font(.system(size: 17, weight: .semibold))
-            HStack(alignment: .top, spacing: 20) {
-                VStack(alignment: .leading, spacing: 12) {
+        VStack(spacing: Design.Space.xl) {
+            Text(existing == nil ? "New Space" : "Edit Space").font(Design.Font.title)
+            HStack(alignment: .top, spacing: Design.Space.xxl) {
+                VStack(alignment: .leading, spacing: Design.Space.l) {
                     preview
-                    HStack(spacing: 8) {
+                    HStack(spacing: Design.Space.m) {
                         iconTile
                         SettingsTextField(placeholder: "Name", text: $title)
                     }
@@ -56,7 +64,7 @@ struct SpaceEditorView: View {
                                     onPick: { icon = .emoji($0) },
                                     onPickSymbol: { icon = .symbol($0) },
                                     onRemove: { icon = .none },
-                                    height: 250)
+                                    height: Metrics.iconPickerHeight)
                         .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(Design.surface))
                         .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Design.hairline))
                     profileSection
@@ -80,7 +88,7 @@ struct SpaceEditorView: View {
                 .disabled((title.trimmingCharacters(in: .whitespaces).isEmpty && existing == nil) || (profile == .new && trimmedProfileName.isEmpty))
             }
         }
-        .padding(24)
+        .padding(Design.Space.xxxl)
         .frame(width: Self.width)
         .tint(Design.accent)
     }
@@ -89,18 +97,18 @@ struct SpaceEditorView: View {
     private var preview: some View {
         ZStack {
             SpaceBackground(palette: theme.palette)
-            VStack(spacing: 6) {
-                HStack(spacing: 6) {
-                    glyph(size: 15, color: theme.palette.textPrimary)
-                    Text(title.isEmpty ? "Space" : title).font(.system(size: 13, weight: .semibold)).foregroundStyle(theme.palette.textPrimary)
+            VStack(spacing: Design.Space.s) {
+                HStack(spacing: Design.Space.s) {
+                    glyph(color: theme.palette.textPrimary)
+                    Text(title.isEmpty ? "Space" : title).font(Design.Font.section).foregroundStyle(theme.palette.textPrimary)
                     Spacer(minLength: 0)
                 }
-                RoundedRectangle(cornerRadius: 6).fill(theme.palette.selectedFill).frame(height: 22)
-                RoundedRectangle(cornerRadius: 6).fill(theme.palette.hoverFill).frame(height: 22)
+                RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(theme.palette.selectedFill).frame(height: Metrics.previewRow)
+                RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(theme.palette.hoverFill).frame(height: Metrics.previewRow)
             }
-            .padding(12)
+            .padding(Design.Space.l)
         }
-        .frame(height: 96)
+        .frame(height: Metrics.previewHeight)
         .clipShape(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(Design.hairline))
     }
@@ -109,23 +117,23 @@ struct SpaceEditorView: View {
     private var iconTile: some View {
         Group {
             if icon == .none {
-                Image(systemName: "face.dashed").font(.system(size: 14)).foregroundStyle(.tertiary)
+                Image(systemName: "face.dashed").font(.system(size: Design.Icon.bar)).foregroundStyle(.tertiary)
             } else {
-                glyph(size: 17, color: .primary)
+                glyph(color: .primary)
             }
         }
-        .frame(width: 32, height: 32)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Design.hairline))
+        .frame(width: Design.Space.controlLarge, height: Design.Space.controlLarge)
+        .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.fill(.hover)))
+        .overlay(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).strokeBorder(Design.hairline))
         .accessibilityLabel("Space icon")
     }
 
     /// The icon as the sidebar draws it: an emoji, or a symbol in the space's text colour.
     @ViewBuilder
-    private func glyph(size: CGFloat, color: Color) -> some View {
+    private func glyph(color: Color) -> some View {
         switch icon {
-        case .emoji(let e): Text(e).font(.system(size: size))
-        case .symbol(let name): Image(systemName: name).font(.system(size: size - 2, weight: .medium)).foregroundStyle(color)
+        case .emoji(let e): Text(e).font(.system(size: Design.Icon.image))
+        case .symbol(let name): Image(systemName: name).font(.system(size: Design.Icon.bar, weight: .medium)).foregroundStyle(color)
         case .none: EmptyView()
         }
     }
@@ -133,7 +141,7 @@ struct SpaceEditorView: View {
     private var trimmedProfileName: String { newProfileName.trimmingCharacters(in: .whitespaces) }
 
     private var profileSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Design.Space.m) {
             HStack {
                 Text("Profile").font(Design.Font.body)
                 Spacer()

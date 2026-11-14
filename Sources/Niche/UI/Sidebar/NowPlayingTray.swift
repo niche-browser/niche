@@ -59,6 +59,8 @@ struct NowPlayingColors {
     let trackFilled: NSColor
     let trackEmpty: NSColor
     let knob: NSColor
+    /// The slider's knob on a dark card: a warm light grey.
+    private static let knobOnDark = NSColor(srgbRed: 0.86, green: 0.86, blue: 0.85, alpha: 1)
 
     init(themeColor hex: String?, dark: Bool) {
         let c = HexColor.components(hex ?? "") ?? (0.5, 0.5, 0.5)
@@ -66,27 +68,27 @@ struct NowPlayingColors {
         let grey = s < 0.05
         func color(_ s: Double, _ v: Double) -> NSColor {
             let o = SpaceTheme.rgb(h: h, s: s, v: v)
-            return NSColor(srgbRed: o.0, green: o.1, blue: o.2, alpha: 1)
+            return NSColor(RGB(o.0, o.1, o.2))
         }
         let shaded = SpaceTheme.shadedDark(hex)
         isDark = dark
         if dark {
             fill = NSColor(RGB.black.mixed(with: shaded, 0.15))
-            foreground = NSColor.white.withAlphaComponent(0.66)
-            title = NSColor.white.withAlphaComponent(0.81)
-            hover = NSColor.white.withAlphaComponent(0.07)
-            placeholder = NSColor.white.withAlphaComponent(0.14)
+            foreground = Design.onDark(.secondary)
+            title = Design.onDark(.primary)
+            hover = Design.fillOnDark(.hover)
+            placeholder = Design.fillOnDark(.pressed)
             trackFilled = color(grey ? 0 : 0.25, 0.99)
-            trackEmpty = NSColor.white.withAlphaComponent(0.1)
-            knob = NSColor(srgbRed: 0.86, green: 0.86, blue: 0.85, alpha: 1)
+            trackEmpty = Design.fillOnDark(.pressed)
+            knob = Self.knobOnDark
         } else {
             fill = color(grey ? 0 : 0.012, 0.996)
-            foreground = NSColor.black.withAlphaComponent(0.5)
-            title = NSColor.black.withAlphaComponent(0.85)
-            hover = NSColor.black.withAlphaComponent(0.08)
-            placeholder = NSColor.black.withAlphaComponent(0.15)
+            foreground = Design.onLight(.secondary)
+            title = Design.onLight(.primary)
+            hover = Design.barFill(.hover, onLight: true)
+            placeholder = Design.barFill(.pressed, onLight: true)
             trackFilled = NSColor(shaded)
-            trackEmpty = NSColor.black.withAlphaComponent(0.18)
+            trackEmpty = Design.barFill(.strong, onLight: true)
             knob = .white
         }
     }
@@ -157,7 +159,7 @@ final class NowPlayingTrayView: NSView {
         for (id, card) in cards where !ids.contains(id) {
             cards[id] = nil
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.15
+                ctx.duration = Design.Motion.fast
                 card.animator().alphaValue = 0
             } completionHandler: { card.removeFromSuperview() }
         }
@@ -231,7 +233,7 @@ final class NowPlayingTrayView: NSView {
             return
         }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
+            ctx.duration = Design.Motion.duration(Design.Motion.standard)
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.15, 0.85, 0.3, 1)
             ctx.allowsImplicitAnimation = true
             for (card, f, a) in frames {
@@ -298,7 +300,7 @@ struct NowPlayingCardModel: Equatable {
 @MainActor
 final class NowPlayingCardView: NSView {
     private let content = NSView()
-    private let title = NSTextField.sidebarLabel(size: 13)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     private let titleRow = NSView()
     private let icon = NowPlayingIconView()
     private let pip: SidebarGlyphButton
@@ -452,13 +454,13 @@ final class NowPlayingCardView: NSView {
 final class NowPlayingIconView: NSView {
     private let imageView = NSImageView()
     var onClick: () -> Void = {}
-    var placeholder = NSColor.white.withAlphaComponent(0.14) { didSet { refresh() } }
+    var placeholder = Design.fillOnDark(.pressed) { didSet { refresh() } }
     var image: NSImage? { didSet { imageView.image = image; refresh() } }
 
     override init(frame: NSRect) {
         super.init(frame: NSRect(x: 0, y: 0, width: 16, height: 16))
         wantsLayer = true
-        layer?.cornerRadius = 3
+        layer?.cornerRadius = Design.Radius.small
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.frame = bounds
         imageView.autoresizingMask = [.width, .height]
@@ -485,23 +487,25 @@ final class NowPlayingVolumeSlider: NSView {
     var onChange: (Double) -> Void = { _ in }
     private(set) var isTracking = false
     private static let knob = NSSize(width: 20, height: 16)
+    private static let trackHeight: CGFloat = 6
 
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
         let k = Self.knob
-        let track = NSRect(x: 0, y: (bounds.height - 6) / 2, width: bounds.width, height: 6)
+        let th = Self.trackHeight, r = Design.Radius.pill(th)
+        let track = NSRect(x: 0, y: (bounds.height - th) / 2, width: bounds.width, height: th)
         colors.trackEmpty.setFill()
-        NSBezierPath(roundedRect: track, xRadius: 3, yRadius: 3).fill()
+        NSBezierPath(roundedRect: track, xRadius: r, yRadius: r).fill()
         let knobX = (bounds.width - k.width) * value
         colors.trackFilled.setFill()
-        NSBezierPath(roundedRect: NSRect(x: 0, y: track.minY, width: knobX + k.width / 2, height: 6), xRadius: 3, yRadius: 3).fill()
+        NSBezierPath(roundedRect: NSRect(x: 0, y: track.minY, width: knobX + k.width / 2, height: th), xRadius: r, yRadius: r).fill()
         let knob = NSBezierPath(roundedRect: NSRect(x: knobX, y: (bounds.height - k.height) / 2, width: k.width, height: k.height),
-                                xRadius: k.height / 2, yRadius: k.height / 2)
+                                xRadius: Design.Radius.pill(k.height), yRadius: Design.Radius.pill(k.height))
         NSGraphicsContext.saveGraphicsState()
         if !colors.isDark {
             let shadow = NSShadow()
-            shadow.shadowColor = NSColor.black.withAlphaComponent(0.18)
+            shadow.shadowColor = Design.Shadow.cardColor
             shadow.shadowBlurRadius = 3
             shadow.shadowOffset = NSSize(width: 0, height: -0.5)
             shadow.set()

@@ -179,11 +179,11 @@ final class SettingsWindowController: NSWindowController, NSToolbarDelegate {
 struct SettingsToolbarRow: View {
     let nav: SettingsNavigation
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Design.Space.m) {
             if let parent = nav.pane.parent {
                 Button { nav.show(parent) } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 15, weight: .semibold))
-                        .frame(width: 28, height: 28)
+                    Image(systemName: "chevron.left").font(.system(size: Design.Icon.bar, weight: .semibold))
+                        .frame(width: Design.Icon.plate, height: Design.Icon.plate)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -211,12 +211,12 @@ struct SettingsSidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ForEach(SettingsPane.Group.allCases, id: \.self) { group in
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Design.Space.xxs) {
                     Text(group.rawValue)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Design.Font.ui(.caption, .semibold))
                         .foregroundStyle(.tertiary)
-                        .padding(.leading, 10)
-                        .padding(.bottom, 4)
+                        .padding(.leading, SettingsMetrics.fieldInset)
+                        .padding(.bottom, Design.Space.xs)
                     ForEach(group.panes) { row($0) }
                 }
             }
@@ -242,11 +242,11 @@ private struct SettingsSidebarRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: pane.symbol)
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 20, height: 20)
+                    .font(.system(size: Design.Icon.regular, weight: .medium))
+                    .frame(width: Design.Icon.large, height: Design.Icon.large)
                     .foregroundStyle(selected ? Design.accent : Color.secondary)
                 Text(pane.title)
-                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .font(Design.Font.ui(.body, selected ? .semibold : .regular))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Spacer(minLength: 0)

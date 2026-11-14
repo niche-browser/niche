@@ -1,6 +1,43 @@
 import AppKit
 import SwiftUI
 
+/// The feature pictures' geometry: each is drawn on its own canvas and shown scaled down in its row.
+private enum Metrics {
+    /// The canvas a picture is drawn on, and the tile it is shown as.
+    static let canvas = CGSize(width: 88, height: 56)
+    static let tile = CGSize(width: 56, height: 36)
+    static let scale = tile.width / canvas.width
+    /// Where the dividers start: at the rows' text, past the picture.
+    static let dividerInset = Design.Space.rowInset + tile.width + Design.Space.l
+    /// Type and glyph sizes on the canvas.
+    static let caption: CGFloat = 4
+    static let small: CGFloat = 4.5
+    static let title: CGFloat = 6
+    static let glyph: CGFloat = 9
+    /// The renamed-download card and its corners.
+    static let cardWidth: CGFloat = 70
+    static let cardRadius: CGFloat = 4
+    /// The favicon stub in front of the renamed tab's title.
+    static let faviconRadius: CGFloat = 1.5
+}
+
+/// The pictures' own colours.
+private enum Palette {
+    /// The cards the pictures show: white paper, black ink, in both appearances.
+    static let paper = Color.white
+    static let paperInk = Color.black
+    static let downloadsGround = Color(red: 0.16, green: 0.20, blue: 0.93)
+    static let downloadsGrey = Color(white: 0.55)
+    static let titlesGround = Color(red: 0.61, green: 0.48, blue: 0.62)
+    static let titlesInk = Color(red: 0.42, green: 0.27, blue: 0.62)
+    static let titlesFavicon = Color(red: 0.32, green: 0.12, blue: 0.36)
+    static let sparkle = Color.white.opacity(0.9)
+    static let sparkleDim = Color.white.opacity(0.6)
+    static let tabsGround = Color(red: 0.84, green: 0.82, blue: 0.96)
+    static let tabsInk = Color(red: 0.55, green: 0.52, blue: 0.72)
+    static let tabsSquiggle = Color(red: 0.70, green: 0.67, blue: 0.90)
+}
+
 /// Intelligence: one card, a row per feature with a picture, its name, what it does and a switch,
 /// and a line under the card about where the data goes. The features run on the Mac's own Apple
 /// Intelligence model, so that line says nothing leaves the Mac, or, while Apple Intelligence
@@ -20,13 +57,13 @@ struct MaxPane: View {
                 } description: {
                     Text("Press \(Image(nsImage: BroomGlyph.image).renderingMode(.template)) to let the sidebar sort itself once you have six or more tabs today.")
                 }
-                SettingsCardDivider(inset: 124)
+                SettingsCardDivider(inset: Metrics.dividerInset)
                 MaxFeatureRow(title: "Tidy Tab Titles", isOn: $store.settings.tidyTabTitles, enabled: available) {
                     TidyTabTitlesPicture()
                 } description: {
                     Text("Pinned tabs get shorter, tidier titles.")
                 }
-                SettingsCardDivider(inset: 124)
+                SettingsCardDivider(inset: Metrics.dividerInset)
                 MaxFeatureRow(title: "Tidy Downloads", isOn: $store.settings.tidyDownloads, enabled: available) {
                     TidyDownloadsPicture()
                 } description: {
@@ -34,7 +71,7 @@ struct MaxPane: View {
                 }
             }
             MaxFooter(status: service.status) { service.openSystemSettings() }
-                .padding(.top, 10)
+                .padding(.top, Design.Space.m)
         }
         // Coming back from System Settings brings Niche to the front, which reads the status again;
         // a model still downloading gets there without that.
@@ -56,31 +93,33 @@ struct MaxFeatureRow<Picture: View, Description: View>: View {
     @ViewBuilder let description: Description
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            MaxPictureFrame { picture }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(Design.Font.body)
-                description
-                    .font(Design.Font.detail).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        SettingsCardRow {
+            HStack(alignment: .center, spacing: Design.Space.l) {
+                MaxPictureFrame { picture }
+                VStack(alignment: .leading, spacing: Design.Space.xxs) {
+                    Text(title).font(Design.Font.body)
+                    description
+                        .font(Design.Font.detail).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            Spacer(minLength: 12)
+        } trailing: {
             SettingsSwitch(title: title, isOn: Binding(get: { isOn && enabled }, set: { isOn = $0 }))
                 .disabled(!enabled)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
     }
 }
 
-/// Each picture on a rounded tile with a hairline edge.
+/// Each picture scaled onto a small rounded tile with a hairline edge.
 private struct MaxPictureFrame<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
         content
-            .frame(width: 88, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Design.hairline))
+            .frame(width: Metrics.canvas.width, height: Metrics.canvas.height)
+            .scaleEffect(Metrics.scale)
+            .frame(width: Metrics.tile.width, height: Metrics.tile.height)
+            .clipShape(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(Design.hairline))
             .accessibilityHidden(true)
     }
 }
@@ -92,7 +131,7 @@ private struct MaxFooter: View {
     let openSettings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Design.Space.xs) {
             Text(status.explanation)
                 .font(Design.Font.detail).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -108,23 +147,23 @@ private struct MaxFooter: View {
 
 /// Tidy Downloads' picture: the "Download renamed to:" card on blue.
 private struct TidyDownloadsPicture: View {
-    private let grey = Color(white: 0.55)
+    private let grey = Palette.downloadsGrey
     var body: some View {
         ZStack {
-            Color(red: 0.16, green: 0.20, blue: 0.93)
+            Palette.downloadsGround
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 3) {
-                    Text("Download renamed to:").font(.system(size: 4)).foregroundStyle(grey).lineLimit(1).fixedSize()
+                    Text("Download renamed to:").font(.system(size: Metrics.caption)).foregroundStyle(grey).lineLimit(1).fixedSize()
                     Spacer(minLength: 0)
-                    Image(systemName: "arrow.uturn.backward").font(.system(size: 4.5, weight: .semibold)).foregroundStyle(grey)
-                    Image(systemName: "xmark").font(.system(size: 4.5, weight: .semibold)).foregroundStyle(grey)
+                    Image(systemName: "arrow.uturn.backward").font(.system(size: Metrics.small, weight: .semibold)).foregroundStyle(grey)
+                    Image(systemName: "xmark").font(.system(size: Metrics.small, weight: .semibold)).foregroundStyle(grey)
                 }
-                Text("Navan Itinerary.pdf").font(.system(size: 6, weight: .medium)).foregroundStyle(.black).lineLimit(1).fixedSize()
-                Text("387494875.pdf").font(.system(size: 4.5)).strikethrough().foregroundStyle(grey).lineLimit(1).fixedSize()
+                Text("Navan Itinerary.pdf").font(.system(size: Metrics.title, weight: .medium)).foregroundStyle(Palette.paperInk).lineLimit(1).fixedSize()
+                Text("387494875.pdf").font(.system(size: Metrics.small)).strikethrough().foregroundStyle(grey).lineLimit(1).fixedSize()
             }
             .padding(.horizontal, 5).padding(.vertical, 4)
-            .frame(width: 70)
-            .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.white))
+            .frame(width: Metrics.cardWidth)
+            .background(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous).fill(Palette.paper))
         }
     }
 }
@@ -132,24 +171,24 @@ private struct TidyDownloadsPicture: View {
 /// Tidy Tab Titles' picture: a renamed tab, "Double-click to rename" under it, sparkles round it,
 /// on mauve.
 private struct TidyTabTitlesPicture: View {
-    private let ink = Color(red: 0.42, green: 0.27, blue: 0.62)
+    private let ink = Palette.titlesInk
     var body: some View {
         ZStack {
-            Color(red: 0.61, green: 0.48, blue: 0.62)
+            Palette.titlesGround
             HStack(spacing: 4) {
-                RoundedRectangle(cornerRadius: 1.5).fill(Color(red: 0.32, green: 0.12, blue: 0.36))
+                RoundedRectangle(cornerRadius: Metrics.faviconRadius).fill(Palette.titlesFavicon)
                     .frame(width: 8, height: 6)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Interior Design Book").font(.system(size: 6, weight: .medium)).foregroundStyle(ink)
+                    Text("Interior Design Book").font(.system(size: Metrics.title, weight: .medium)).foregroundStyle(ink)
                         .lineLimit(1).fixedSize()
-                    Text("Double-click to rename").font(.system(size: 4.5)).foregroundStyle(ink.opacity(0.8))
+                    Text("Double-click to rename").font(.system(size: Metrics.small)).foregroundStyle(ink.opacity(0.8))
                         .lineLimit(1).fixedSize()
                 }
             }
             .padding(.horizontal, 5).padding(.vertical, 2.5)
-            .background(Capsule().fill(Color.white))
+            .background(Capsule().fill(Palette.paper))
             ForEach(0..<9, id: \.self) { i in
-                Circle().fill(Color.white.opacity(i % 2 == 0 ? 0.9 : 0.6))
+                Circle().fill(i % 2 == 0 ? Palette.sparkle : Palette.sparkleDim)
                     .frame(width: i % 3 == 0 ? 1.6 : 1.1, height: i % 3 == 0 ? 1.6 : 1.1)
                     .offset(x: [-33, -20, -6, 9, 22, 34, -26, 15, 30][i], y: [-12, 13, -14, 12, -13, 10, 9, -11, -6][i])
             }
@@ -159,16 +198,16 @@ private struct TidyTabTitlesPicture: View {
 
 /// Tidy Tabs' picture: the squiggle, the broom and a ✕ on lavender.
 private struct TidyTabsPicture: View {
-    private let ink = Color(red: 0.55, green: 0.52, blue: 0.72)
+    private let ink = Palette.tabsInk
     var body: some View {
         ZStack {
-            Color(red: 0.84, green: 0.82, blue: 0.96)
+            Palette.tabsGround
             HStack(spacing: 5) {
                 Squiggle()
-                    .stroke(Color(red: 0.70, green: 0.67, blue: 0.90), style: StrokeStyle(lineWidth: 1.1, lineCap: .round))
+                    .stroke(Palette.tabsSquiggle, style: StrokeStyle(lineWidth: 1.1, lineCap: .round))
                     .frame(width: 40, height: 5)
                 Image(nsImage: BroomGlyph.image).renderingMode(.template).foregroundStyle(ink)
-                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(ink)
+                Image(systemName: "xmark").font(.system(size: Metrics.glyph, weight: .semibold)).foregroundStyle(ink)
             }
             .offset(x: -2)
         }

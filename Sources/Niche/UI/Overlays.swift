@@ -19,7 +19,7 @@ final class OverlayState {
 final class StatusBubbleView: NSView {
     private let overlay: OverlayState
     private let bubble = NSVisualEffectView()
-    private let label = NSTextField.sidebarLabel(size: 11)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
 
     init(overlay: OverlayState) {
         self.overlay = overlay
@@ -28,7 +28,7 @@ final class StatusBubbleView: NSView {
         bubble.blendingMode = .withinWindow
         bubble.state = .active
         bubble.wantsLayer = true
-        bubble.layer?.cornerRadius = 6
+        bubble.layer?.cornerRadius = Design.Radius.inset
         bubble.layer?.cornerCurve = .continuous
         bubble.layer?.masksToBounds = true
         bubble.layer?.borderWidth = 1
@@ -58,7 +58,7 @@ final class StatusBubbleView: NSView {
 
     override func layout() {
         super.layout()
-        bubble.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.1).cgColor
+        bubble.layer?.borderColor = Design.hairlineNS.cgColor
         let s = label.attributedStringValue.size()
         let w = min(ceil(s.width) + 16, max(0, bounds.width - 12))
         let h = ceil(s.height) + 8
@@ -72,10 +72,10 @@ final class FindBarView: NSView, NSTextFieldDelegate {
     private let overlay: OverlayState
     private let onFind: (String, Bool) -> Void   // query, forward
     private let onClose: () -> Void
-    private let card = MaterialCardView(radius: 10)
+    private let card = MaterialCardView(radius: Design.Radius.control)
     private let glyph = NSImageView()
     private let field = NSTextField()
-    private let count = NSTextField.sidebarLabel(size: 11)
+    private let count = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
     private var buttons: [ClosureButton] = []
     private var lastQuery = ""
     private var lastFocusToken = 0
@@ -87,26 +87,26 @@ final class FindBarView: NSView, NSTextFieldDelegate {
         self.onClose = onClose
         super.init(frame: .zero)
         addSubview(card)
-        glyph.image = SidebarSymbols.image("magnifyingglass", size: 13)
+        glyph.image = Design.Icon.symbol("magnifyingglass", size: Design.Icon.regular)
         glyph.contentTintColor = .secondaryLabelColor
         glyph.imageScaling = .scaleNone
         addSubview(glyph)
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 13)
+        field.font = Design.Font.ns(.body)
         field.placeholderString = "Find in page"
         field.usesSingleLineMode = true
         field.cell?.isScrollable = true
         field.delegate = self
         addSubview(field)
-        count.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        count.font = Design.Font.digits(.caption)
         count.textColor = .secondaryLabelColor
         addSubview(count)
         for (symbol, run) in [("chevron.up", { [weak self] in self.map { $0.onFind($0.overlay.findQuery, false) } }),
                               ("chevron.down", { [weak self] in self.map { $0.onFind($0.overlay.findQuery, true) } }),
                               ("xmark", { [weak self] in self?.onClose() })] as [(String, () -> Void)] {
-            let b = ClosureButton(symbol: symbol, size: 13, onPress: run)
+            let b = ClosureButton(symbol: symbol, size: Design.Icon.regular, onPress: run)
             buttons.append(b)
             addSubview(b)
         }

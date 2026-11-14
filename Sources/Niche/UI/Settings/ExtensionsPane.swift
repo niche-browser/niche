@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+private enum Metrics {
+    /// The plate behind an extension's icon.
+    static let iconPlate: CGFloat = 28
+    /// Where the dividers start: at the rows' text, past the icon.
+    static let dividerInset = Design.Space.rowInset + iconPlate + Design.Space.l
+}
+
 /// Installed extensions, each with its icon, version and description, and the ways to add and
 /// manage them at the foot of the card.
 struct ExtensionsPane: View {
@@ -22,12 +29,12 @@ struct ExtensionsPane: View {
                         } trailing: { EmptyView() }
                     }
                     ForEach(Array(extensions.entries.enumerated()), id: \.element.id) { i, e in
-                        if i > 0 { SettingsCardDivider(inset: 60) }
+                        if i > 0 { SettingsCardDivider(inset: Metrics.dividerInset) }
                         SettingsCardRow {
-                            HStack(spacing: 12) {
+                            HStack(spacing: Design.Space.l) {
                                 ExtensionRowIcon(image: e.icon)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 6) {
+                                VStack(alignment: .leading, spacing: Design.Space.xxs) {
+                                    HStack(spacing: Design.Space.s) {
                                         Text(e.name).font(Design.Font.body).lineLimit(1)
                                         Text(e.version).font(Design.Font.detail).foregroundStyle(.tertiary).lineLimit(1)
                                     }
@@ -56,7 +63,7 @@ struct ExtensionsPane: View {
                             .help("All extensions, their permissions and site access.")
                     }
                 }
-                if let error { SettingsFootnote(error).foregroundStyle(.red) }
+                if let error { SettingsFootnote(error).foregroundStyle(Design.danger) }
                 SettingsFootnote(store.settings.chromeEngine
                                  ? (extensions.needsRestart ? "Restart Niche to apply the change." : "Extensions load when Niche starts.")
                                  : "Extensions need the Chrome engine, in Advanced.")
@@ -83,13 +90,13 @@ private struct ExtensionRowIcon: View {
     var body: some View {
         Group {
             if let image {
-                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit).padding(5)
+                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit).padding(Design.Space.xs)
             } else {
-                Image(systemName: "puzzlepiece.extension.fill").font(.system(size: 14)).foregroundStyle(.secondary)
+                Image(systemName: "puzzlepiece.extension.fill").font(.system(size: Design.Icon.bar)).foregroundStyle(.secondary)
             }
         }
-        .frame(width: 32, height: 32)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .frame(width: Metrics.iconPlate, height: Metrics.iconPlate)
+        .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.fill(.hover)))
         .accessibilityHidden(true)
     }
 }

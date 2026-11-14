@@ -20,7 +20,7 @@ struct PerformancePane: View {
             Picker("", selection: $section) { ForEach(Section.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
                 .frame(maxWidth: .infinity)
-                .padding(.bottom, 16)
+                .padding(.bottom, Design.Space.xl)
             switch section {
             case .overview: overview($store.settings.perfRecording)
             case .events: events
@@ -44,31 +44,25 @@ struct PerformancePane: View {
     @ViewBuilder private func overview(_ recording: Binding<Bool>) -> some View {
         SettingsCard {
             SettingsCardRow {
-                HStack(spacing: 5.5) {
-                    SettingsGlyph(symbol: "gauge.with.dots.needle.67percent", color: Color(nsColor: .systemBlue))
-                    Text("Record performance").font(.system(size: 13))
-                }
+                SettingsIconLabel(title: "Record performance", symbol: "gauge.with.dots.needle.67percent",
+                                  color: Color(nsColor: .systemBlue))
             } trailing: {
-                Toggle("Record performance", isOn: recording).toggleStyle(.switch).labelsHidden()
+                SettingsSwitch(title: "Record performance", isOn: recording)
             }
         }
         SettingsFootnote("Freezes, CPU, memory and tab timings, measured on this Mac. Nothing leaves it unless you export.")
 
         if let r = report {
             if !r.insights.isEmpty {
-                SettingsHeader("Findings").padding(.top, 20)
+                SettingsHeader("Findings").padding(.top, Design.Space.section)
                 SettingsCard {
                     ForEach(Array(r.insights.enumerated()), id: \.element.id) { i, insight in
                         if i > 0 { SettingsCardDivider() }
                         SettingsCardRow {
-                            HStack(alignment: .top, spacing: 8) {
+                            HStack(alignment: .top, spacing: Design.Space.m) {
                                 Image(systemName: insight.severity == .warning ? "exclamationmark.triangle.fill" : "info.circle.fill")
                                     .foregroundStyle(insight.severity == .warning ? Color(nsColor: .systemOrange) : Color.secondary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(insight.title).font(.system(size: 13))
-                                    Text(insight.detail).font(.system(size: 11)).foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
+                                SettingsLabel(title: insight.title, detail: insight.detail)
                             }
                         } trailing: { EmptyView() }
                     }
@@ -98,13 +92,13 @@ struct PerformancePane: View {
             }
             card("Tabs", tabRows(r))
             Text("Session \(r.session.id), launch \(r.session.launch), up \(Int(r.session.uptimeSeconds / 60)) min · recording costs \(String(format: "%.3f", r.selfCost.cpuPct)) % of a core")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-                .padding(.leading, 8).padding(.top, 12)
+                .font(Design.Font.caption).foregroundStyle(.secondary)
+                .padding(.leading, Design.Space.m).padding(.top, Design.Space.l)
         } else if !recording.wrappedValue {
             SettingsFootnote("Recording is off: no samples, no timers, nothing written. Files already recorded stay until you clear them.")
-                .padding(.top, 12)
+                .padding(.top, Design.Space.l)
         } else {
-            ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(.top, 24)
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(.top, Design.Space.xxxl)
         }
     }
 
@@ -123,14 +117,14 @@ struct PerformancePane: View {
 
     @ViewBuilder private func card(_ title: String, _ rows: [(String, String)]) -> some View {
         if !rows.isEmpty {
-            SettingsHeader(title).padding(.top, 20)
+            SettingsHeader(title).padding(.top, Design.Space.section)
             SettingsCard {
                 ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
                     if i > 0 { SettingsCardDivider() }
                     SettingsCardRow {
-                        Text(row.0).font(.system(size: 13))
+                        SettingsLabel(title: row.0)
                     } trailing: {
-                        Text(row.1).font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
+                        Text(row.1).font(Design.Font.body.monospacedDigit()).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -148,14 +142,14 @@ struct PerformancePane: View {
                 ForEach(Array(list.prefix(100).enumerated()), id: \.offset) { i, e in
                     if i > 0 { SettingsCardDivider() }
                     SettingsCardRow {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(e.title).font(.system(size: 13))
+                        VStack(alignment: .leading, spacing: Design.Space.xxs) {
+                            Text(e.title).font(Design.Font.body)
                             if !e.detail.isEmpty {
-                                Text(e.detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+                                Text(e.detail).font(Design.Font.detail).foregroundStyle(.secondary).lineLimit(2)
                             }
                         }
                     } trailing: {
-                        Text(e.time).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                        Text(e.time).font(Design.Font.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -185,14 +179,10 @@ struct PerformancePane: View {
 
     @ViewBuilder private func export(_ hideSites: Binding<Bool>) -> some View {
         SettingsCard {
-            SettingsCardRow {
-                Text("Hide site names").font(.system(size: 13))
-            } trailing: {
-                Toggle("Hide site names", isOn: hideSites).toggleStyle(.switch).labelsHidden()
-            }
+            SettingsToggleRow(title: "Hide site names", isOn: hideSites)
         }
         SettingsFootnote("Sites become site-1, site-2… in every exported file. Off keeps host names, never full addresses.")
-        HStack(spacing: 8) {
+        HStack(spacing: Design.Space.m) {
             Button("Export Diagnostics…") { actions.exportDiagnostics() }
             Button(copied ? "Copied" : "Copy Summary") {
                 guard let r = report else { return }
@@ -204,9 +194,9 @@ struct PerformancePane: View {
             Spacer(minLength: 0)
             Button("Clear…") { confirmClear() }
         }
-        .padding(.top, 16)
+        .padding(.top, Design.Space.xl)
         SettingsFootnote("Copy Summary never names a site. The recording lives in \(AppPaths.file("Perf").path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) and stays under 2 MB.")
-            .padding(.top, 4)
+            .padding(.top, Design.Space.xs)
     }
 
     private func confirmClear() {

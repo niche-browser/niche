@@ -16,6 +16,10 @@ enum DownloadFlight {
     nonisolated static let gravity: CGFloat = 2630
     nonisolated static let apexHeight: CGFloat = 90
     private static let maxDiameter: CGFloat = 48
+    /// Arc's glyph: a navy disc, a light ring and arrow, in a faint blue glow.
+    private static let discColor = NSColor(red: 4 / 255, green: 7 / 255, blue: 42 / 255, alpha: 1)
+    private static let ringColor = NSColor(red: 239 / 255, green: 239 / 255, blue: 1, alpha: 1)
+    private static let glowColor = NSColor(red: 0.1, green: 0.42, blue: 0.85, alpha: 1)
     private static var flights: [NSPanel] = []
 
     /// Flies the glyph from `from` to `to` (screen points) over `window`; returns the
@@ -42,7 +46,7 @@ enum DownloadFlight {
         icon.bounds = CGRect(x: 0, y: 0, width: maxDiameter, height: maxDiameter)
         icon.contents = glyph
         icon.contentsScale = window.backingScaleFactor
-        icon.shadowColor = NSColor(red: 0.1, green: 0.42, blue: 0.85, alpha: 1).cgColor
+        icon.shadowColor = glowColor.cgColor
         icon.shadowOpacity = 0.55
         icon.shadowRadius = 9
         icon.shadowOffset = .zero
@@ -120,13 +124,12 @@ enum DownloadFlight {
         return NSImage(size: NSSize(width: d, height: d), flipped: false) { rect in
             let ring: CGFloat = 2.5
             let disc = NSBezierPath(ovalIn: rect.insetBy(dx: ring / 2, dy: ring / 2))
-            NSColor(red: 4 / 255, green: 7 / 255, blue: 42 / 255, alpha: 1).setFill()
+            discColor.setFill()
             disc.fill()
-            NSColor(red: 239 / 255, green: 239 / 255, blue: 1, alpha: 1).setStroke()
+            ringColor.setStroke()
             disc.lineWidth = ring
             disc.stroke()
-            let config = NSImage.SymbolConfiguration(pointSize: d * 0.42, weight: .semibold)
-                .applying(.init(paletteColors: [NSColor(red: 239 / 255, green: 239 / 255, blue: 1, alpha: 1)]))
+            let config = Design.Icon.configuration(Design.Icon.large, weight: .semibold).applying(.init(paletteColors: [ringColor]))
             if let arrow = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: nil)?.withSymbolConfiguration(config) {
                 let s = arrow.size
                 arrow.draw(in: NSRect(x: (d - s.width) / 2, y: (d - s.height) / 2, width: s.width, height: s.height))

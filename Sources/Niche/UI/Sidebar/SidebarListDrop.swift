@@ -131,9 +131,11 @@ final class CombineDropPreview: NSView {
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    /// `withAnimation(.spring(duration: 0.34, bounce: 0.22)) { open = true }` on appear.
+    /// The preview opens on a spring with a 0.22 bounce, as SwiftUI's `.spring` did on appear;
+    /// under Reduce motion it is simply open.
     private static func spring(_ layer: CALayer?, _ key: String, from: Any, to: Any) {
-        let a = CASpringAnimation(perceptualDuration: 0.34, bounce: 0.22)
+        guard !Design.Motion.reduced else { return }
+        let a = CASpringAnimation(perceptualDuration: Design.Motion.slow, bounce: 0.22)
         a.keyPath = key
         a.fromValue = from
         a.toValue = to
@@ -149,11 +151,12 @@ final class CombineDropPreview: NSView {
         CATransaction.setDisableActions(true)
         card.frame = bounds
         if let l = card.layer {
-            l.borderColor = colors.textPrimary.withAlphaComponent(0.35).cgColor
-            l.shadowRadius = 6
-            l.shadowOffset = CGSize(width: 0, height: -2)
-            Self.spring(l, "borderColor", from: colors.textPrimary.withAlphaComponent(0).cgColor, to: l.borderColor!)
-            Self.spring(l, "shadowRadius", from: 2.0, to: 6.0)
+            let border = colors.ink(.tertiary).cgColor
+            l.borderColor = border
+            l.shadowRadius = Design.Shadow.cardRadius
+            l.shadowOffset = CGSize(width: 0, height: -Design.Shadow.cardOffset)
+            Self.spring(l, "borderColor", from: border.copy(alpha: 0) ?? border, to: border)
+            Self.spring(l, "shadowRadius", from: 2.0, to: l.shadowRadius)
             Self.spring(l, "shadowOffset", from: CGSize(width: 0, height: -1), to: l.shadowOffset)
             // .scaleEffect(0.97 → 1), from the card's centre.
             let small = bounds.insetBy(dx: bounds.width * 0.015, dy: bounds.height * 0.015)
@@ -176,12 +179,13 @@ final class CombineDropPreview: NSView {
         let h = bounds.height
         icon.frame = NSRect(x: SplitRowMetrics.cellInset + SplitRowMetrics.favicon, y: (h - NicheMetrics.favicon) / 2, width: NicheMetrics.favicon, height: NicheMetrics.favicon)
         v.addSubview(icon)
-        let label = NSTextField.sidebarLabel(size: 14)
+        let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
         label.stringValue = item.displayTitle
         label.textColor = colors.textPrimary
         // HStack(spacing: 8) after 8 pt, Spacer(minLength: 2), 4 pt trailing.
         let x = SplitRowMetrics.cellInset + SplitRowMetrics.favicon + NicheMetrics.favicon + 11
-        label.frame = NSRect(x: x - SidebarText.inset, y: (h - 17) / 2, width: max(0, width - x - 14) + 2 * SidebarText.inset, height: 17)
+        let lh = label.intrinsicContentSize.height
+        label.frame = NSRect(x: x - SidebarText.inset, y: (h - lh) / 2, width: max(0, width - x - 14) + 2 * SidebarText.inset, height: lh)
         v.addSubview(label)
         return v
     }
@@ -195,7 +199,7 @@ final class CombineDropPreview: NSView {
         // The dragged half: a dashed box 4 pt in, clipped while it opens.
         let dash = CAShapeLayer()
         dash.fillColor = colors.hoverFill.cgColor
-        dash.strokeColor = colors.textPrimary.withAlphaComponent(0.45).cgColor
+        dash.strokeColor = colors.ink(.tertiary).cgColor
         dash.lineWidth = 1.25
         dash.lineDashPattern = [4, 3]
         // Never narrower than its corners: CGPath refuses radii wider than half the rect.

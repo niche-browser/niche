@@ -225,13 +225,13 @@ struct FolderPreviewItem: Equatable {
 enum FolderPreviewMetrics {
     static let width: CGFloat = 240
     static let maxHeight: CGFloat = 320
-    static let corner: CGFloat = 10
+    static let corner: CGFloat = Design.Radius.control
     static let searchHeight: CGFloat = 48
     /// From the hairline under the search field to the first row.
     static let listInset: CGFloat = 4
     static let rowPitch: CGFloat = 45
     static let rowFill: CGFloat = 44
-    static let rowCorner: CGFloat = 4
+    static let rowCorner: CGFloat = Design.Radius.small
     static let sideInset: CGFloat = 4
     /// Favicon and magnifier centre, and where the text starts, from the panel's left edge.
     static let iconCenter: CGFloat = 20
@@ -262,11 +262,18 @@ enum FolderPreviewMetrics {
     }
 
     // Arc draws it dark whatever the space's theme: a blur that lets ~12 % of the backdrop
-    // through (23 over a dark page, 45/44/36 over a light yellow one), white text at 85 % / 58 %.
-    static let title = NSColor(white: 1, alpha: 0.83)
-    static let secondary = NSColor(white: 1, alpha: 0.55)
-    static let rowFillColor = NSColor(white: 1, alpha: 0.078)
-    static let hairline = NSColor(white: 1, alpha: 0.13)
+    // through (23 over a dark page, 45/44/36 over a light yellow one), white text in two strengths.
+    static let title = Design.onDark(.primary)
+    static let secondary = Design.onDark(.secondary)
+    static let rowFillColor = Design.fillOnDark(.selected)
+    static let hairline = Design.hairlineOnDark
+    /// Over hudWindow (27 + 0.52 × backdrop) this leaves ≈ 19 + 0.12 × backdrop, as Arc.
+    static let shade = NSColor(white: 17 / 255, alpha: 0.77)
+    /// Two half-point rims: a grey outline, a faint light line inside it.
+    static let rimOuter = NSColor(white: 0.23, alpha: 1)
+    static let rimInner = Design.fillOnDark(.strong)
+    /// The unread dot at a row's end.
+    static let badge: CGFloat = 6
 }
 
 /// A borderless panel that can take the search field's keys without activating anything else.
@@ -360,19 +367,18 @@ final class FolderPreviewView: NSView, NSTextFieldDelegate {
         blur.state = .active
         blur.maskImage = Self.mask(radius: FolderPreviewMetrics.corner)
         addSubview(blur)
-        // Over hudWindow (27 + 0.52 × backdrop) this leaves ≈ 19 + 0.12 × backdrop, as Arc.
         shade.wantsLayer = true
-        shade.layer?.backgroundColor = NSColor(white: 17 / 255, alpha: 0.77).cgColor
+        shade.layer?.backgroundColor = FolderPreviewMetrics.shade.cgColor
         shade.layer?.cornerRadius = FolderPreviewMetrics.corner
         shade.layer?.cornerCurve = .circular
         addSubview(shade)
-        searchIcon.image = SidebarSymbols.image("magnifyingglass", size: 12, weight: .semibold)
+        searchIcon.image = Design.Icon.symbol("magnifyingglass", size: Design.Icon.small)
         searchIcon.contentTintColor = FolderPreviewMetrics.secondary
         addSubview(searchIcon)
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 13)
+        field.font = Design.Font.ns(.body)
         field.textColor = FolderPreviewMetrics.title
         field.delegate = self
         field.cell?.isScrollable = true
@@ -389,13 +395,12 @@ final class FolderPreviewView: NSView, NSTextFieldDelegate {
         addSubview(scroll)
         // Arc: "No tabs matching that search 🤔", wrapping the emoji onto a second line.
         empty.stringValue = "No tabs matching that search 🤔"
-        empty.font = .systemFont(ofSize: 13)
+        empty.font = Design.Font.ns(.body)
         empty.textColor = FolderPreviewMetrics.secondary
         empty.alignment = .center
         empty.isHidden = true
         addSubview(empty)
-        // Two half-point rims: a grey outline, a faint light line inside it.
-        for (l, c) in [(outline, NSColor(white: 0.23, alpha: 1)), (highlight, NSColor(white: 1, alpha: 0.2))] {
+        for (l, c) in [(outline, FolderPreviewMetrics.rimOuter), (highlight, FolderPreviewMetrics.rimInner)] {
             l.fillColor = nil
             l.strokeColor = c.cgColor
             l.lineWidth = 0.5
@@ -422,7 +427,7 @@ final class FolderPreviewView: NSView, NSTextFieldDelegate {
 
     func show(title: String, items: [FolderPreviewItem]) {
         field.placeholderAttributedString = NSAttributedString(string: "Search \(title)…", attributes: [
-            .foregroundColor: FolderPreviewMetrics.secondary, .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: FolderPreviewMetrics.secondary, .font: Design.Font.ns(.body),
         ])
         field.stringValue = ""
         self.items = items
@@ -557,8 +562,8 @@ final class FolderPreviewRowView: NSView {
     private weak var preview: FolderPreviewView?
     private let fill = CALayer()
     private let favicon = SidebarFaviconView(size: 16)
-    private let title = NSTextField.sidebarLabel(size: 13)
-    private let age = NSTextField.sidebarLabel(size: 11)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
+    private let age = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue)
     private let badge = CALayer()
     private var itemID: UUID?
     var isSelected = false { didSet { if isSelected != oldValue { refresh() } } }
@@ -577,7 +582,7 @@ final class FolderPreviewRowView: NSView {
         addSubview(title)
         age.textColor = FolderPreviewMetrics.secondary
         addSubview(age)
-        badge.cornerRadius = 3
+        badge.cornerRadius = Design.Radius.pill(FolderPreviewMetrics.badge)
         badge.backgroundColor = FolderPreviewMetrics.title.cgColor
         layer?.addSublayer(badge)
     }
@@ -609,7 +614,7 @@ final class FolderPreviewRowView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         fill.frame = CGRect(x: m.sideInset, y: 0, width: bounds.width - 2 * m.sideInset, height: m.rowFill)
-        badge.frame = CGRect(x: bounds.width - m.sideInset - 12 - 6, y: (m.rowFill - 6) / 2, width: 6, height: 6)
+        badge.frame = CGRect(x: bounds.width - m.sideInset - 12 - m.badge, y: (m.rowFill - m.badge) / 2, width: m.badge, height: m.badge)
         CATransaction.commit()
         favicon.frame = NSRect(x: m.iconCenter - 8, y: (m.rowFill - 16) / 2, width: 16, height: 16)
         let right = bounds.width - m.sideInset - (badge.isHidden ? 10 : 24)

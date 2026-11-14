@@ -72,6 +72,10 @@ enum LibraryMetrics {
     static let rail: CGFloat = 74
     static let button = NSSize(width: 64, height: 56)
     static let buttonGap: CGFloat = 4
+    /// The back arrow at the rail's foot.
+    static let back = Design.Space.controlLarge
+    /// Where the rail's wash starts, as a share of the ink; it ends at a resting fill.
+    static let washStart: CGFloat = 0.02
 }
 
 /// The Library column: the page rail on the left, the page's search and list on the right.
@@ -131,7 +135,7 @@ final class LibraryView: NSView {
     /// The space's accent pair (Arc 1.172.1): on a light theme the folder's tinted light with its
     /// shaded dark on it; on a dark one near-white with dark.
     private var accent: (fill: NSColor, ink: NSColor) {
-        palette.isDark ? (NSColor.white.withAlphaComponent(0.88), NSColor.black.withAlphaComponent(0.8))
+        palette.isDark ? (Design.onDark(.primary), Design.onLight(.primary))
                        : (NSColor(palette.folderFill), NSColor(palette.folderTint))
     }
 
@@ -140,8 +144,8 @@ final class LibraryView: NSView {
         spaces?.accent = accent
         rail.colors = SidebarColors(palette)
         // Light themes: Arc's switch is the folder's shaded dark with a tinted-light knob.
-        list.switchTint = palette.isDark ? NSColor.white.withAlphaComponent(0.85) : NSColor(palette.folderTint)
-        list.switchKnob = palette.isDark ? NSColor(white: 0.15, alpha: 1) : NSColor(palette.folderFill)
+        list.switchTint = palette.isDark ? Design.onDark(.primary) : NSColor(palette.folderTint)
+        list.switchKnob = palette.isDark ? Design.panelDark : NSColor(palette.folderFill)
         list.colors = SidebarColors(palette)
     }
 
@@ -208,12 +212,12 @@ private final class LibraryRailView: NSView {
         let ink: NSColor = colors.isDark ? .white : .black
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        wash.colors = [ink.withAlphaComponent(0.02).cgColor, ink.withAlphaComponent(0.045).cgColor]
-        hairline.backgroundColor = ink.withAlphaComponent(0.09).cgColor
+        wash.colors = [ink.withAlphaComponent(LibraryMetrics.washStart).cgColor, ink.withAlphaComponent(Design.Fill.subtle.rawValue).cgColor]
+        hairline.backgroundColor = ink.withAlphaComponent(Design.Fill.selected.rawValue).cgColor
         CATransaction.commit()
         for b in buttons { b.show(selected: b.page == page, ink: ink, accent: accent) }
         if back == nil {
-            let b = SidebarGlyphButton(symbol: "arrow.left", size: 32, height: 32, iconSize: 15, weight: .regular,
+            let b = SidebarGlyphButton(symbol: "arrow.left", size: LibraryMetrics.back, height: LibraryMetrics.back, iconSize: Design.Icon.bar, weight: .regular,
                                        help: "Exit the Library (Esc)", colors: colors) { [weak self] in self?.onBack() }
             addSubview(b)
             back = b
@@ -236,7 +240,8 @@ private final class LibraryRailView: NSView {
         for (i, b) in buttons.enumerated() {
             b.frame = NSRect(x: ((w - size.width) / 2).rounded(), y: top + CGFloat(i) * step, width: size.width, height: size.height)
         }
-        back?.frame = NSRect(x: ((w - 32) / 2).rounded(), y: h - 10 - 32, width: 32, height: 32)
+        let side = LibraryMetrics.back
+        back?.frame = NSRect(x: ((w - side) / 2).rounded(), y: h - 10 - side, width: side, height: side)
     }
 }
 
@@ -247,7 +252,7 @@ private final class LibraryRailButton: NSView {
 
     override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
     private let glyph = NSImageView()
-    private let label = NSTextField.sidebarLabel(size: 12, weight: .semibold)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.micro.rawValue, weight: .medium)
     private var selected = false
     private var ink = NSColor.white
     private var hovering = false { didSet { if hovering != oldValue { refresh() } } }
@@ -259,7 +264,7 @@ private final class LibraryRailButton: NSView {
         layer?.cornerRadius = Design.Radius.card
         layer?.cornerCurve = .continuous
         glyph.imageScaling = .scaleNone
-        label.font = .systemFont(ofSize: 10.5, weight: .medium)
+        label.font = Design.Font.ns(.micro, .medium)
         label.lineBreakMode = .byTruncatingTail
         addSubview(glyph)
         label.stringValue = page.railTitle
@@ -283,7 +288,7 @@ private final class LibraryRailButton: NSView {
     }
 
     private func refresh() {
-        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        let config = Design.Icon.configuration(Design.Icon.bar)
         if selected {
             // The filled glyph in palette mode: the space's dark mark on its light tint (Arc 1.172.1).
             glyph.image = NSImage(systemSymbolName: page.selectedSymbol, accessibilityDescription: nil)?
@@ -291,18 +296,18 @@ private final class LibraryRailButton: NSView {
             glyph.contentTintColor = nil
         } else {
             glyph.image = NSImage(systemSymbolName: page.symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config)
-            glyph.contentTintColor = ink.withAlphaComponent(0.6)
+            glyph.contentTintColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         }
-        label.textColor = ink.withAlphaComponent(selected ? 0.9 : (hovering ? 0.72 : 0.55))
-        label.font = .systemFont(ofSize: 10.5, weight: selected ? .semibold : .medium)
-        layer?.backgroundColor = ink.withAlphaComponent(selected ? 0.09 : (hovering ? 0.045 : 0)).cgColor
+        label.textColor = ink.withAlphaComponent((selected || hovering ? Design.Emphasis.primary : .secondary).rawValue)
+        label.font = Design.Font.ns(.micro, selected ? .semibold : .medium)
+        layer?.backgroundColor = ink.withAlphaComponent(selected ? Design.Fill.selected.rawValue : (hovering ? Design.Fill.subtle.rawValue : 0)).cgColor
     }
 
     override func layout() {
         super.layout()
         // The glyph in a 20 pt band 10 pt down, the label 6 pt under it.
         glyph.frame = NSRect(x: 0, y: 10, width: bounds.width, height: 20)
-        // The label may run a little past the plate ("Downloads" at 10.5 pt is 58 pt plus the field's inset).
+        // The label may run a little past the plate ("Downloads" plus the field's inset).
         label.frame = NSRect(x: -5, y: 34, width: bounds.width + 10, height: 14)
     }
 
@@ -326,7 +331,7 @@ extension LibraryListView {
 }
 
 enum LibraryListMetrics {
-    static let searchHeight: CGFloat = 32
+    static let searchHeight = Design.Space.controlLarge
 }
 
 /// The page's list column: search, then the downloads or the archived tabs by day.
@@ -368,7 +373,7 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
     private let field = NSTextField()
     private let menuButton = NSView()
     private let menuGlyph = NSImageView()
-    private let filterLabel = NSTextField.sidebarLabel(size: 14, weight: .medium)
+    private let filterLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .medium)
     private let scroll = NSScrollView()
     private let table = LibraryTable()
     private let empty = LibraryEmptyView()
@@ -384,13 +389,13 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         searchBox.layer?.cornerRadius = Design.Radius.control
         searchBox.layer?.cornerCurve = .continuous
         addSubview(searchBox)
-        searchGlyph.image = SidebarSymbols.image("magnifyingglass", size: 14)
+        searchGlyph.image = SidebarSymbols.image("magnifyingglass", size: Design.Icon.bar)
         searchGlyph.imageScaling = .scaleNone
         searchBox.addSubview(searchGlyph)
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 13)
+        field.font = Design.Font.ns(.body)
         field.placeholderString = page.searchPrompt
         field.usesSingleLineMode = true
         field.cell?.isScrollable = true
@@ -400,11 +405,11 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         menuButton.layer?.cornerRadius = Design.Radius.control
         menuButton.layer?.cornerCurve = .continuous
         // Arc's Filter button: a line.3 circle and "Filter", 73 × 36 pt.
-        menuGlyph.image = SidebarSymbols.image("line.3.horizontal.decrease.circle", size: 14, weight: .medium)
+        menuGlyph.image = SidebarSymbols.image("line.3.horizontal.decrease.circle", size: Design.Icon.bar, weight: .medium)
         menuGlyph.imageScaling = .scaleNone
         menuGlyph.frame = NSRect(x: 9, y: 0, width: 18, height: 36)
         menuButton.addSubview(menuGlyph)
-        filterLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        filterLabel.font = Design.Font.ns(.body, .medium)
         filterLabel.stringValue = "Filter"
         menuButton.addSubview(filterLabel)
         menuButton.setAccessibilityElement(true)
@@ -428,7 +433,7 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
         scroll.hasHorizontalScroller = false
-        scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 12, right: 0)
+        scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: Design.Space.l, right: 0)
         scroll.automaticallyAdjustsContentInsets = false
         addSubview(scroll)
         addSubview(empty)
@@ -541,12 +546,14 @@ private final class LibraryListView: NSView, NSTextFieldDelegate, NSTableViewDat
 
     private func refresh() {
         let ink: NSColor = colors.isDark ? .white : .black
-        searchBox.layer?.backgroundColor = ink.withAlphaComponent(0.08).cgColor
-        searchGlyph.contentTintColor = ink.withAlphaComponent(0.5)
+        let rest = ink.withAlphaComponent(Design.Fill.selected.rawValue)
+        searchBox.layer?.backgroundColor = rest.cgColor
+        searchGlyph.contentTintColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         field.textColor = colors.textPrimary
         // Picked chips show on the button: Arc's dark pill.
-        menuButton.layer?.backgroundColor = (filterActive ? ink.withAlphaComponent(colors.isDark ? 0.85 : 0.68) : ink.withAlphaComponent(0.08)).cgColor
-        let label = filterActive ? (colors.isDark ? NSColor.black : NSColor.white) : ink.withAlphaComponent(0.7)
+        let pill = ink.withAlphaComponent((colors.isDark ? Design.Emphasis.primary : .secondary).rawValue)
+        menuButton.layer?.backgroundColor = (filterActive ? pill : rest).cgColor
+        let label = filterActive ? (colors.isDark ? NSColor.black : NSColor.white) : ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         menuGlyph.contentTintColor = label
         filterLabel.textColor = label
         empty.ink = ink
@@ -913,7 +920,7 @@ private final class LibraryTable: NSTableView {
 }
 
 private final class LibraryHeaderCell: NSView {
-    private let label = NSTextField.sidebarLabel(size: 13, weight: .semibold)
+    private let label = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue, weight: .semibold)
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -926,7 +933,7 @@ private final class LibraryHeaderCell: NSView {
 
     func show(_ text: String, ink: NSColor) {
         label.stringValue = text
-        label.textColor = ink.withAlphaComponent(0.6)
+        label.textColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
     }
 
     override func layout() {
@@ -942,8 +949,8 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
     private let card = FlippedView()
     private let tile = NSView()
     private let icon = NSImageView()
-    private let title = NSTextField.sidebarLabel(size: 14)
-    private let detail = NSTextField.sidebarLabel(size: 12)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
+    private let detail = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue)
     private var tip: ArcTooltipAnchorView?
     private var colors = SidebarColors()
     /// A finished download's file: opened by a click, dragged out.
@@ -967,11 +974,11 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
     override init(frame: NSRect) {
         super.init(frame: frame)
         card.wantsLayer = true
-        card.layer?.cornerRadius = 10
+        card.layer?.cornerRadius = Design.Radius.control
         card.layer?.cornerCurve = .continuous
         addSubview(card)
         tile.wantsLayer = true
-        tile.layer?.cornerRadius = 6
+        tile.layer?.cornerRadius = Design.Radius.inset
         tile.layer?.cornerCurve = .continuous
         tile.layer?.masksToBounds = true
         tile.layer?.contentsGravity = .resizeAspectFill
@@ -981,7 +988,7 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         card.addSubview(title)
         card.addSubview(detail)
         for (b, symbol, label) in [(binButton, "trash", "Delete"), (restoreButton, "arrow.uturn.backward", "Restore")] {
-            b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?.withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
+            b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?.withSymbolConfiguration(Design.Icon.configuration(Design.Icon.bar, weight: .regular))
             b.imageScaling = .scaleNone
             b.isHidden = true
             b.setAccessibilityElement(true)
@@ -1003,7 +1010,7 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         self.remove = remove
         let ink: NSColor = colors.isDark ? .white : .black
         tile.layer?.contents = nil
-        tile.layer?.backgroundColor = ink.withAlphaComponent(0.04).cgColor
+        tile.layer?.backgroundColor = ink.withAlphaComponent(Design.Fill.subtle.rawValue).cgColor
         icon.isHidden = image == nil
         icon.image = image
         title.stringValue = e.item.displayTitle
@@ -1043,7 +1050,7 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
             tile.layer?.backgroundColor = nil
         } else {
             tile.layer?.contents = nil
-            tile.layer?.backgroundColor = ink.withAlphaComponent(0.04).cgColor
+            tile.layer?.backgroundColor = ink.withAlphaComponent(Design.Fill.subtle.rawValue).cgColor
         }
         title.stringValue = listed.name
         title.lineBreakMode = .byTruncatingMiddle
@@ -1052,8 +1059,8 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
     }
 
     private func apply(ink: NSColor) {
-        title.textColor = ink.withAlphaComponent(0.82)
-        detail.textColor = ink.withAlphaComponent(0.55)
+        title.textColor = ink.withAlphaComponent(Design.Emphasis.primary.rawValue)
+        detail.textColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         refreshHover()
         needsLayout = true
     }
@@ -1077,8 +1084,8 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         binButton.isHidden = !showsButtons
         restoreButton.isHidden = !showsButtons
         let ink: NSColor = colors.isDark ? .white : .black
-        binButton.contentTintColor = ink.withAlphaComponent(0.6)
-        restoreButton.contentTintColor = ink.withAlphaComponent(0.6)
+        binButton.contentTintColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
+        restoreButton.contentTintColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         restoreButton.frame = NSRect(x: card.bounds.width - 14 - 24, y: (h - 24) / 2, width: 24, height: 24)
         binButton.frame = restoreButton.frame.offsetBy(dx: -34, dy: 0)
         // HStack(spacing: 10) ends in a Spacer, so the text stops 10 + 8 pt short of the edge.
@@ -1128,7 +1135,7 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
 private final class LibraryEmptyView: NSView {
     var ink = NSColor.white { didSet { refresh() } }
     private let glyph = NSImageView()
-    private let title = NSTextField.sidebarLabel(size: 17, weight: .semibold)
+    private let title = NSTextField.sidebarLabel(size: Design.TextSize.headline.rawValue, weight: .semibold)
     private let detail = NSTextField(wrappingLabelWithString: "")
 
     override init(frame: NSRect) {
@@ -1137,7 +1144,7 @@ private final class LibraryEmptyView: NSView {
         addSubview(glyph)
         title.alignment = .center
         addSubview(title)
-        detail.font = .systemFont(ofSize: 14)
+        detail.font = Design.Font.ns(.body)
         detail.alignment = .center
         addSubview(detail)
     }
@@ -1147,7 +1154,7 @@ private final class LibraryEmptyView: NSView {
     override var isFlipped: Bool { true }
 
     func show(symbol: String, title text: String, detail d: String?) {
-        glyph.image = SidebarSymbols.image(symbol, size: 30, weight: .light)
+        glyph.image = SidebarSymbols.image(symbol, size: Design.Icon.large, weight: .light)
         title.stringValue = text
         detail.stringValue = d ?? ""
         detail.isHidden = d == nil
@@ -1155,9 +1162,9 @@ private final class LibraryEmptyView: NSView {
     }
 
     private func refresh() {
-        glyph.contentTintColor = ink.withAlphaComponent(0.45)
-        title.textColor = ink.withAlphaComponent(0.9)
-        detail.textColor = ink.withAlphaComponent(0.7)
+        glyph.contentTintColor = ink.withAlphaComponent(Design.Emphasis.tertiary.rawValue)
+        title.textColor = ink.withAlphaComponent(Design.Emphasis.primary.rawValue)
+        detail.textColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         needsLayout = true
     }
 
@@ -1165,7 +1172,7 @@ private final class LibraryEmptyView: NSView {
         super.layout()
         // 260 pt down, 16 pt in: the glyph (+4), 8, the title, 8, the detail.
         let w = max(0, bounds.width - 32)
-        let gh = glyph.image?.size.height ?? 30
+        let gh = glyph.image?.size.height ?? Design.Icon.large
         var y: CGFloat = 260 - 46
         glyph.frame = NSRect(x: 16, y: y, width: w, height: gh)
         y += gh + 4 + 8

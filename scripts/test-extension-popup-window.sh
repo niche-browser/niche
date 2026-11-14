@@ -8,6 +8,7 @@ xcrun swiftc -swift-version 5 -emit-module -emit-library -module-name NicheCEF \
   -emit-module-path "$TEST_DIR/NicheCEF.swiftmodule"
 xcrun swiftc -swift-version 5 -parse-as-library ${NICHE_TEST_SWIFTC_FLAGS:-} -I "$TEST_DIR" -L "$TEST_DIR" -lNicheCEF \
   -Xlinker -rpath -Xlinker "$TEST_DIR" \
+  Packages/NicheCore/Sources/NicheCore/ExtensionPopupPlacement.swift \
   Sources/Niche/UI/Windows/ExtensionPopupWindow.swift Tests/ExtensionPopupWindowTests.swift \
   -o "$TEST_DIR/popup-window-tests"
 "$TEST_DIR/popup-window-tests"

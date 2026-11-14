@@ -32,7 +32,7 @@ final class ExtensionSidePanelCard: NSView {
         pageArea.autoresizesSubviews = false
         hairline.wantsLayer = true
         icon.imageScaling = .scaleProportionallyUpOrDown
-        title.font = .systemFont(ofSize: 13, weight: .medium)
+        title.font = Design.Font.ns(.body, .medium)
         title.lineBreakMode = .byTruncatingTail
         title.cell?.usesSingleLineMode = true
         header.addSubview(icon)
@@ -51,7 +51,7 @@ final class ExtensionSidePanelCard: NSView {
 
     func show(name: String, icon image: NSImage?) {
         title.stringValue = name
-        icon.image = image ?? SidebarSymbols.image("puzzlepiece.extension", size: 14)
+        icon.image = image ?? Design.Icon.symbol("puzzlepiece.extension", size: Design.Icon.bar)
         refreshColors()
     }
 
@@ -61,11 +61,10 @@ final class ExtensionSidePanelCard: NSView {
         layer?.backgroundColor = NicheBrowser.pageCanvasColor.cgColor
         header.wantsLayer = true
         header.layer?.backgroundColor = NicheBrowser.pageCanvasColor.cgColor
-        let ink = dark ? NSColor(white: 1, alpha: 0.85) : NSColor(white: 0, alpha: 0.8)
-        title.textColor = ink
-        hairline.layer?.backgroundColor = NSColor(white: dark ? 1 : 0, alpha: 0.08).cgColor
-        closeButton.configure(symbol: "xmark", image: nil, help: "Close Side Panel", enabled: true, width: 26, iconSize: 11,
-                              tint: ink.withAlphaComponent(0.7), hover: NSColor(white: dark ? 1 : 0, alpha: 0.08))
+        title.textColor = Design.barInk(onLight: !dark)
+        hairline.layer?.backgroundColor = Design.barFill(.hover, onLight: !dark).cgColor
+        closeButton.configure(symbol: "xmark", image: nil, help: "Close Side Panel", enabled: true, width: 26, iconSize: Design.Icon.small,
+                              tint: Design.barInkDim(onLight: !dark), hover: Design.barFill(.hover, onLight: !dark))
     }
 
     override func layout() {

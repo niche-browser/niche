@@ -1,9 +1,9 @@
 import SwiftUI
 
 // Metrics measured from Dia 1.54's import window at 2x (window 928×544 pt, left
-// column inset 32, art panel from x 451); colours from its asset catalogs
-// (BoostBrowser_UnboxingUI / BoostBrowser_Onboarding), dark values checked
-// against pixels. See docs/arc-reverse-engineering.md, "Dia import onboarding".
+// column inset 32, art panel from x 451); the colours keep the roles of its asset
+// catalogs (BoostBrowser_UnboxingUI / BoostBrowser_Onboarding) and take their values
+// from Design's inks and plates. See docs/arc-reverse-engineering.md, "Dia import onboarding".
 enum ImportMetrics {
     static let inset: CGFloat = 32
     static let columnWidth: CGFloat = 440
@@ -16,41 +16,71 @@ enum ImportMetrics {
     static let artX: CGFloat = 451
     static let card = CGSize(width: 215, height: 80)
     static let gap: CGFloat = 10
+    /// A selectable row (a space, an extension, a system option).
+    static let rowHeight: CGFloat = 52
+    /// A progress tile, and the shorter one when a fourth row of them has to fit.
+    static let tileHeight: CGFloat = 64
+    static let tileHeightCompact: CGFloat = 52
+    /// Skip beside the primary button, and the primary button beside it.
+    static let skipWidth: CGFloat = 146
+    static let pairedPrimaryWidth: CGFloat = 290
+    /// The column a row's glyph, emoji or icon sits in.
+    static let rowGlyph: CGFloat = 24
+    /// A browser's logo on its card.
+    static let browserLogo: CGFloat = 52
+    /// The primary button's glow: how far it spreads and how far it drops.
+    static let glowRadius: CGFloat = 14
+    static let glowDrop: CGFloat = 6
+    /// The close button's place and hit area.
+    static let closeOrigin = CGPoint(x: 887, y: 16)
+    static let closeSize = CGSize(width: 26, height: 22)
 }
 
 struct ImportColors {
     let dark: Bool
+    /// The primary button under the pointer, and the glow under it.
+    static let primaryHover = Design.accent.opacity(0.88)
+    static let primaryGlow = Design.accent.opacity(0.35)
+    /// A window's traffic lights, for the scenes that draw a window.
+    static let trafficLights = ["#FF5F57", "#FEBC2E", "#28C840"]
+
     var background: Color { dark ? .black : .white }
-    /// RebrandAppTitleText
-    var title: Color { dark ? .white.opacity(0.85) : .black.opacity(0.85) }
-    /// RebrandBodyText
-    var body: Color { dark ? .white.opacity(0.55) : .black.opacity(0.55) }
     var ink: Color { dark ? .white : .black }
-    /// Browser card hairline: #5E5E5E / #9D9D9D over black.
-    var cardBorder: Color { dark ? .white.opacity(0.37) : .black.opacity(0.14) }
-    var cardBorderSelected: Color { dark ? .white.opacity(0.62) : .black.opacity(0.42) }
+    /// Ink at an emphasis: white on the dark window, black on the light one.
+    func text(_ emphasis: Design.Emphasis) -> Color { dark ? Design.onDarkColor(emphasis) : Design.onLightColor(emphasis) }
+    /// A neutral plate in the window's ink.
+    func plate(_ fill: Design.Fill) -> Color { ink.opacity(fill.rawValue) }
+    /// Hairlines between and around things.
+    var hairline: Color { dark ? Color(nsColor: Design.hairlineOnDark) : Design.hairline }
+    /// RebrandAppTitleText
+    var title: Color { text(.primary) }
+    /// RebrandBodyText
+    var body: Color { text(.secondary) }
+    /// Browser card hairline: drawn half a point wide, so it takes ink rather than the hairline.
+    var cardBorder: Color { dark ? Design.onDarkColor(.tertiary) : Design.onLightColor(.quaternary) }
+    var cardBorderSelected: Color { dark ? Design.onDarkColor(.secondary) : Design.onLightColor(.tertiary) }
     /// BrowserItemBackground (hover)
-    var cardHover: Color { dark ? .white.opacity(0.04) : .black.opacity(0.04) }
-    /// Radio ring: #505050 over black.
-    var radioRing: Color { dark ? .white.opacity(0.31) : .black.opacity(0.22) }
+    var cardHover: Color { plate(.subtle) }
+    /// Radio ring
+    var radioRing: Color { cardBorder }
     /// RebrandRowBackground / RebrandRowBorder
-    var rowFill: Color { dark ? .white.opacity(0.08) : .black.opacity(0.015) }
-    var rowFillHover: Color { dark ? .white.opacity(0.11) : .black.opacity(0.04) }
-    var rowBorder: Color { dark ? .white.opacity(0.16) : .black.opacity(0.08) }
+    var rowFill: Color { plate(dark ? .selected : .subtle) }
+    var rowFillHover: Color { plate(dark ? .pressed : .hover) }
+    var rowBorder: Color { hairline }
     /// ImportSelectionCaption
-    var caption: Color { dark ? .white.opacity(0.4) : .black.opacity(0.3) }
+    var caption: Color { text(.tertiary) }
     /// The primary button carries the signal orange, the brand's one colour.
     var primaryFill: Color { Design.accent }
-    var primaryFillHover: Color { Design.accent.opacity(0.88) }
-    var primaryText: Color { .white }
-    var primaryTextDisabled: Color { .white.opacity(0.5) }
+    var primaryFillHover: Color { Self.primaryHover }
+    var primaryText: Color { Design.onDarkColor(.primary) }
+    var primaryTextDisabled: Color { Design.onDarkColor(.secondary) }
     /// ButtonDefaultBackground
-    var secondaryFill: Color { dark ? .white.opacity(0.08) : .black.opacity(0.08) }
-    var secondaryFillHover: Color { dark ? .white.opacity(0.1) : .black.opacity(0.1) }
+    var secondaryFill: Color { plate(.selected) }
+    var secondaryFillHover: Color { plate(.pressed) }
     /// ImportProgressItemBorder
-    var tileBorder: Color { dark ? .white.opacity(0.1) : .black.opacity(0.1) }
+    var tileBorder: Color { hairline }
     /// LoadingSubtitle
-    var loading: Color { dark ? .white.opacity(0.4) : .black.opacity(0.3) }
+    var loading: Color { text(.tertiary) }
 }
 
 struct ImportFlowView: View {
@@ -90,12 +120,12 @@ struct ImportFlowView: View {
                 .frame(width: ImportMetrics.columnWidth + 2, height: ImportWindowController.size.height, alignment: .topLeading)
                 .offset(x: ImportMetrics.inset)
                 .id(model.step)
-                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: model.forward ? 16 : -16)),
-                                        removal: .opacity.combined(with: .offset(x: model.forward ? -16 : 16))))
+                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: model.forward ? Design.Space.xl : -Design.Space.xl)),
+                                        removal: .opacity.combined(with: .offset(x: model.forward ? -Design.Space.xl : Design.Space.xl))))
             }
             if !model.firstRun && (model.step != .progress || model.finished) {
                 CloseButton(c: c) { model.onClose() }
-                    .offset(x: 887, y: 16)
+                    .offset(x: ImportMetrics.closeOrigin.x, y: ImportMetrics.closeOrigin.y)
             }
         }
         .frame(width: ImportWindowController.size.width, height: ImportWindowController.size.height)
@@ -112,14 +142,14 @@ struct StepHeader: View {
     var body: some View {
         // Dia sets these in Exposure; New York is the closest face macOS ships.
         Text(title)
-            .font(.system(size: 28, weight: .semibold))
+            .font(Design.Font.ui(.large, .semibold))
             .tracking(-0.6)
             .foregroundStyle(c.title)
             .lineLimit(1)
             .frame(width: ImportMetrics.columnWidth, height: 36, alignment: .leading)
             .offset(y: ImportMetrics.titleTop)
         Text(subtitle)
-            .font(.system(size: 15))
+            .font(Design.Font.ui(.title))
             .lineSpacing(2.5)
             .foregroundStyle(c.body)
             .frame(width: 431, height: 46, alignment: .topLeading)
@@ -136,14 +166,14 @@ private struct DefaultBrowserStep: View {
         let system = model.system
         ZStack(alignment: .topLeading) {
             Text("Fast, secure, and packed with all your browser essentials")
-                .font(.system(size: 28, weight: .semibold))
+                .font(Design.Font.ui(.large, .semibold))
                 .tracking(-0.6)
                 .foregroundStyle(c.title)
                 .lineLimit(2)
                 .lineSpacing(1)
                 .frame(width: ImportMetrics.columnWidth, alignment: .topLeading)
                 .offset(y: ImportMetrics.titleTop)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Design.Space.m) {
                 SelectableRow(c: c, checked: system.isDefaultBrowser || model.setAsDefault, disabled: system.isDefaultBrowser,
                               toggle: { model.setAsDefault.toggle() }) {
                     RowTitle(title: "Set Niche as default browser",
@@ -161,15 +191,15 @@ private struct DefaultBrowserStep: View {
             .frame(width: ImportMetrics.columnWidth)
             .offset(y: ImportMetrics.listTop)
             if let err = model.systemError {
-                Text(err).font(.system(size: 12)).foregroundStyle(.red.opacity(0.8))
+                Text(err).font(Design.Font.ui(.detail)).foregroundStyle(Design.danger)
                     .frame(width: ImportMetrics.columnWidth, alignment: .leading)
                     .offset(y: ImportMetrics.buttonTop - 28)
             }
-            HStack(spacing: 6) {
+            HStack(spacing: Design.Space.s) {
                 SecondaryButton(title: "Skip", c: c) { model.continueFromDefaultBrowser(applying: false) }
-                    .frame(width: 146)
+                    .frame(width: ImportMetrics.skipWidth)
                 PrimaryButton(title: system.isPromptingDefault ? "Confirm in the macOS dialog" : "Continue",
-                              c: c, enabled: !model.applyingSystemOptions, width: 290) { model.continueFromDefaultBrowser() }
+                              c: c, enabled: !model.applyingSystemOptions, width: ImportMetrics.pairedPrimaryWidth) { model.continueFromDefaultBrowser() }
             }
             .frame(width: ImportMetrics.columnWidth + 2)
             .offset(x: -1, y: ImportMetrics.buttonTop)
@@ -193,21 +223,21 @@ private struct SourceStep: View {
                         BrowserCard(source: s, model: model, c: c)
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, Design.Space.m)
             }
             .scrollIndicators(.never)
             .frame(width: ImportMetrics.columnWidth, height: ImportMetrics.listHeight + 8, alignment: .topLeading)
             .mask(ScrollFade())
             .offset(y: ImportMetrics.listTop - 8)
             if let err = model.loadError {
-                Text(err).font(.system(size: 12)).foregroundStyle(.red.opacity(0.8))
+                Text(err).font(Design.Font.ui(.detail)).foregroundStyle(Design.danger)
                     .offset(y: ImportMetrics.buttonTop - 28)
             }
             if model.firstRun {
                 // Dia's onboarding offers "skip the importing process" beside Continue.
-                HStack(spacing: 6) {
-                    SecondaryButton(title: "Skip", c: c) { model.skipImport() }.frame(width: 146)
-                    PrimaryButton(title: "Continue", c: c, enabled: model.canContinueFromSource, width: 290) { model.continueFromSource() }
+                HStack(spacing: Design.Space.s) {
+                    SecondaryButton(title: "Skip", c: c) { model.skipImport() }.frame(width: ImportMetrics.skipWidth)
+                    PrimaryButton(title: "Continue", c: c, enabled: model.canContinueFromSource, width: ImportMetrics.pairedPrimaryWidth) { model.continueFromSource() }
                 }
                 .frame(width: ImportMetrics.columnWidth + 2)
                 .offset(x: -1, y: ImportMetrics.buttonTop)
@@ -230,19 +260,19 @@ private struct SpacesStep: View {
             StepHeader(title: "Select spaces to import",
                        subtitle: "We'll import your \(name) spaces, tabs, and folders to Niche.", c: c)
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Design.Space.m) {
                     ForEach(Array((plan?.spaces ?? []).enumerated()), id: \.offset) { i, sp in
                         SelectableRow(c: c, checked: model.selectedSpaces.contains(i),
                                       onHover: { if $0 { model.previewSpace = i } },
                                       toggle: { model.toggleSpace(i) }) {
-                            Text(sp.emoji).font(.system(size: 18)).frame(width: 24)
+                            Text(sp.emoji).font(.system(size: Design.Icon.large)).frame(width: ImportMetrics.rowGlyph)
                             RowTitle(title: sp.title, caption: "\(sp.itemCount) tab\(sp.itemCount == 1 ? "" : "s")", c: c)
                         }
                     }
                     if let plan, !plan.favorites.isEmpty || !plan.archive.isEmpty || model.includeSettings {
                         Text("Also bring over")
-                            .font(.system(size: 12, weight: .medium)).foregroundStyle(c.caption)
-                            .padding(.top, 8).padding(.leading, 2)
+                            .font(Design.Font.ui(.detail, .medium)).foregroundStyle(c.caption)
+                            .padding(.top, Design.Space.m).padding(.leading, Design.Space.xxs)
                         if !plan.favorites.isEmpty {
                             SelectableRow(c: c, checked: model.includeFavorites, toggle: { model.includeFavorites.toggle() }) {
                                 RowSymbol(name: "star.fill", c: c)
@@ -263,7 +293,7 @@ private struct SpacesStep: View {
                         }
                     }
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, Design.Space.l)
             }
             .scrollIndicators(.never)
             .frame(width: ImportMetrics.columnWidth, height: ImportMetrics.listHeight + 12)
@@ -284,13 +314,13 @@ private struct ExtensionsStep: View {
             StepHeader(title: "Import your extensions",
                        subtitle: "Pick your essentials. You can always add more extensions later as you settle in with Niche.", c: c)
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Design.Space.m) {
                     ForEach(model.extensions) { e in
                         let installed = ExtensionStore.isInstalled(id: e.id)
                         // Arc keeps extensions per profile: say which profiles it goes to (#131).
                         let profiles = model.profileNames(of: e).map { " · " + $0.joined(separator: ", ") } ?? ""
                         SelectableRow(c: c, checked: model.selectedExtensions.contains(e.id), toggle: { model.toggleExtension(e.id) }) {
-                            ExtensionIcon(image: e.icon, size: 24, c: c)
+                            ExtensionIcon(image: e.icon, size: ImportMetrics.rowGlyph, c: c)
                             RowTitle(title: e.name,
                                      caption: installed ? "Already in Niche · \(e.version)"
                                         : (e.isEnabled ? e.version + profiles : "Turned off in \(model.source?.rawValue ?? "Arc")"),
@@ -298,17 +328,17 @@ private struct ExtensionsStep: View {
                         }
                     }
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, Design.Space.l)
             }
             .scrollIndicators(.never)
             .frame(width: ImportMetrics.columnWidth, height: ImportMetrics.listHeight + 12)
             .mask(ScrollFade())
             .offset(y: ImportMetrics.listTop - 8)
-            HStack(spacing: 6) {
+            HStack(spacing: Design.Space.s) {
                 SecondaryButton(title: "Skip", c: c) { model.startImport(withExtensions: false) }
-                    .frame(width: 146)
+                    .frame(width: ImportMetrics.skipWidth)
                 PrimaryButton(title: model.selectedExtensions.isEmpty ? "Continue" : "Import \(model.selectedExtensions.count) Extension\(model.selectedExtensions.count == 1 ? "" : "s")",
-                              c: c, enabled: true, width: 290) { model.startImport(withExtensions: true) }
+                              c: c, enabled: true, width: ImportMetrics.pairedPrimaryWidth) { model.startImport(withExtensions: true) }
             }
             .frame(width: ImportMetrics.columnWidth + 2)
             .offset(x: -1, y: ImportMetrics.buttonTop)
@@ -322,31 +352,31 @@ private struct ProgressStep: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Text("\(model.finished ? "Imported" : "Importing") from \(model.source?.rawValue ?? "Arc")")
-                .font(.system(size: 28, weight: .semibold))
+                .font(Design.Font.ui(.large, .semibold))
                 .tracking(-0.6)
                 .foregroundStyle(c.title)
                 .frame(width: ImportMetrics.columnWidth, height: 36, alignment: .leading)
                 .offset(y: ImportMetrics.titleTop)
-            HStack(spacing: 8) {
+            HStack(spacing: Design.Space.m) {
                 if !model.finished { ProgressView().controlSize(.small) }
                 Text(model.finished ? (model.failures.isEmpty ? "Everything is in place." : "Some import steps failed:") : "Hold on while we fetch your data")
-                    .font(.system(size: 15)).foregroundStyle(model.finished ? c.body : c.loading)
+                    .font(Design.Font.ui(.title)).foregroundStyle(model.finished ? c.body : c.loading)
             }
             .frame(height: 22)
             .offset(y: ImportMetrics.subtitleTop)
             // Up to eight tiles: a fourth row only fits above the notes and the button when the
             // tiles are shorter.
             let compact = model.categories.count > 6
-            let gap: CGFloat = compact ? 8 : ImportMetrics.gap
+            let gap: CGFloat = compact ? Design.Space.m : ImportMetrics.gap
             let cols = [GridItem(.fixed(ImportMetrics.card.width), spacing: ImportMetrics.gap),
                         GridItem(.fixed(ImportMetrics.card.width))]
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Design.Space.l) {
                 LazyVGrid(columns: cols, alignment: .leading, spacing: gap) {
-                    ForEach(model.categories) { CategoryTile(category: $0, c: c, height: compact ? 52 : 64) }
+                    ForEach(model.categories) { CategoryTile(category: $0, c: c, height: compact ? ImportMetrics.tileHeightCompact : ImportMetrics.tileHeight) }
                 }
                 // The notes follow the grid, so they never run into the tiles.
                 if model.finished {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: Design.Space.xs) {
                         ForEach(model.failures, id: \.self) { Text($0).lineLimit(2) }
                         if model.importedExtensionCount > 0 {
                             Text("Niche restarts once to load your extensions. Their settings and sign-ins stay in \(model.source?.rawValue ?? "Arc").")
@@ -354,7 +384,7 @@ private struct ProgressStep: View {
                             Text("Niche restarts once to bring in your passwords and sign-ins.")
                         }
                     }
-                    .font(.system(size: 12)).foregroundStyle(c.caption)
+                    .font(Design.Font.ui(.detail)).foregroundStyle(c.caption)
                     .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -373,9 +403,9 @@ private struct ProgressStep: View {
 struct ScrollFade: View {
     var body: some View {
         VStack(spacing: 0) {
-            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 8)
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: Design.Space.m)
             Color.black
-            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 16)
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: Design.Space.xl)
         }
     }
 }
@@ -390,20 +420,20 @@ private struct BrowserCard: View {
 
     var body: some View {
         let selected = model.source == source
-        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous)
         ZStack(alignment: .topLeading) {
             shape.fill(hover ? c.cardHover : .clear)
             shape.strokeBorder(selected ? c.cardBorderSelected : c.cardBorder, lineWidth: 0.5)
             Image(nsImage: source.icon)
                 .resizable().interpolation(.high)
-                .frame(width: 52, height: 52)
+                .frame(width: ImportMetrics.browserLogo, height: ImportMetrics.browserLogo)
                 .offset(x: 19, y: 14)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(source.rawValue).font(.system(size: 16, weight: .medium)).foregroundStyle(c.title)
+            VStack(alignment: .leading, spacing: Design.Space.xxs) {
+                Text(source.rawValue).font(Design.Font.ui(.title, .medium)).foregroundStyle(c.title)
                 if selected, let plan = model.plan, !plan.spaces.isEmpty {
                     Button { model.continueFromSource() } label: {
                         Text("\(model.selectedSpaces.count) of \(plan.spaces.count) spaces")
-                            .font(.system(size: 11)).foregroundStyle(c.body).underline(hover)
+                            .font(Design.Font.ui(.caption)).foregroundStyle(c.body).underline(hover)
                     }
                     .buttonStyle(.plain)
                     .transition(.opacity)
@@ -417,11 +447,11 @@ private struct BrowserCard: View {
         .frame(width: ImportMetrics.card.width, height: ImportMetrics.card.height)
         .contentShape(shape)
         .onHover { hover = $0 }
-        .onTapGesture { withAnimation(.easeOut(duration: 0.18)) { model.select(source) } }
+        .onTapGesture { withAnimation(.easeOut(duration: Design.Motion.duration(Design.Motion.standard))) { model.select(source) } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(source.rawValue)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { withAnimation(.easeOut(duration: 0.18)) { model.select(source) } }
+        .accessibilityAction { withAnimation(.easeOut(duration: Design.Motion.duration(Design.Motion.standard))) { model.select(source) } }
     }
 }
 
@@ -431,8 +461,8 @@ struct RadioDot: View {
     let c: ImportColors
     var body: some View {
         ZStack {
-            Circle().strokeBorder(on ? c.ink.opacity(0.98) : c.radioRing, lineWidth: 1.5)
-            if on { Circle().fill(c.ink.opacity(0.98)).frame(width: 17.5, height: 17.5).transition(.scale.combined(with: .opacity)) }
+            Circle().strokeBorder(on ? c.title : c.radioRing, lineWidth: 1.5)
+            if on { Circle().fill(c.title).frame(width: 17.5, height: 17.5).transition(.scale.combined(with: .opacity)) }
         }
         .frame(width: 24, height: 24)
     }
@@ -443,13 +473,13 @@ struct CheckBox: View {
     let on: Bool
     let c: ImportColors
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
         ZStack {
             if on {
-                shape.fill(c.ink.opacity(0.9))
-                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(c.background)
+                shape.fill(c.title)
+                Image(systemName: "checkmark").font(Design.Font.ui(.micro, .bold)).foregroundStyle(c.background)
             } else {
-                shape.strokeBorder(c.ink.opacity(0.3), lineWidth: 1.5)
+                shape.strokeBorder(c.radioRing, lineWidth: 1.5)
             }
         }
         .frame(width: 18, height: 18)
@@ -468,22 +498,22 @@ struct SelectableRow<Content: View>: View {
     @State private var hover = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        HStack(spacing: 12) {
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous)
+        HStack(spacing: Design.Space.l) {
             content()
-            Spacer(minLength: 8)
-            CheckBox(on: checked, c: c).opacity(disabled ? 0.45 : 1)
+            Spacer(minLength: Design.Space.m)
+            CheckBox(on: checked, c: c).opacity(disabled ? Design.Opacity.disabled : 1)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 52)
+        .padding(.horizontal, Design.Space.rowInset)
+        .frame(height: ImportMetrics.rowHeight)
         .background(shape.fill(hover && !disabled ? c.rowFillHover : c.rowFill))
         .overlay(shape.strokeBorder(c.rowBorder, lineWidth: 0.5))
         .contentShape(shape)
         .onHover { hover = $0; onHover($0) }
-        .onTapGesture { if !disabled { withAnimation(.easeOut(duration: 0.15)) { toggle() } } }
+        .onTapGesture { if !disabled { withAnimation(.easeOut(duration: Design.Motion.fast)) { toggle() } } }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(checked ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { if !disabled { withAnimation(.easeOut(duration: 0.15)) { toggle() } } }
+        .accessibilityAction { if !disabled { withAnimation(.easeOut(duration: Design.Motion.fast)) { toggle() } } }
     }
 }
 
@@ -492,9 +522,9 @@ struct RowTitle: View {
     let caption: String
     let c: ImportColors
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(c.title).lineLimit(1)
-            Text(caption).font(.system(size: 12)).foregroundStyle(c.caption).lineLimit(1)
+        VStack(alignment: .leading, spacing: Design.Space.hair) {
+            Text(title).font(Design.Font.control).foregroundStyle(c.title).lineLimit(1)
+            Text(caption).font(Design.Font.detail).foregroundStyle(c.caption).lineLimit(1)
         }
     }
 }
@@ -503,7 +533,7 @@ struct RowSymbol: View {
     let name: String
     let c: ImportColors
     var body: some View {
-        Image(systemName: name).font(.system(size: 14)).foregroundStyle(c.body).frame(width: 24)
+        Image(systemName: name).font(.system(size: Design.Icon.bar)).foregroundStyle(c.body).frame(width: ImportMetrics.rowGlyph)
     }
 }
 
@@ -523,31 +553,31 @@ struct ExtensionIcon: View {
 struct CategoryTile: View {
     let category: ImportCategory
     let c: ImportColors
-    var height: CGFloat = 64
+    var height: CGFloat = ImportMetrics.tileHeight
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        HStack(spacing: 12) {
-            Image(systemName: category.symbol).font(.system(size: 15)).foregroundStyle(c.body).frame(width: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(category.title).font(.system(size: 14, weight: .medium)).foregroundStyle(c.title)
-                Text(category.detail).font(.system(size: 12)).foregroundStyle(c.caption).lineLimit(1)
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous)
+        HStack(spacing: Design.Space.l) {
+            Image(systemName: category.symbol).font(.system(size: Design.Icon.bar)).foregroundStyle(c.body).frame(width: 22)
+            VStack(alignment: .leading, spacing: Design.Space.hair) {
+                Text(category.title).font(Design.Font.control).foregroundStyle(c.title)
+                Text(category.detail).font(Design.Font.detail).foregroundStyle(c.caption).lineLimit(1)
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: Design.Space.xs)
             Group {
                 switch category.state {
                 case .waiting: Circle().strokeBorder(c.radioRing, lineWidth: 1.5).frame(width: 18, height: 18)
                 case .working: ProgressView().controlSize(.small)
-                case .done: Image(systemName: "checkmark.circle.fill").font(.system(size: 18)).foregroundStyle(c.ink.opacity(0.9))
-                case .failed: Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 15)).foregroundStyle(.orange)
+                case .done: Image(systemName: "checkmark.circle.fill").font(.system(size: Design.Icon.image)).foregroundStyle(c.title)
+                case .failed: Image(systemName: "exclamationmark.triangle.fill").font(.system(size: Design.Icon.bar)).foregroundStyle(Design.warning)
                 }
             }
             .frame(width: 22, height: 22)
             .transition(.scale.combined(with: .opacity))
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Design.Space.l)
         .frame(width: ImportMetrics.card.width, height: height)
         .overlay(shape.strokeBorder(c.tileBorder, lineWidth: 1))
-        .animation(.easeOut(duration: 0.2), value: category.state)
+        .animation(.easeOut(duration: Design.Motion.duration(Design.Motion.standard)), value: category.state)
     }
 }
 
@@ -562,17 +592,17 @@ struct PrimaryButton: View {
 
     var body: some View {
         Button { if enabled { action() } } label: {
-            HStack(spacing: 8) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Image(systemName: "return").font(.system(size: 12, weight: .medium)).opacity(0.75)
+            HStack(spacing: Design.Space.m) {
+                Text(title).font(Design.Font.section)
+                Image(systemName: "return").font(.system(size: Design.Icon.small, weight: .medium)).opacity(Design.Opacity.dimmed)
             }
             .foregroundStyle(enabled ? c.primaryText : c.primaryTextDisabled)
             .frame(maxWidth: .infinity)
             .frame(height: ImportMetrics.buttonHeight)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .background(RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous)
                 .fill(hover && enabled ? c.primaryFillHover : c.primaryFill)
-                .opacity(enabled ? 1 : 0.45)
-                .shadow(color: Design.accent.opacity(enabled ? 0.35 : 0), radius: 14, y: 6))
+                .opacity(enabled ? 1 : Design.Opacity.disabled)
+                .shadow(color: enabled ? ImportColors.primaryGlow : .clear, radius: ImportMetrics.glowRadius, y: ImportMetrics.glowDrop))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -591,10 +621,10 @@ struct SecondaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(c.body)
+            Text(title).font(Design.Font.section).foregroundStyle(c.body)
                 .frame(maxWidth: .infinity)
                 .frame(height: ImportMetrics.buttonHeight)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(hover ? c.secondaryFillHover : c.secondaryFill))
+                .background(RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous).fill(hover ? c.secondaryFillHover : c.secondaryFill))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -609,9 +639,9 @@ struct BackLink: View {
     @State private var hover = false
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                Text("Back").font(.system(size: 13, weight: .medium))
+            HStack(spacing: Design.Space.xs) {
+                Image(systemName: "chevron.left").font(.system(size: Design.Icon.small, weight: .semibold))
+                Text("Back").font(Design.Font.control)
             }
             .foregroundStyle(hover ? c.title : c.body)
             .contentShape(Rectangle())
@@ -628,10 +658,10 @@ private struct CloseButton: View {
     @State private var hover = false
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark").font(.system(size: 15, weight: .light))
-                .foregroundStyle(c.dark ? .white.opacity(hover ? 0.95 : 0.7) : .black.opacity(hover ? 0.8 : 0.5))
-                .shadow(color: .black.opacity(c.dark ? 0.3 : 0), radius: 2)
-                .frame(width: 26, height: 22)
+            Image(systemName: "xmark").font(.system(size: Design.Icon.bar, weight: .light))
+                .foregroundStyle(c.text(hover ? .primary : .secondary))
+                .shadow(color: c.dark ? Color(nsColor: Design.Shadow.cardColor) : .clear, radius: Design.Space.xxs)
+                .frame(width: ImportMetrics.closeSize.width, height: ImportMetrics.closeSize.height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

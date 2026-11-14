@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 /// Arc's downloads list: hovering the Library button lists the recent downloads over the
 /// bottom of the sidebar, newest at the bottom, and the tab list behind them fades out.
 /// Measured on Arc 1.170 (window captures at 60 fps, 27 Oct 2026): rows 56 pt apart, a
-/// 40 pt thumbnail with 6 pt corners 8 pt in, the name at x 61 (14 pt, white 82 %) and
-/// "54 seconds ago" under it (12 pt, white 50 %); the last row ends 2 pt below the list
+/// 40 pt thumbnail with 6 pt corners 8 pt in, the name at x 61 (body size, primary ink) and
+/// "54 seconds ago" under it (detail size, secondary ink); the last row ends 2 pt below the list
 /// area. The tab list is hidden from 3 pt above the first row and fades back in over the
 /// 170 pt above that. It opens 0.2 s into the hover, rows rising 5 pt and fading in bottom
 /// first 25 ms apart; it closes 0.07 s after the pointer leaves.
@@ -13,6 +13,17 @@ enum DownloadsTrayMetrics {
     static let rowPitch: CGFloat = 56
     static let thumbnail: CGFloat = 40
     static let fade: CGFloat = 170
+    /// Arc's timings: how far into a hover it opens and how soon after it closes; the stagger
+    /// between rows on the way in and out; a row's drop back (it rises in `Design.Motion.fast`).
+    static let openDelay: TimeInterval = 0.2
+    static let closeDelay: TimeInterval = 0.07
+    static let riseStagger: TimeInterval = 0.025
+    static let dropStagger: TimeInterval = 0.015
+    static let drop: TimeInterval = 0.05
+    /// How far a row rises as it comes in.
+    static let rise: CGFloat = 5
+    /// A file with no thumbnail yet: a white tile.
+    static let placeholder = NSColor.white.withAlphaComponent(0.9)
     static func listHeight(rows: Int) -> CGFloat { rows == 0 ? 0 : CGFloat(rows) * rowPitch - (rowPitch - thumbnail) }
 }
 
@@ -23,7 +34,7 @@ extension SidebarUIState {
         guard open != downloadsListOpen else { return }
         let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.downloadsListOpen = open } }
         downloadsListWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + (open ? 0.2 : 0.07), execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (open ? DownloadsTrayMetrics.openDelay : DownloadsTrayMetrics.closeDelay), execute: work)
     }
 }
 
@@ -88,23 +99,25 @@ final class DownloadsTrayView: NSView {
         for (i, r) in rows.enumerated() {
             guard let layer = r.layer else { continue }
             let fromBottom = Double(n - 1 - i)
-            let delay = open ? fromBottom * 0.025 : fromBottom * 0.015
+            let m = DownloadsTrayMetrics.self
+            let delay = fromBottom * (open ? m.riseStagger : m.dropStagger)
             let fromOpacity = layer.presentation()?.opacity ?? layer.opacity
-            let fromShift = (layer.presentation()?.value(forKeyPath: "sublayerTransform.translation.y") as? CGFloat) ?? (open ? 5 : 0)
+            let fromShift = (layer.presentation()?.value(forKeyPath: "sublayerTransform.translation.y") as? CGFloat) ?? (open ? m.rise : 0)
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             r.alphaValue = open ? 1 : 0
-            layer.sublayerTransform = CATransform3DMakeTranslation(0, open ? 0 : 5, 0)
+            layer.sublayerTransform = CATransform3DMakeTranslation(0, open ? 0 : m.rise, 0)
             CATransaction.commit()
             let fade = CABasicAnimation(keyPath: "opacity")
             fade.fromValue = fromOpacity
             fade.toValue = open ? 1 : 0
             let move = CABasicAnimation(keyPath: "sublayerTransform.translation.y")
             move.fromValue = fromShift
-            move.toValue = open ? 0 : 5
+            move.toValue = open ? 0 : m.rise
             let group = CAAnimationGroup()
-            group.animations = [fade, move]
-            group.duration = open ? 0.12 : 0.05
+            // Under Reduce motion the rows fade where they are.
+            group.animations = Design.Motion.reduced ? [fade] : [fade, move]
+            group.duration = open ? Design.Motion.fast : m.drop
             group.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) + delay
             group.fillMode = .backwards
             group.timingFunction = CAMediaTimingFunction(name: open ? .easeOut : .easeIn)
@@ -151,15 +164,15 @@ private final class DownloadsTrayRowView: NSView, NSDraggingSource {
     }
     var now = Date() { didSet { refreshAge() } }
     private let thumb = NSView()
-    private let name = NSTextField.sidebarLabel(size: 14)
-    private let age = NSTextField.sidebarLabel(size: 12)
+    private let name = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
+    private let age = NSTextField.sidebarLabel(size: Design.TextSize.detail.rawValue)
     private var downAt: NSPoint?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         thumb.wantsLayer = true
-        thumb.layer?.cornerRadius = 6
+        thumb.layer?.cornerRadius = Design.Radius.inset
         thumb.layer?.cornerCurve = .continuous
         thumb.layer?.masksToBounds = true
         thumb.layer?.contentsGravity = .resizeAspectFill
@@ -181,8 +194,8 @@ private final class DownloadsTrayRowView: NSView, NSDraggingSource {
 
     private func refresh() {
         let ink: NSColor = colors.isDark ? .white : .black
-        name.textColor = ink.withAlphaComponent(0.82)
-        age.textColor = ink.withAlphaComponent(0.5)
+        name.textColor = ink.withAlphaComponent(Design.Emphasis.primary.rawValue)
+        age.textColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         guard let listed else { return }
         var image: NSImage?
         switch listed {
@@ -203,7 +216,7 @@ private final class DownloadsTrayRowView: NSView, NSDraggingSource {
             thumb.layer?.backgroundColor = nil
         } else {
             thumb.layer?.contents = nil
-            thumb.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.9).cgColor
+            thumb.layer?.backgroundColor = DownloadsTrayMetrics.placeholder.cgColor
         }
         refreshAge()
     }

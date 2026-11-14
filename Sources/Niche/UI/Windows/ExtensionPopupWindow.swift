@@ -14,9 +14,10 @@ final class ExtensionPopupWindow: NSWindow {
     /// Chrome's bubble draws a transparent margin around the page.
     static let bubbleInset: CGFloat = 7
     static let titleBarHeight: CGFloat = 28
-    /// Where the user dragged a popup to, relative to its anchor. (Niche ≤ 0.1.17 kept an
-    /// absolute screen point under "extensionPopupWindowTopLeft"; that one is dropped.)
-    private static let savedOffsetKey = "extensionPopupWindowOffset"
+    /// Earlier versions remembered where a popup was dragged to and opened every later popup
+    /// there, whatever its button ("extensionPopupWindowOffset", before that an absolute point):
+    /// a popup now opens at its button each time, and a drag moves that popup only.
+    private static let droppedKeys = ["extensionPopupWindowOffset", "extensionPopupWindowTopLeft"]
 
     private static var current: ExtensionPopupWindow?
     /// When the mouse-down that closed the last popup happened (event time), if one did.
@@ -25,8 +26,10 @@ final class ExtensionPopupWindow: NSWindow {
     private weak var bubble: NSWindow?
     /// The top-right point (screen) the popup hangs from: right edge of its button, under the bar.
     private var anchor = NSPoint.zero
-    /// Where the user dragged the frame, from hanging right under the anchor.
+    /// Where the user dragged this popup, from hanging right under the anchor.
     private var offset = NSPoint.zero
+    /// The browser window the popup belongs to: it opens inside it (ExtensionPopupPlacement).
+    private weak var browserWindow: NSWindow?
     /// The frame's top-left when a title-bar drag began.
     private var dragStart = NSPoint.zero
     private var observers: [NSObjectProtocol] = []
@@ -66,14 +69,14 @@ final class ExtensionPopupWindow: NSWindow {
         let w = ExtensionPopupWindow()
         w.bubble = bubble
         w.anchor = anchor
-        UserDefaults.standard.removeObject(forKey: "extensionPopupWindowTopLeft")
-        w.offset = savedOffset ?? .zero
+        for key in droppedKeys { UserDefaults.standard.removeObject(forKey: key) }
         w.appearance = bubble.parent?.effectiveAppearance ?? NSApp.effectiveAppearance
         w.backgroundColor = .windowBackgroundColor
         current = w
 
         // Above the page (and the main window), below the popup.
         let host = bubble.parent?.parent ?? bubble.parent
+        w.browserWindow = host
         bubble.parent?.removeChildWindow(bubble)
         bubble.hasShadow = false
         w.layout()
@@ -131,12 +134,14 @@ final class ExtensionPopupWindow: NSWindow {
         defer { placing = false }
         let inset = Self.bubbleInset
         let size = NSSize(width: bubble.frame.width - 2 * inset, height: bubble.frame.height - 2 * inset + Self.titleBarHeight)
-        // Right edge on the anchor whatever width the page reports (Bitwarden grows after it loads).
-        var topLeft = NSPoint(x: anchor.x - size.width + offset.x, y: anchor.y + offset.y)
-        if let screen = (Self.screen(at: anchor) ?? bubble.screen ?? NSScreen.main)?.visibleFrame {
-            topLeft.x = min(max(topLeft.x, screen.minX + 4), screen.maxX - size.width - 4)
-            topLeft.y = min(max(topLeft.y, screen.minY + size.height + 4), screen.maxY)
-        }
+        // Right edge on the anchor whatever width the page reports (Bitwarden grows after it
+        // loads), inside the browser window and on the screen.
+        let screen = (Self.screen(at: anchor) ?? bubble.screen ?? NSScreen.main)?.visibleFrame
+        var topLeft = NSPoint(x: ExtensionPopupPlacement.minX(anchorX: anchor.x, width: size.width, dragged: offset.x,
+                                                              window: browserWindow.map { $0.frame.minX...$0.frame.maxX },
+                                                              screen: screen.map { $0.minX...$0.maxX }),
+                              y: anchor.y + offset.y)
+        if let screen { topLeft.y = min(max(topLeft.y, screen.minY + size.height + 4), screen.maxY) }
         let frame = NSRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height)
         if self.frame != frame { setFrame(frame, display: true) }
         let origin = NSPoint(x: frame.minX - inset, y: frame.minY - inset)
@@ -149,30 +154,23 @@ final class ExtensionPopupWindow: NSWindow {
         // A click on the title bar that barely moved it is not a new place.
         guard hypot(moved.x - dragStart.x, moved.y - dragStart.y) > 4 else { return }
         offset = NSPoint(x: moved.x - (anchor.x - frame.width), y: moved.y - anchor.y)
-        Self.savedOffset = offset
     }
 
-    /// Top-left of a popup window `width` wide: hanging from `anchor` (top-right), moved by
-    /// where the user last dragged one to. The drag is kept relative to the anchor, so the
-    /// popup follows its button when the browser window moves or changes screen (GitHub #8:
-    /// an absolute screen point made it open in "random" places).
-    static func placement(anchor: NSPoint, width: CGFloat) -> NSPoint {
-        let offset = savedOffset ?? .zero
-        return NSPoint(x: anchor.x - width + offset.x, y: anchor.y + offset.y)
+    /// Top-left of a popup window `width` wide hanging from `anchor` (top-right), inside `window`
+    /// and on the anchor's screen. The popup follows its button when the browser window moves or
+    /// changes screen (GitHub #8: an absolute screen point made it open in "random" places).
+    static func placement(anchor: NSPoint, width: CGFloat, in window: NSWindow? = nil) -> NSPoint {
+        let screen = (screen(at: anchor) ?? window?.screen ?? NSScreen.main)?.visibleFrame
+        return NSPoint(x: ExtensionPopupPlacement.minX(anchorX: anchor.x, width: width,
+                                                       window: window.map { $0.frame.minX...$0.frame.maxX },
+                                                       screen: screen.map { $0.minX...$0.maxX }),
+                       y: anchor.y)
     }
 
     /// The display the anchor (the button) is on. Chrome's bubble starts out by its hidden
     /// toolbar, which can be on another display than the browser window.
     static func screen(at anchor: NSPoint) -> NSScreen? {
         NSScreen.screens.first { $0.frame.insetBy(dx: -1, dy: -1).contains(anchor) }
-    }
-
-    private static var savedOffset: NSPoint? {
-        get {
-            guard let s = UserDefaults.standard.string(forKey: savedOffsetKey) else { return nil }
-            return NSPointFromString(s)
-        }
-        set { UserDefaults.standard.set(newValue.map(NSStringFromPoint), forKey: savedOffsetKey) }
     }
 
     override func performClose(_ sender: Any?) { dismiss(closingBubble: true) }
@@ -224,14 +222,22 @@ private final class TrafficLight: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// macOS's close button: its red, the darker rim, the ✕ it shows under the pointer, and the
+    /// grey of the two buttons a popup can't use.
+    private static let closeFill = NSColor(srgbRed: 1, green: 0.373, blue: 0.341, alpha: 1)
+    private static let closeRim = NSColor(srgbRed: 0.886, green: 0.267, blue: 0.239, alpha: 1)
+    private static let closeMark = NSColor(srgbRed: 0.3, green: 0, blue: 0, alpha: 0.8)
+    private static let idleOnDark = NSColor.white.withAlphaComponent(0.22)
+    private static let idleOnLight = NSColor.black.withAlphaComponent(0.13)
+
     override func draw(_ dirtyRect: NSRect) {
         let d = min(bounds.width, bounds.height) - 2
         let circle = NSRect(x: bounds.midX - d / 2, y: bounds.midY - d / 2, width: d, height: d)
         let path = NSBezierPath(ovalIn: circle)
         if isClose {
-            NSColor(srgbRed: 1, green: 0.373, blue: 0.341, alpha: 1).setFill()
+            Self.closeFill.setFill()
             path.fill()
-            NSColor(srgbRed: 0.886, green: 0.267, blue: 0.239, alpha: 1).setStroke()
+            Self.closeRim.setStroke()
             path.lineWidth = 0.5
             path.stroke()
             if hovered {
@@ -241,12 +247,12 @@ private final class TrafficLight: NSView {
                 x.move(to: NSPoint(x: circle.midX - r, y: circle.midY + r)); x.line(to: NSPoint(x: circle.midX + r, y: circle.midY - r))
                 x.lineWidth = 1.2
                 x.lineCapStyle = .round
-                NSColor(srgbRed: 0.3, green: 0, blue: 0, alpha: 0.8).setStroke()
+                Self.closeMark.setStroke()
                 x.stroke()
             }
         } else {
             (effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor.white.withAlphaComponent(0.22) : NSColor.black.withAlphaComponent(0.13)).setFill()
+                ? Self.idleOnDark : Self.idleOnLight).setFill()
             path.fill()
         }
     }
@@ -268,6 +274,8 @@ private final class TrafficLight: NSView {
 /// 25×25 to 800×600, following it as it changes) and closed when it loses focus.
 @MainActor
 final class ExtensionPageWindow: NSWindow, NSWindowDelegate, @preconcurrency NicheBrowserDelegate {
+    /// The page's bottom corners, as the window's own.
+    private static let pageCorner: CGFloat = 12
     private static var current: ExtensionPageWindow?
     nonisolated static let minSize = NSSize(width: 25, height: 25)
     nonisolated static let maxSize = NSSize(width: 800, height: 600)
@@ -383,7 +391,7 @@ final class ExtensionPageWindow: NSWindow, NSWindowDelegate, @preconcurrency Nic
         if let cv = host.contentView {
             cv.isHidden = false
             cv.wantsLayer = true
-            cv.layer?.cornerRadius = 12
+            cv.layer?.cornerRadius = Self.pageCorner
             cv.layer?.cornerCurve = .continuous
             cv.layer?.maskedCorners = cv.isFlipped ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
             cv.layer?.masksToBounds = true

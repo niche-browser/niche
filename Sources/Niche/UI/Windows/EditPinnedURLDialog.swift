@@ -1,7 +1,15 @@
 import SwiftUI
 
+private enum Metrics {
+    /// The card's width, Arc's.
+    static let width: CGFloat = 393
+    /// The key badges beside Cancel and Save.
+    static let cancelKey = CGSize(width: 35, height: 20)
+    static let saveKey = CGSize(width: 27, height: 20)
+}
+
 /// Arc 1.171's "Edit Pinned URL" dialog (a pinned tab's or favorite's Edit Pinned URL…),
-/// measured from a 2x capture (1 Nov, #54): a 393 × 265 pt navy card over the dimmed window, the
+/// as wide as Arc's in a 2x capture (1 Nov, #54): a 393 pt card over the dimmed window, the
 /// saved URL selected in its field. Arc enables Save for any text; Niche only for an address
 /// (TypedURL.pinnedDestination), so a search or a script can't become the pinned page.
 struct EditPinnedURLDialog: View {
@@ -21,44 +29,39 @@ struct EditPinnedURLDialog: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Edit Pinned URL")
-                .font(.system(size: 17.5, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(height: 21, alignment: .top)
-                .padding(.top, 55)
-                .padding(.leading, 37.5)
+                .font(Design.Font.ui(.title, .semibold))
+                .foregroundStyle(DialogTheme.title)
             Text("This is what opens first when you click this tab or its favicon.")
-                .font(.system(size: 14))
-                .lineSpacing(0.8)
+                .font(Design.Font.ui(.body))
+                .lineSpacing(Design.Space.hair)
                 .foregroundStyle(DialogTheme.body)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 304, height: 35, alignment: .topLeading)
-                .padding(.top, 16)
-                .padding(.leading, 37.5)
-            TextField("", text: $text, prompt: Text("Enter a URL…").foregroundStyle(Color(hex: "#A6A8B0")))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, Design.Space.m)
+            TextField("", text: $text, prompt: Text("Enter a URL…").foregroundStyle(DialogTheme.faint))
                 .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundStyle(.white)
+                .font(Design.Font.ui(.body))
+                .foregroundStyle(DialogTheme.title)
                 .focused($focused)
                 .onSubmit { if let destination { onSave(destination) } }
-                .padding(.horizontal, 8.5)
-                .frame(width: 318, height: 37)
-                .background(RoundedRectangle(cornerRadius: 5.5, style: .continuous).fill(Color(hex: "#383E4F")))
-                .overlay(RoundedRectangle(cornerRadius: 5.5, style: .continuous).strokeBorder(Color(hex: "#737884"), lineWidth: 1))
-                .padding(.top, 15.5)
-                .padding(.leading, 37.5)
-            HStack(spacing: 7) {
+                .padding(.horizontal, Design.Space.m)
+                .frame(height: Design.Space.control)
+                .background(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(Design.panelDarkRaisedColor))
+                .overlay(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).strokeBorder(DialogTheme.outline, lineWidth: 1))
+                .padding(.top, Design.Space.xl)
+            HStack(spacing: Design.Space.m) {
                 Spacer()
-                DialogButton(title: "Cancel", key: "ESC", enabled: true, style: .secondary, badge: CGSize(width: 35, height: 20), action: onCancel)
+                DialogButton(title: "Cancel", key: "ESC", enabled: true, style: .secondary, badge: Metrics.cancelKey, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                DialogButton(title: "Save", key: "↩", enabled: destination != nil, style: .accent, badge: CGSize(width: 27, height: 20)) {
+                DialogButton(title: "Save", key: "↩", enabled: destination != nil, style: .accent, badge: Metrics.saveKey) {
                     if let destination { onSave(destination) }
                 }
             }
-            .padding(.top, 21)
-            .padding(.trailing, 28)
-            Spacer(minLength: 0)
+            .padding(.top, Design.Space.xxxl)
         }
-        .frame(width: 393, height: 265)
+        .padding(Design.Space.xxxl)
+        .frame(width: Metrics.width)
+        .fixedSize(horizontal: false, vertical: true)
         .modifier(DialogSurface())
         .onAppear { focused = true }
     }

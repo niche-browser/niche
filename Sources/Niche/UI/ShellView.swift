@@ -139,7 +139,14 @@ final class ShellView: NSView {
     /// toolbar hidden (View ▸ Show Toolbar is disabled while a split is open, GitHub #178).
     var panesShowBars: Bool { barsShown(panes: paneCards.count, fullscreen: contentFullscreen) }
     private func barsShown(panes: Int, fullscreen: Bool) -> Bool { !fullscreen && (showToolbar || panes > 1) }
-    var hasTab = false { didSet { needsLayout = true } }
+    var hasTab = false {
+        didSet {
+            needsLayout = true
+            if hasTab != oldValue { onHasTabChange?() }
+        }
+    }
+    /// The window gained its first tab or lost its last: the home shows or goes (HomeView).
+    var onHasTabChange: (() -> Void)?
     var onEdgeHover: ((Bool) -> Void)?
     /// Set again each time the window becomes key; only a change rebuilds the backdrop.
     var windowActive = true {
@@ -205,7 +212,7 @@ final class ShellView: NSView {
     func refreshLift() {
         let t = NicheTuning.shared
         let lift = vibrantDark ? (windowActive ? 0.15 : 0.93) : (windowActive ? t.liftActive : t.liftInactive)
-        vibrancyLift.layer?.backgroundColor = NSColor(white: 1, alpha: lift).cgColor
+        vibrancyLift.layer?.backgroundColor = NSColor.white.withAlphaComponent(lift).cgColor
         if usesBackdropLayer {
             vibrancy.isHidden = true
             vibrancyLift.isHidden = true
@@ -230,7 +237,7 @@ final class ShellView: NSView {
             if let b = backdropLayer, (backdrop.source == .blur) != (b.superlayer != nil) {
                 if backdrop.source == .blur { backdropHost.layer?.insertSublayer(b, at: desktopTintLayer?.superlayer == nil ? 0 : 1) } else { b.removeFromSuperlayer() }
             }
-            liftLayer.colors = [NSColor(white: 1, alpha: backdrop.liftTop).cgColor, NSColor(white: 1, alpha: backdrop.liftBottom).cgColor]
+            liftLayer.colors = [NSColor.white.withAlphaComponent(backdrop.liftTop).cgColor, NSColor.white.withAlphaComponent(backdrop.liftBottom).cgColor]
             CATransaction.commit()
             let state = backdrop.logLine(active: windowActive, reduceTransparency: reduceTransparency)
             if state != loggedBackdrop {
@@ -308,7 +315,7 @@ final class ShellView: NSView {
             self, selector: #selector(accessibilityDisplayOptionsChanged),
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         vibrancyLift.wantsLayer = true
-        vibrancyLift.layer?.backgroundColor = NSColor(white: 1, alpha: 0.15).cgColor
+        vibrancyLift.layer?.backgroundColor = Design.fillOnDark(.strong).cgColor
         vibrancyLift.isHidden = true
         addSubview(vibrancyLift)
         addSubview(backgroundHost)
@@ -323,7 +330,7 @@ final class ShellView: NSView {
         devToolsHost.layer?.backgroundColor = NSColor.white.cgColor
         devToolsHost.isHidden = true
         devToolsDivider.wantsLayer = true
-        devToolsDivider.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.12).cgColor
+        devToolsDivider.layer?.backgroundColor = Design.barFill(.selected, onLight: true).cgColor
         devToolsDivider.isHidden = true
         devToolsHandle.isHidden = true
         devToolsHandle.onDrag = { [weak self] dx in
@@ -577,7 +584,7 @@ final class ShellView: NSView {
         let n = CGFloat(max(1, paneCards.count))
         for c in paneCards { paneFactors[c.tabID] = 1 / n }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
+            ctx.duration = Design.Motion.duration(Design.Motion.standard)
             ctx.timingFunction = SplitPaneLayout.Constants.transitionTiming
             ctx.allowsImplicitAnimation = true
             layoutContentChildren(animated: true)
@@ -634,7 +641,7 @@ final class ShellView: NSView {
         let b = bounds
         if fullscreen {
             return Frames(sidebar: NSRect(x: -width, y: 0, width: width, height: b.height),
-                          handle: .zero, content: b, cornerRadius: 0, sidebarCorner: 0)
+                          handle: .zero, content: b, cornerRadius: .zero, sidebarCorner: .zero)
         }
         // Edge to edge the card fills what the sidebar leaves, square; the window's own
         // corners round it where they meet.
@@ -689,7 +696,7 @@ final class ShellView: NSView {
             sidebarHost.shadow = NSShadow()
             sidebarHost.shadow?.shadowBlurRadius = 24
             sidebarHost.shadow?.shadowOffset = NSSize(width: 0, height: -6)
-            sidebarHost.shadow?.shadowColor = NSColor.black.withAlphaComponent(0.3)
+            sidebarHost.shadow?.shadowColor = Design.Shadow.panelColor
         } else {
             sidebarHost.shadow = nil
         }

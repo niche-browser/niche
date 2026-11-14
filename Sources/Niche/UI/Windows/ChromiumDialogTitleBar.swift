@@ -4,7 +4,8 @@ import NicheCEF
 /// Applies `ChromiumDialogFrame` to every window as it appears: Chromium's buttonless dialogs
 /// get a full-size, transparent title bar so nothing covers their top edge. Dialogs hung from the
 /// page's hidden toolbar open at the page's top right, and other bubbles Chromium left off the
-/// screen move into their window (`ChromiumBubblePlacement`).
+/// screen move into their window (`ChromiumBubblePlacement`). Chromium's "… has been added"
+/// bubble is closed: Niche says it (`ChromiumAddedBubble`).
 @MainActor
 enum ChromiumDialogTitleBar {
     static func install() {
@@ -38,7 +39,31 @@ enum ChromiumDialogTitleBar {
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { w.standardWindowButton(type)?.isHidden = true }
     }
 
+    /// Closes Chromium's "<name> has been added to Chromium" bubble (`ChromiumAddedBubble`): it
+    /// opens half off the screen's top-left corner and stays there, and Niche's own "Added <name>"
+    /// toast says it. True when `w` is that bubble.
+    @discardableResult
+    private static func closeAddedBubble(_ w: NSWindow) -> Bool {
+        guard w.isVisible, NSStringFromClass(type(of: w)) == "NativeWidgetMacNSWindow",
+              ChromiumAddedBubble.matches(title: w.title, titled: w.styleMask.contains(.titled), hasParent: w.parent != nil,
+                                          extensionNames: ExtensionStore.shared.entries.map(\.name)) else { return false }
+        // Out of sight now; closed after this notification, which may be about the window itself.
+        w.alphaValue = 0
+        DispatchQueue.main.async { [weak w] in
+            guard let w, w.isVisible else { return }
+            NicheLog.note("bubble \(w.windowNumber) closed: Chromium's extension added bubble")
+            w.close()
+        }
+        return true
+    }
+
+    /// The bubble can show before Niche has read the new extension's name: look again once it has.
+    static func closeAddedBubbles() {
+        for w in NSApp.windows { closeAddedBubble(w) }
+    }
+
     private static func placeBubble(_ w: NSWindow) {
+        if closeAddedBubble(w) { return }
         // Extension popups wait transparent until ExtensionActions frames them; a framed one moves
         // with its frame, which the user may drag partly off screen.
         guard w.isVisible, w.alphaValue > 0, !(w is NSPanel), !(w.parent is ExtensionPopupWindow),

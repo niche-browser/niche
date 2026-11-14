@@ -100,7 +100,7 @@ enum SpaceIconCatalog {
     /// own colours, which the caller must not tint over, anything else a template to tint.
     static func image(_ name: String, size: CGFloat? = nil, weight: NSFont.Weight = .medium) -> (image: NSImage?, colored: Bool) {
         let base = NSImage(systemSymbolName: name, accessibilityDescription: nil)
-        var config = size.map { NSImage.SymbolConfiguration(pointSize: $0, weight: weight) } ?? NSImage.SymbolConfiguration(scale: .medium)
+        var config = size.map { Design.Icon.configuration($0, weight: weight) } ?? NSImage.SymbolConfiguration(scale: .medium)
         guard let vibe = vibe(name) else { return (base?.withSymbolConfiguration(config), false) }
         config = config.applying(NSImage.SymbolConfiguration(paletteColors: vibe.colors))
         let image = base?.withSymbolConfiguration(config)
@@ -178,16 +178,16 @@ struct SpaceIconPicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: Design.Space.m) {
                 SpaceIconTabs(selection: $tab)
-                Button(action: onRemove) { SettingsIconTile(symbol: "trash", active: false, size: 28) }
+                Button(action: onRemove) { SettingsIconTile(symbol: "trash", active: false, size: Design.Space.control) }
                     .buttonStyle(.plain)
                     .help("Remove icon")
                     .accessibilityLabel("Remove icon")
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 6)
+            .padding(.horizontal, Design.Space.l)
+            .padding(.top, Design.Space.l)
+            .padding(.bottom, Design.Space.s)
             switch tab {
             case .vibes: SpaceVibeGrid(current: currentSymbol, onPick: onPickSymbol)
             case .icons: SpaceSymbolGrid(current: currentSymbol, onPick: onPickSymbol)
@@ -206,8 +206,8 @@ struct SpaceIconPicker: View {
         // otherwise slide the grid's own top margin away and butt it against the search.
         VStack(spacing: 10) {
             SettingsSearchField(text: $query, focused: $searchFocused)
-                .padding(.horizontal, 12)
-                .padding(.top, 4)
+                .padding(.horizontal, Design.Space.l)
+                .padding(.top, Design.Space.xs)
             SpaceEmojiGrid(current: current, query: query, onPick: onPick)
         }
     }
@@ -219,21 +219,21 @@ private struct SpaceIconTabs: View {
     @Namespace private var plate
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Design.Space.xxs) {
             ForEach(SpaceIconPicker.Tab.allCases, id: \.self) { t in
                 Button {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { selection = t }
                 } label: {
                     Text(t.rawValue)
-                        .font(.system(size: 12, weight: selection == t ? .semibold : .medium))
+                        .font(Design.Font.ui(.detail, selection == t ? .semibold : .medium))
                         .foregroundStyle(selection == t ? Color.primary : Color.secondary)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 24)
+                        .frame(height: Design.Space.controlCompact)
                         .background {
                             if selection == t {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(Color.primary.opacity(0.12))
-                                    .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
+                                RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous)
+                                    .fill(Design.fill(.pressed))
+                                    .shadow(color: Color(nsColor: Design.Shadow.cardColor), radius: 1, y: 0.5)
                                     .matchedGeometryEffect(id: "plate", in: plate)
                             }
                         }
@@ -243,8 +243,8 @@ private struct SpaceIconTabs: View {
                 .accessibilityAddTraits(selection == t ? .isSelected : [])
             }
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .padding(Design.Space.xxs)
+        .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.fill(.hover)))
     }
 }
 
@@ -263,8 +263,8 @@ private struct IconCell<Glyph: View>: View {
             glyph(hovered)
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fit)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(fill))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(fill))
+                .overlay(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous)
                     .strokeBorder(selected ? (tint ?? Design.accent).opacity(0.75) : .clear, lineWidth: 1.5))
                 .scaleEffect(hovered && !selected ? 1.06 : 1)
                 .animation(.spring(response: 0.25, dampingFraction: 0.7), value: hovered)
@@ -279,20 +279,20 @@ private struct IconCell<Glyph: View>: View {
 
     private var fill: Color {
         if let tint { return tint.opacity(selected ? 0.3 : hovered ? 0.22 : 0.13) }
-        return selected ? Design.accent.opacity(0.18) : Color.primary.opacity(hovered ? 0.09 : 0)
+        return selected ? Design.accent.opacity(0.18) : (hovered ? Design.fill(.selected) : .clear)
     }
 }
 
 /// Eight square tiles with an even 6 pt gap, rows and columns alike.
-private let iconColumns = Array(repeating: GridItem(.flexible(minimum: 28), spacing: 6), count: 8)
-private let iconRowSpacing: CGFloat = 6
+private let iconColumns = Array(repeating: GridItem(.flexible(minimum: 28), spacing: Design.Space.s), count: 8)
+private let iconRowSpacing = Design.Space.s
 
 private struct GridSectionTitle: View {
     let text: String
     var body: some View {
-        Text(text).font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+        Text(text).font(Design.Font.ui(.caption, .semibold)).foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 1).padding(.top, 10).padding(.bottom, 6)
+            .padding(.leading, Design.Space.hair).padding(.top, 10).padding(.bottom, Design.Space.s)
     }
 }
 
@@ -313,7 +313,7 @@ struct SpaceVibeGrid: View {
                             let selected = vibe.symbol == current
                             IconCell(selected: selected, help: vibe.name, tint: vibe.tileColor, action: { onPick(vibe.symbol) }) { hovered in
                                 Image(systemName: vibe.symbol)
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: Design.Icon.image, weight: .semibold))
                                     .foregroundStyle(vibe.gradient)
                                     .modifier(VibeMotionModifier(motion: vibe.motion, trigger: bumps[vibe.symbol, default: 0], looping: selected))
                                     .onChange(of: hovered) { _, now in if now { bumps[vibe.symbol, default: 0] += 1 } }
@@ -322,8 +322,8 @@ struct SpaceVibeGrid: View {
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            .padding(.horizontal, Design.Space.l)
+            .padding(.bottom, Design.Space.l)
         }
     }
 }
@@ -343,15 +343,15 @@ struct SpaceSymbolGrid: View {
                             let selected = name == current
                             IconCell(selected: selected, help: name, action: { onPick(name) }) { _ in
                                 Image(systemName: name)
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.system(size: Design.Icon.bar, weight: .medium))
                                     .foregroundStyle(selected ? Design.accent : Color.primary)
                             }
                         }
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            .padding(.horizontal, Design.Space.l)
+            .padding(.bottom, Design.Space.l)
         }
     }
 }
@@ -370,22 +370,22 @@ private struct SpaceEmojiGrid: View {
                     let entries = query.isEmpty ? EmojiCatalog.all : EmojiCatalog.search(query)
                     ForEach(entries, id: \.self) { e in
                         IconCell(selected: e.emoji == current, help: e.name, action: { onPick(e.emoji) }) { _ in
-                            Text(e.emoji).font(.system(size: 21))
+                            Text(e.emoji).font(.system(size: Design.Icon.large))
                         }
                         .id(e.emoji)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Design.Space.l)
+                .padding(.bottom, Design.Space.m)
             }
             .onAppear { if let anchor = rowAnchor(current) { proxy.scrollTo(anchor, anchor: .top) } }
-            Rectangle().fill(Design.hairline).frame(height: 1)
+            Rectangle().fill(Design.hairline).frame(height: Design.Space.hair)
             HStack(spacing: 0) {
                 ForEach(EmojiCatalog.categories) { c in
                     Button {
                         proxy.scrollTo(c.entries.first?.emoji, anchor: .top)
                     } label: {
-                        Image(systemName: c.symbol).font(.system(size: 13)).frame(maxWidth: .infinity).frame(height: 30)
+                        Image(systemName: c.symbol).font(.system(size: Design.Icon.regular)).frame(maxWidth: .infinity).frame(height: 30)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -393,7 +393,7 @@ private struct SpaceEmojiGrid: View {
                     .disabled(!query.isEmpty)
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, Design.Space.l)
         }
     }
 

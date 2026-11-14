@@ -303,7 +303,7 @@ enum SidebarMenus {
         let dialog = AppDialog(title: "Add a GitLab Live Folder",
                                message: "Enter your GitLab’s address, or leave it empty for GitLab.com. The folder signs in with this Space’s Profile.",
                                actions: [DialogAction("Add Folder"), .cancel], input: "", placeholder: "https://gitlab.com",
-                               icon: .none, width: 496, buttonSpacing: 30, buttonOutset: 0)
+                               icon: .none, width: 496)
         dialog.present(over: window) { response in
             guard response == .alertFirstButtonReturn else { return }
             let address = (dialog.input ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

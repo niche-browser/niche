@@ -224,7 +224,7 @@ final class FavoritePreviewCard {
     private func demo(_ favorite: String, in window: NSWindow) {
         guard let content = window.contentView else { return }
         dismiss(animated: false)
-        let anchor = NSView(frame: NSRect(x: 200, y: content.bounds.height - 44 - 47, width: 56, height: 47))
+        let anchor = NSView(frame: NSRect(x: 200, y: content.bounds.height - 44 - FavoritesLayout.tileHeight, width: 56, height: FavoritesLayout.tileHeight))
         content.addSubview(anchor)
         tile = anchor
         target = Target(favorite: favorite, profilePath: nil, open: { NicheLog.note("preview opens \($0)") },
@@ -293,19 +293,19 @@ private struct MeetingReminderView: View {
     var body: some View {
         CardStyle.card(
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(CardStyle.text).lineLimit(1)
-                    Text(when).font(.system(size: 11)).foregroundStyle(CardStyle.secondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: Design.Space.xxs) {
+                    Text(event.title).font(Design.Font.ui(.body, .semibold)).foregroundStyle(CardStyle.text).lineLimit(1)
+                    Text(when).font(Design.Font.caption).foregroundStyle(CardStyle.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                Text("Join").font(.system(size: 12, weight: .semibold))
-                    .padding(.horizontal, 12).padding(.vertical, 5)
+                Text("Join").font(Design.Font.ui(.detail, .semibold))
+                    .padding(.horizontal, Design.Space.l).padding(.vertical, 5)
                     .background(Capsule().fill(CalendarPreviewView.nowColor))
-                    .foregroundStyle(.black.opacity(0.85))
+                    .foregroundStyle(CardStyle.onNow)
                     .contentShape(Capsule())
                     .onTapGesture(perform: join)
                     .accessibilityAddTraits(.isButton)
-                Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(CardStyle.secondary)
+                Image(systemName: "xmark").font(Design.Font.ui(.micro, .bold)).foregroundStyle(CardStyle.secondary)
                     .frame(width: 18, height: 18).contentShape(Rectangle())
                     .onTapGesture(perform: dismiss)
                     .accessibilityLabel("Dismiss")
@@ -360,7 +360,7 @@ private final class PreviewPanel: NSPanel {
         setContentSize(NSSize(width: size.width + 2 * m, height: size.height + 2 * m))
         card.frame = NSRect(x: m, y: m, width: size.width, height: size.height)
         host.frame = card.bounds
-        card.layer?.shadowPath = CGPath(roundedRect: card.bounds, cornerWidth: 10, cornerHeight: 10, transform: nil)
+        card.layer?.shadowPath = CGPath(roundedRect: card.bounds, cornerWidth: CardStyle.radius, cornerHeight: CardStyle.radius, transform: nil)
         (contentView as? TrackingView)?.cardRect = card.frame
     }
 
@@ -451,17 +451,30 @@ private final class TrackingView: NSView {
 // MARK: - Views
 
 private enum CardStyle {
-    static let fill = Color(red: 25 / 255, green: 24 / 255, blue: 23 / 255)
+    static let radius = Design.Radius.control
+    static let fill = Design.graphite
     static let edge = Color(red: 63 / 255, green: 62 / 255, blue: 60 / 255)
-    static let line = Color.white.opacity(0.08)
-    static let text = Color.white.opacity(0.9)
-    static let secondary = Color.white.opacity(0.5)
-    static let hover = Color.white.opacity(0.07)
+    static let line = Color(nsColor: Design.hairlineOnDark)
+    static let text = Design.onDarkColor(.primary)
+    static let secondary = Design.onDarkColor(.secondary)
+    static let hover = Design.fillOnDarkColor(.hover)
+    /// Ink on the cream of the now line (a Join capsule).
+    static let onNow = Design.onLightColor(.primary)
+    /// The round buttons: an opaque dark disc with a light rim (＋) or a lighter wash (gear), each
+    /// a step brighter under the pointer.
+    static let button = Color(white: 0.14)
+    static let buttonHover = Color(white: 0.2)
+    static let buttonRim = Design.fillOnDarkColor(.pressed)
+    static let buttonLight = Color.white.opacity(0.24)
+    static let buttonLightHover = Color.white.opacity(0.3)
+    /// An event's block: opaque, over the hour lines and the now line.
+    static let event = Color(white: 0.22)
+    static let eventHover = Color(white: 0.27)
 
     static func card<V: View>(_ v: V) -> some View {
-        v.background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(fill))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(edge, lineWidth: 1))
+        v.background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(fill))
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(edge, lineWidth: 1))
     }
 }
 
@@ -476,10 +489,10 @@ private struct RoundButton: View {
     var body: some View {
         GeometryReader { g in
             Circle()
-                .fill(light ? Color.white.opacity(hovered ? 0.3 : 0.24) : Color(white: hovered ? 0.2 : 0.14))
-                .overlay(Circle().strokeBorder(Color.white.opacity(light ? 0 : 0.14), lineWidth: 1))
-                .overlay(Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(CardStyle.text))
-                .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
+                .fill(light ? (hovered ? CardStyle.buttonLightHover : CardStyle.buttonLight) : (hovered ? CardStyle.buttonHover : CardStyle.button))
+                .overlay(Circle().strokeBorder(light ? Color.clear : CardStyle.buttonRim, lineWidth: 1))
+                .overlay(Image(systemName: symbol).font(Design.Font.ui(.title, .semibold)).foregroundStyle(CardStyle.text))
+                .shadow(color: Color(nsColor: Design.Shadow.cardColor), radius: Design.Shadow.cardRadius, y: Design.Shadow.cardOffset)
                 .contentShape(Circle())
                 .onHover { hovered = $0 }
                 .onTapGesture {
@@ -509,11 +522,11 @@ private struct GmailPreviewView: View {
     private var empty: some View {
         CardStyle.card(
             VStack(spacing: -2) {
-                Text(GmailPreview.emptyText).font(.system(size: 13)).multilineTextAlignment(.center)
-                Text("🍃").font(.system(size: 14))
+                Text(GmailPreview.emptyText).font(Design.Font.body).multilineTextAlignment(.center)
+                Text("🍃").font(Design.Font.body)
             }
-            .foregroundStyle(.white.opacity(0.78))
-            .padding(.vertical, 15.5).padding(.horizontal, 16)
+            .foregroundStyle(CardStyle.secondary)
+            .padding(.vertical, 15.5).padding(.horizontal, Design.Space.xl)
             .frame(width: 240))
     }
 
@@ -546,14 +559,14 @@ private struct MailRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(mail.from).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: Design.Space.s) {
+                Text(mail.from).font(Design.Font.ui(.body, .semibold)).lineLimit(1)
                 Spacer(minLength: 0)
-                if let r = mail.received { Text(GmailPreview.age(of: r, now: now)).font(.system(size: 13)) }
+                if let r = mail.received { Text(GmailPreview.age(of: r, now: now)).font(Design.Font.body) }
             }
             .foregroundStyle(CardStyle.text)
-            Text(mail.subject).font(.system(size: 13)).foregroundStyle(CardStyle.text).lineLimit(1)
-            Text(mail.snippet).font(.system(size: 12)).foregroundStyle(CardStyle.secondary).lineLimit(2)
+            Text(mail.subject).font(Design.Font.body).foregroundStyle(CardStyle.text).lineLimit(1)
+            Text(mail.snippet).font(Design.Font.detail).foregroundStyle(CardStyle.secondary).lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, FavoritePreviewMetrics.inset)
@@ -561,7 +574,7 @@ private struct MailRow: View {
         .frame(maxWidth: .infinity, minHeight: FavoritePreviewMetrics.mailRowHeight, maxHeight: FavoritePreviewMetrics.mailRowHeight, alignment: .topLeading)
         .background {
             if hovered {
-                RoundedRectangle(cornerRadius: 7, style: .continuous).fill(CardStyle.hover).padding(FavoritePreviewMetrics.hoverInset)
+                RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(CardStyle.hover).padding(FavoritePreviewMetrics.hoverInset)
             }
         }
         .contentShape(Rectangle())
@@ -597,12 +610,12 @@ struct CalendarPreviewView: View {
     /// Arc's CalendarPreviewLoginView: a sign-in, in the card's style.
     private var signIn: some View {
         CardStyle.card(
-            VStack(spacing: 8) {
+            VStack(spacing: Design.Space.m) {
                 Text("Sign in to Google Calendar to see today's meetings here.")
-                    .font(.system(size: 13)).multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.78))
+                    .font(Design.Font.body).multilineTextAlignment(.center).foregroundStyle(CardStyle.secondary)
                 Button("Sign In", action: actions.signIn).buttonStyle(.borderedProminent).controlSize(.small)
             }
-            .padding(.vertical, 14).padding(.horizontal, 16)
+            .padding(.vertical, 14).padding(.horizontal, Design.Space.xl)
             .frame(width: FavoritePreviewMetrics.width))
     }
 
@@ -618,7 +631,7 @@ struct CalendarPreviewView: View {
                                 ForEach(0..<24, id: \.self) { h in
                                     VStack(alignment: .leading, spacing: 0) {
                                         Rectangle().fill(CardStyle.line).frame(height: 1)
-                                        Text(CalendarPreview.hourLabel(h)).font(.system(size: 11)).foregroundStyle(CardStyle.secondary)
+                                        Text(CalendarPreview.hourLabel(h)).font(Design.Font.caption).foregroundStyle(CardStyle.secondary)
                                             .padding(.leading, 5).padding(.top, 3)
                                         Spacer(minLength: 0)
                                     }
@@ -686,23 +699,23 @@ private struct EventBlock: View {
 
     var body: some View {
         let past = event.end <= now
-        HStack(alignment: compact ? .center : .top, spacing: 4) {
+        HStack(alignment: compact ? .center : .top, spacing: Design.Space.xs) {
             if compact {
-                (Text(event.title).font(.system(size: 11, weight: .semibold))
-                    + Text("  " + CalendarPreview.timeRange(event)).font(.system(size: 10)).foregroundColor(.white.opacity(0.6)))
+                (Text(event.title).font(Design.Font.ui(.caption, .semibold))
+                    + Text("  " + CalendarPreview.timeRange(event)).font(Design.Font.ui(.micro)).foregroundColor(CardStyle.secondary))
                     .lineLimit(1)
             } else {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(event.title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                    Text(CalendarPreview.timeRange(event)).font(.system(size: 10)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                VStack(alignment: .leading, spacing: Design.Space.hair) {
+                    Text(event.title).font(Design.Font.ui(.caption, .semibold)).lineLimit(1)
+                    Text(CalendarPreview.timeRange(event)).font(Design.Font.ui(.micro)).foregroundStyle(CardStyle.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
             if let url = event.meetingURL, !past {
-                Text("Join").font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 6).padding(.vertical, compact ? 0 : 2)
+                Text("Join").font(Design.Font.ui(.micro, .semibold))
+                    .padding(.horizontal, Design.Space.s).padding(.vertical, compact ? 0 : Design.Space.xxs)
                     .background(Capsule().fill(CalendarPreviewView.nowColor))
-                    .foregroundStyle(.black.opacity(0.85))
+                    .foregroundStyle(CardStyle.onNow)
                     .contentShape(Capsule())
                     .onTapGesture { join(url) }
                     .accessibilityAddTraits(.isButton)
@@ -712,8 +725,8 @@ private struct EventBlock: View {
         .padding(.horizontal, 5).padding(.vertical, compact ? 0 : 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: compact ? .leading : .topLeading)
         // Opaque, over the hour lines and the now line.
-        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color(white: hovered ? 0.27 : 0.22)))
-        .opacity(past ? 0.55 : 1)
+        .background(RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(hovered ? CardStyle.eventHover : CardStyle.event))
+        .opacity(past ? Design.Opacity.dimmed : 1)
         .clipped()
         .contentShape(Rectangle())
         .onHover { hovered = $0 }

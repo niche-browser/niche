@@ -7,6 +7,24 @@ import UniformTypeIdentifiers
 // result, Safari's exported-file drop, pinned tabs, personalization and the
 // outro. See docs/arc-reverse-engineering.md, "Dia onboarding steps".
 
+private enum Metrics {
+    /// The cover's glyph, the passwords result's glyph, the outro's mark and its button.
+    static let coverGlyph: CGFloat = 44
+    static let resultGlyph: CGFloat = 44
+    static let outroMark: CGFloat = 76
+    static let outroButton: CGFloat = 260
+    /// A site's card on the pinned tabs step, the icon on it and the room the icon gets.
+    static let pinCard: CGFloat = 76
+    static let pinIcon: CGFloat = 26
+    static let pinIconRow: CGFloat = 28
+    /// A theme swatch on the personalization step.
+    static let swatch: CGFloat = 34
+    /// Dia's layout illustration at its artwork size, and the ring around the picked one: the
+    /// window's corners plus its 5 pt inset.
+    static let layoutArt = CGSize(width: 230, height: 180)
+    static let layoutRing: CGFloat = 15
+}
+
 /// A two-line step title; the import steps use StepHeader (one line).
 struct TwoLineHeader: View {
     let title: String
@@ -14,7 +32,7 @@ struct TwoLineHeader: View {
     let c: ImportColors
     var body: some View {
         Text(title)
-            .font(.system(size: 28, weight: .semibold))
+            .font(Design.Font.ui(.large, .semibold))
             .tracking(-0.6)
             .foregroundStyle(c.title)
             .lineLimit(2)
@@ -23,7 +41,7 @@ struct TwoLineHeader: View {
             .frame(width: ImportMetrics.columnWidth, alignment: .topLeading)
             .offset(y: ImportMetrics.titleTop - 14)
         Text(subtitle)
-            .font(.system(size: 15))
+            .font(Design.Font.ui(.title))
             .lineSpacing(2.5)
             .foregroundStyle(c.body)
             .fixedSize(horizontal: false, vertical: true)
@@ -41,23 +59,23 @@ struct CoverStep: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             VStack(alignment: .leading, spacing: 0) {
-                BrandGlyph(size: 44, ink: c.title)
+                BrandGlyph(size: Metrics.coverGlyph, ink: c.title)
                 Text("Welcome to Niche")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Design.Font.section)
                     .foregroundStyle(Design.accent)
-                    .padding(.top, 28)
+                    .padding(.top, Design.Space.pane)
                 Text("Your corner\nof the web.")
-                    .font(.system(size: 42, weight: .semibold))
+                    .font(Design.Font.ui(.display, .semibold))
                     .tracking(-1.4)
                     .lineSpacing(-2)
                     .foregroundStyle(c.title)
-                    .padding(.top, 10)
+                    .padding(.top, Design.Space.m)
                 Text("A native Mac browser built around a sidebar. Spaces for every part of your life, and a command bar that finds anything in a keystroke.")
-                    .font(.system(size: 15))
+                    .font(Design.Font.ui(.title))
                     .lineSpacing(3)
                     .foregroundStyle(c.body)
                     .frame(width: 380, alignment: .leading)
-                    .padding(.top, 16)
+                    .padding(.top, Design.Space.xl)
             }
             .offset(y: 128)
             PrimaryButton(title: "Get Started", c: c, enabled: true) { model.continueFromCover() }
@@ -104,7 +122,7 @@ struct UnlockStep: View {
                                   : "Some data is encrypted, so macOS will ask for your computer password to bring it securely into Niche.", c: c)
             if many {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: Design.Space.m) {
                         ForEach(model.credentialProfiles) { p in
                             SelectableRow(c: c, checked: model.selectedProfiles.contains(p.id), toggle: { model.toggleProfile(p.id) }) {
                                 RowSymbol(name: "person.crop.circle", c: c)
@@ -112,33 +130,33 @@ struct UnlockStep: View {
                             }
                         }
                     }
-                    .padding(.bottom, 12)
+                    .padding(.bottom, Design.Space.l)
                 }
                 .scrollIndicators(.never)
                 .frame(width: ImportMetrics.columnWidth, height: ImportMetrics.listHeight + 12)
                 .mask(ScrollFade())
                 .offset(y: ImportMetrics.listTop - 8)
             } else {
-                HStack(spacing: 12) {
+                HStack(spacing: Design.Space.l) {
                     RowSymbol(name: "key.fill", c: c)
                     RowTitle(title: "Passwords and sign-ins",
                              caption: "So you don't have to enter all your passwords again", c: c)
                     Spacer()
                 }
-                .padding(.horizontal, 16).frame(width: ImportMetrics.columnWidth, height: 52)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(c.rowFill))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(c.rowBorder, lineWidth: 0.5))
+                .padding(.horizontal, Design.Space.rowInset).frame(width: ImportMetrics.columnWidth, height: ImportMetrics.rowHeight)
+                .background(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).fill(c.rowFill))
+                .overlay(RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous).strokeBorder(c.rowBorder, lineWidth: 0.5))
                 .offset(y: ImportMetrics.listTop)
             }
             if let err = model.unlockError {
-                Text(err).font(.system(size: 12)).foregroundStyle(.red.opacity(0.85))
+                Text(err).font(Design.Font.detail).foregroundStyle(Design.danger)
                     .frame(width: ImportMetrics.columnWidth, alignment: .leading)
                     .offset(y: ImportMetrics.buttonTop - 44)
             }
-            HStack(spacing: 6) {
-                SecondaryButton(title: "Skip", c: c) { model.skipCredentials() }.frame(width: 146)
+            HStack(spacing: Design.Space.s) {
+                SecondaryButton(title: "Skip", c: c) { model.skipCredentials() }.frame(width: ImportMetrics.skipWidth)
                 PrimaryButton(title: model.unlocking ? "Waiting for password" : model.unlockError == nil ? "Continue" : "Try Again",
-                              c: c, enabled: !model.unlocking, width: 290) { model.unlock() }
+                              c: c, enabled: !model.unlocking, width: ImportMetrics.pairedPrimaryWidth) { model.unlock() }
             }
             .frame(width: ImportMetrics.columnWidth + 2)
             .offset(x: -1, y: ImportMetrics.buttonTop)
@@ -162,7 +180,7 @@ struct ExportedFileStep: View {
             StepHeader(title: isSafari ? "Import from Safari" : "Import \(browser) passwords",
                        subtitle: isSafari ? "Open Safari and follow these steps to import your passwords, history, and bookmarks."
                                           : "In \(browser), open Settings ▸ Passwords ▸ ⋯ ▸ Export Passwords, then drop the file here.", c: c)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: Design.Space.m) {
                 if isSafari {
                     InstructionRow(n: 1, text: "Open the Safari app.", c: c)
                     InstructionRow(n: 2, text: "Open File ▸ Export Browsing Data to File.", c: c)
@@ -180,14 +198,14 @@ struct ExportedFileStep: View {
                     return true
                 }
                 if let err = model.exportError {
-                    Text(err).font(.system(size: 12)).foregroundStyle(.red.opacity(0.85))
+                    Text(err).font(Design.Font.detail).foregroundStyle(Design.danger)
                 }
             }
             .frame(width: ImportMetrics.columnWidth, alignment: .topLeading)
             .offset(y: ImportMetrics.listTop - (isSafari ? 24 : 0))
-            HStack(spacing: 6) {
-                SecondaryButton(title: "Skip", c: c) { model.skipExport() }.frame(width: 146)
-                PrimaryButton(title: "Continue", c: c, enabled: model.exportFileName != nil, width: 290) { model.continueFromExport() }
+            HStack(spacing: Design.Space.s) {
+                SecondaryButton(title: "Skip", c: c) { model.skipExport() }.frame(width: ImportMetrics.skipWidth)
+                PrimaryButton(title: "Continue", c: c, enabled: model.exportFileName != nil, width: ImportMetrics.pairedPrimaryWidth) { model.continueFromExport() }
             }
             .frame(width: ImportMetrics.columnWidth + 2)
             .offset(x: -1, y: ImportMetrics.buttonTop)
@@ -210,11 +228,11 @@ private struct InstructionRow: View {
     let text: String
     let c: ImportColors
     var body: some View {
-        HStack(spacing: 12) {
-            Text("\(n)").font(.system(size: 12, weight: .semibold)).foregroundStyle(c.title)
-                .frame(width: 24, height: 24)
+        HStack(spacing: Design.Space.l) {
+            Text("\(n)").font(Design.Font.ui(.detail, .semibold)).foregroundStyle(c.title)
+                .frame(width: ImportMetrics.rowGlyph, height: ImportMetrics.rowGlyph)
                 .background(Circle().fill(c.secondaryFill))
-            Text(text).font(.system(size: 14)).foregroundStyle(c.body)
+            Text(text).font(Design.Font.body).foregroundStyle(c.body)
             Spacer()
         }
     }
@@ -229,31 +247,31 @@ private struct DropWell: View {
     let choose: () -> Void
     let clear: () -> Void
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous)
         Button(action: { if fileName == nil { choose() } }) {
-            HStack(spacing: 12) {
+            HStack(spacing: Design.Space.l) {
                 if reading {
                     ProgressView().controlSize(.small)
-                    Text("Reading…").font(.system(size: 14)).foregroundStyle(c.body)
+                    Text("Reading…").font(Design.Font.body).foregroundStyle(c.body)
                 } else if let fileName {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 18)).foregroundStyle(c.ink.opacity(0.9))
-                    Text(fileName).font(.system(size: 14, weight: .medium)).foregroundStyle(c.title).lineLimit(1)
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: Design.Icon.large)).foregroundStyle(c.title)
+                    Text(fileName).font(Design.Font.control).foregroundStyle(c.title).lineLimit(1)
                     Spacer()
-                    Button(action: clear) { Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(c.caption) }
+                    Button(action: clear) { Image(systemName: "xmark.circle.fill").font(.system(size: Design.Icon.image)).foregroundStyle(c.caption) }
                         .buttonStyle(.plain)
                 } else {
-                    Image(systemName: "arrow.down.doc").font(.system(size: 16)).foregroundStyle(c.body)
+                    Image(systemName: "arrow.down.doc").font(.system(size: Design.Icon.image)).foregroundStyle(c.body)
                     Text(isSafari ? "Choose .zip file or drag it here" : "Choose .csv file or drag it here")
-                        .font(.system(size: 14)).foregroundStyle(c.body)
+                        .font(Design.Font.body).foregroundStyle(c.body)
                     Spacer()
                 }
             }
-            .padding(.horizontal, 16)
-            .frame(height: 64)
+            .padding(.horizontal, Design.Space.rowInset)
+            .frame(height: ImportMetrics.tileHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(shape.fill(targeted ? c.rowFillHover : c.rowFill))
             .overlay(shape.strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: fileName == nil ? [5, 4] : []))
-                .foregroundStyle(targeted ? c.ink.opacity(0.5) : c.rowBorder))
+                .foregroundStyle(targeted ? c.body : c.rowBorder))
             .contentShape(shape)
         }
         .buttonStyle(.plain)
@@ -268,14 +286,14 @@ struct CredentialsResultStep: View {
     var body: some View {
         let ok = model.credentialsSucceeded
         ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Design.Space.xl) {
                 Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 44)).foregroundStyle(ok ? c.ink.opacity(0.9) : .orange)
+                    .font(.system(size: Metrics.resultGlyph)).foregroundStyle(ok ? c.title : Design.warning)
                 Text(ok ? "You're all set" : "Something went wrong")
-                    .font(.system(size: 28, weight: .semibold)).tracking(-0.6).foregroundStyle(c.title)
+                    .font(Design.Font.ui(.large, .semibold)).tracking(-0.6).foregroundStyle(c.title)
                 Text(ok ? "Your passwords and cookies are now available in Niche. Start browsing and you'll be signed in to your sites."
                         : "Niche was unable to import your passwords and cookies. You can try again now or skip this step.")
-                    .font(.system(size: 15)).lineSpacing(2.5).foregroundStyle(c.body)
+                    .font(Design.Font.ui(.title)).lineSpacing(2.5).foregroundStyle(c.body)
                     .frame(width: 420, alignment: .leading)
             }
             .offset(y: 150)
@@ -283,9 +301,9 @@ struct CredentialsResultStep: View {
                 PrimaryButton(title: "Continue", c: c, enabled: true) { model.afterImport() }
                     .offset(x: -1, y: ImportMetrics.buttonTop)
             } else {
-                HStack(spacing: 6) {
-                    SecondaryButton(title: "Skip", c: c) { model.afterImport() }.frame(width: 146)
-                    PrimaryButton(title: "Try Again", c: c, enabled: true, width: 290) { model.retryCredentials() }
+                HStack(spacing: Design.Space.s) {
+                    SecondaryButton(title: "Skip", c: c) { model.afterImport() }.frame(width: ImportMetrics.skipWidth)
+                    PrimaryButton(title: "Try Again", c: c, enabled: true, width: ImportMetrics.pairedPrimaryWidth) { model.retryCredentials() }
                 }
                 .frame(width: ImportMetrics.columnWidth + 2)
                 .offset(x: -1, y: ImportMetrics.buttonTop)
@@ -299,20 +317,20 @@ struct CredentialsResultStep: View {
 struct PinnedTabsStep: View {
     @Bindable var model: ImportFlowModel
     let c: ImportColors
-    private let cols = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
+    private let cols = Array(repeating: GridItem(.flexible(), spacing: ImportMetrics.gap), count: 4)
     var body: some View {
         ZStack(alignment: .topLeading) {
             StepHeader(title: "Keep your favorites handy",
                        subtitle: "Pin the apps you use most so they're always a click away in Niche.", c: c)
             ScrollView {
-                LazyVGrid(columns: cols, spacing: 10) {
+                LazyVGrid(columns: cols, spacing: ImportMetrics.gap) {
                     ForEach(model.pinCandidates) { p in
                         PinCard(candidate: p, icon: model.pinIcons[p.host], on: model.selectedPins.contains(p.host), c: c) {
                             model.togglePin(p.host)
                         }
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, Design.Space.m)
             }
             .scrollIndicators(.never)
             .frame(width: ImportMetrics.columnWidth, height: ImportMetrics.listHeight + 8)
@@ -335,27 +353,27 @@ private struct PinCard: View {
     let toggle: () -> Void
     @State private var hover = false
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        VStack(spacing: 7) {
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous)
+        VStack(spacing: Design.Space.s) {
             ZStack {
                 if let icon {
-                    Image(nsImage: icon).resizable().interpolation(.high).aspectRatio(contentMode: .fit).frame(width: 26, height: 26)
+                    Image(nsImage: icon).resizable().interpolation(.high).aspectRatio(contentMode: .fit).frame(width: Metrics.pinIcon, height: Metrics.pinIcon)
                 } else {
-                    Image(systemName: "globe").font(.system(size: 20)).foregroundStyle(c.body)
+                    Image(systemName: "globe").font(.system(size: Design.Icon.large)).foregroundStyle(c.body)
                 }
             }
-            .frame(height: 28)
-            Text(candidate.name).font(.system(size: 11, weight: .medium)).foregroundStyle(c.title).lineLimit(1)
+            .frame(height: Metrics.pinIconRow)
+            Text(candidate.name).font(Design.Font.ui(.caption, .medium)).foregroundStyle(c.title).lineLimit(1)
         }
-        .frame(maxWidth: .infinity).frame(height: 76)
-        .background(shape.fill(on ? c.rowFillHover : (hover ? c.rowFillHover.opacity(0.6) : c.rowFill)))
+        .frame(maxWidth: .infinity).frame(height: Metrics.pinCard)
+        .background(shape.fill(on ? c.rowFillHover : (hover ? c.rowFillHover.opacity(Design.Opacity.dimmed) : c.rowFill)))
         .overlay(shape.strokeBorder(on ? c.cardBorderSelected : c.rowBorder, lineWidth: on ? 1.5 : 0.5))
         .overlay(alignment: .topTrailing) {
-            if on { Image(systemName: "checkmark.circle.fill").font(.system(size: 14)).foregroundStyle(c.ink.opacity(0.9)).padding(5) }
+            if on { Image(systemName: "checkmark.circle.fill").font(.system(size: Design.Icon.bar)).foregroundStyle(c.title).padding(Design.Space.xs) }
         }
         .contentShape(shape)
         .onHover { hover = $0 }
-        .onTapGesture { withAnimation(.easeOut(duration: 0.12)) { toggle() } }
+        .onTapGesture { withAnimation(.easeOut(duration: Design.Motion.fast)) { toggle() } }
     }
 }
 
@@ -372,7 +390,7 @@ struct PersonalizationStep: View {
         ZStack(alignment: .topLeading) {
             StepHeader(title: "Make it yours",
                        subtitle: "Pick the theme color and layout that feel right for you.", c: c)
-            HStack(spacing: (ImportMetrics.columnWidth - 34 * CGFloat(SpaceTheme.presets.count)) / CGFloat(SpaceTheme.presets.count - 1)) {
+            HStack(spacing: (ImportMetrics.columnWidth - Metrics.swatch * CGFloat(SpaceTheme.presets.count)) / CGFloat(SpaceTheme.presets.count - 1)) {
                 ForEach(SpaceTheme.presets.indices, id: \.self) { i in
                     ThemeSwatch(theme: SpaceTheme.presets[i], on: model.chosenTheme == i, c: c) { model.chooseTheme(i) }
                 }
@@ -380,10 +398,10 @@ struct PersonalizationStep: View {
             .frame(width: ImportMetrics.columnWidth, alignment: .leading)
             .offset(y: ImportMetrics.listTop)
             Text("Choose where the address bar goes:")
-                .font(.system(size: 13))
+                .font(Design.Font.body)
                 .foregroundStyle(c.body)
                 .offset(y: 228)
-            HStack(spacing: 12) {
+            HStack(spacing: Design.Space.l) {
                 LayoutTile(toolbar: false, title: "Sidebar", model: model, c: c)
                 LayoutTile(toolbar: true, title: "Toolbar", model: model, c: c)
             }
@@ -402,23 +420,23 @@ private struct LayoutTile: View {
     @Bindable var model: ImportFlowModel
     let c: ImportColors
 
-    private static let width: CGFloat = (ImportMetrics.columnWidth - 12) / 2
+    private static let width: CGFloat = (ImportMetrics.columnWidth - Design.Space.l) / 2
 
     var body: some View {
         let selected = model.classicLayout == toolbar
-        let k = Self.width / 230
-        VStack(spacing: 7) {
+        let k = Self.width / Metrics.layoutArt.width
+        VStack(spacing: Design.Space.s) {
             LayoutArt(toolbar: toolbar, selected: selected, dark: c.dark)
-                .frame(width: 230, height: 180)
+                .frame(width: Metrics.layoutArt.width, height: Metrics.layoutArt.height)
                 .scaleEffect(k, anchor: .topLeading)
-                .frame(width: 230 * k, height: 180 * k, alignment: .topLeading)
-            // TabLayoutLabelText: black 53% / white 60%.
+                .frame(width: Metrics.layoutArt.width * k, height: Metrics.layoutArt.height * k, alignment: .topLeading)
+            // TabLayoutLabelText
             Text(title)
-                .font(.system(size: 13))
-                .foregroundStyle(c.dark ? Color.white.opacity(0.6) : Color.black.opacity(0.53))
+                .font(Design.Font.body)
+                .foregroundStyle(c.body)
         }
         .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { model.classicLayout = toolbar } }
+        .onTapGesture { withAnimation(.easeOut(duration: Design.Motion.duration(Design.Motion.fast))) { model.classicLayout = toolbar } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(toolbar ? "Toolbar: the address bar above the page" : "Sidebar: the address bar at the top of the sidebar")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
@@ -435,44 +453,45 @@ private struct LayoutArt: View {
     let selected: Bool
     let dark: Bool
     var body: some View {
-        let window: Color = dark ? Color(white: 0.2) : Color.black.opacity(0.05)
-        let row: Color = dark ? Color(white: 0.36) : Color.black.opacity(0.19)
-        let pane: Color = dark ? Color(white: 0.12) : .white
-        let accent: Color = dark ? Color(white: 0.62) : Color.black.opacity(0.42)
+        let c = ImportColors(dark: dark)
+        let window = c.plate(dark ? .strong : .hover)
+        let row: Color = dark ? Design.onDarkColor(.tertiary) : Design.onLightColor(.quaternary)
+        let pane: Color = dark ? Design.panelDarkColor : .white
+        let accent: Color = dark ? Design.onDarkColor(.secondary) : Design.onLightColor(.tertiary)
         ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .strokeBorder(dark ? Color(white: 0.8) : Color.black.opacity(0.8), lineWidth: 3)
+            RoundedRectangle(cornerRadius: Metrics.layoutRing, style: .continuous)
+                .strokeBorder(c.title, lineWidth: 3)
                 .opacity(selected ? 1 : 0)
-            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(window)
+            RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous).fill(window)
                 .frame(width: 220, height: 170)
                 .offset(x: 5, y: 5)
-            ForEach(Array(["#FF5F57", "#FEBC2E", "#28C840"].enumerated()), id: \.offset) { i, hex in
+            ForEach(Array(ImportColors.trafficLights.enumerated()), id: \.offset) { i, hex in
                 Circle().fill(Color(hex: hex)).frame(width: 5, height: 5)
                     .offset(x: 13 + CGFloat(i) * 8.5, y: 14)
             }
             ForEach(0..<3) { i in
-                RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
                     .fill(i == 0 && !toolbar ? accent : row)
                     .frame(width: 54, height: 14)
                     .offset(x: 10, y: 27 + CGFloat(i) * 19)
             }
-            RoundedRectangle(cornerRadius: 6, style: .continuous).fill(pane)
+            RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(pane)
                 .frame(width: 150, height: 160)
                 .overlay(alignment: .top) {
                     if toolbar {
                         VStack(spacing: 0) {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous).fill(accent)
+                            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous).fill(accent)
                                 .frame(width: 70, height: 7)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 8)
+                                .padding(.horizontal, Design.Space.m)
                                 .frame(height: 18)
-                            Rectangle().fill(dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)).frame(height: 1)
+                            Rectangle().fill(c.hairline).frame(height: Design.Space.hair)
                         }
                     }
                 }
                 .offset(x: 70, y: 10)
         }
-        .frame(width: 230, height: 180, alignment: .topLeading)
+        .frame(width: Metrics.layoutArt.width, height: Metrics.layoutArt.height, alignment: .topLeading)
     }
 }
 
@@ -486,11 +505,11 @@ private struct ThemeSwatch: View {
         Circle()
             .fill(LinearGradient(colors: colors.count > 1 ? colors : [colors.first ?? .gray, colors.first ?? .gray],
                                  startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(width: 34, height: 34)
-            .overlay(Circle().strokeBorder(c.ink.opacity(on ? 0.95 : 0), lineWidth: 2).padding(-3))
-            .overlay(on ? Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white).shadow(radius: 1) : nil)
+            .frame(width: Metrics.swatch, height: Metrics.swatch)
+            .overlay(Circle().strokeBorder(on ? c.title : .clear, lineWidth: 2).padding(-3))
+            .overlay(on ? Image(systemName: "checkmark").font(.system(size: Design.Icon.small, weight: .bold)).foregroundStyle(.white).shadow(radius: 1) : nil)
             .contentShape(Circle())
-            .onTapGesture { withAnimation(.easeOut(duration: 0.12)) { tap() } }
+            .onTapGesture { withAnimation(.easeOut(duration: Design.Motion.fast)) { tap() } }
     }
 }
 
@@ -502,21 +521,21 @@ struct OutroStep: View {
     let c: ImportColors
     @State private var shown = false
     var body: some View {
-        VStack(spacing: 22) {
-            BrandMark(size: 76)
+        VStack(spacing: Design.Space.xxl) {
+            BrandMark(size: Metrics.outroMark)
                 .scaleEffect(shown ? 1 : 0.8)
                 .opacity(shown ? 1 : 0)
             Text("Welcome to your new\nhome on the internet")
-                .font(.system(size: 32, weight: .semibold))
+                .font(Design.Font.ui(.large, .semibold))
                 .tracking(-0.6)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
                 .foregroundStyle(c.title)
                 .opacity(shown ? 1 : 0)
-                .offset(y: shown ? 0 : 12)
-            PrimaryButton(title: "Start browsing", c: c, enabled: true, width: 260) { model.finish() }
+                .offset(y: shown ? 0 : Design.Space.l)
+            PrimaryButton(title: "Start browsing", c: c, enabled: true, width: Metrics.outroButton) { model.finish() }
                 .opacity(shown ? 1 : 0)
-                .padding(.top, 8)
+                .padding(.top, Design.Space.m)
         }
         .frame(width: ImportWindowController.size.width, height: ImportWindowController.size.height)
         .onAppear { withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.15)) { shown = true } }

@@ -4,6 +4,12 @@ import AppKit
 /// grid's tiles, two to a row, each holding a light card (white 3 pt rim, 8 pt corners) with the
 /// easel drawn small on it and, at its bottom left, Arc's pink squiggle over the title in bold.
 /// No day headers. Click opens the easel; right-click: Delete.
+/// The easel card's own colours, the same on a light or a dark sidebar: paper, and Arc's pink squiggle.
+private enum Palette {
+    static let card = NSColor(white: 0.957, alpha: 1)
+    static let squiggle = NSColor(srgbRed: 0.88, green: 0.40, blue: 0.45, alpha: 1)
+}
+
 struct EaselEntry: Equatable {
     var id: UUID
     var title: String
@@ -55,12 +61,12 @@ private final class EaselTile: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = Design.Radius.control
         layer?.cornerCurve = .continuous
-        card.backgroundColor = NSColor(white: 0.957, alpha: 1).cgColor
+        card.backgroundColor = Palette.card.cgColor
         card.borderColor = NSColor.white.cgColor
         card.borderWidth = 3
-        card.cornerRadius = 8
+        card.cornerRadius = Design.Radius.row
         card.cornerCurve = .continuous
         card.masksToBounds = true
         card.shadowColor = NSColor.black.cgColor
@@ -69,11 +75,11 @@ private final class EaselTile: NSView {
         card.addSublayer(picture)
         // Arc's squiggle (its Easel mark), pink.
         mark.image = NSImage(systemSymbolName: "scribble", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 14, weight: .bold))
-        mark.contentTintColor = NSColor(srgbRed: 0.88, green: 0.40, blue: 0.45, alpha: 1)
+            .withSymbolConfiguration(Design.Icon.configuration(Design.Icon.bar, weight: .bold))
+        mark.contentTintColor = Palette.squiggle
         addSubview(mark)
-        title.font = .systemFont(ofSize: 13, weight: .bold)
-        title.textColor = NSColor(white: 0.12, alpha: 1)
+        title.font = Design.Font.ns(.body, .bold)
+        title.textColor = Design.onLight(.primary)
         title.lineBreakMode = .byTruncatingTail
         addSubview(title)
         setAccessibilityElement(true)
@@ -97,7 +103,7 @@ private final class EaselTile: NSView {
     }
 
     private func refresh() {
-        layer?.backgroundColor = ink.withAlphaComponent(hovering ? 0.08 : 0.04).cgColor
+        layer?.backgroundColor = ink.withAlphaComponent((hovering ? Design.Fill.selected : .subtle).rawValue).cgColor
     }
 
     override func layout() {
@@ -155,7 +161,7 @@ enum EaselThumbnail {
         let side: CGFloat = 220
         let scale = min(side / box.width, side / box.height, 1)
         let size = NSSize(width: max(1, box.width * scale), height: max(1, box.height * scale))
-        let ink = NSColor(white: 0.2, alpha: 1)
+        let ink = Design.onLight(.primary)
         let image = NSImage(size: size, flipped: true) { _ in
             let t = NSAffineTransform()
             t.scale(by: scale)
@@ -166,7 +172,7 @@ enum EaselThumbnail {
                 (item.color.map { NSColor(hex: $0) } ?? ink).setStroke()
                 switch item.kind {
                 case .rectangle:
-                    let p = NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4); p.lineWidth = 3 / scale; p.stroke()
+                    let p = NSBezierPath(roundedRect: r, xRadius: Design.Radius.small, yRadius: Design.Radius.small); p.lineWidth = 3 / scale; p.stroke()
                 case .ellipse:
                     let p = NSBezierPath(ovalIn: r); p.lineWidth = 3 / scale; p.stroke()
                 case .arrow(let a, let b):

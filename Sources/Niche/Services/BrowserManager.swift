@@ -11,6 +11,9 @@ final class TabRuntime {
     var themeColor: String = ""
     /// What the page paints behind its content ("#RRGGBB", "" until reported).
     var backgroundColor: String = ""
+    /// What the page's own script said its top edge is ("#RRGGBB"): the bar's colour until the
+    /// page's pixels are read, and the exact value a read colour settles on (PageTopColor).
+    var namedTopColor: String = ""
     /// Niche popped this tab's video out because the user left the tab (Arc's
     /// auto Picture in Picture); coming back brings the video home.
     var autoPictureInPicture = false
@@ -360,14 +363,90 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     /// already on screen, and the crop and downscale happen here instead.
     func captureSnapshot(_ id: UUID, completion: (() -> Void)? = nil) {
         guard let rt = runtimes[id], visibleTabIDs.contains(id) else { completion?(); return }
+        let revision = rt.navigationRevision
         rt.browser.sendDevToolsMethod("Page.captureScreenshot", params: #"{"format":"jpeg","quality":80,"optimizeForSpeed":true}"#) { [weak self, weak rt] shot, _ in
             DispatchQueue.global(qos: .utility).async {
-                let image = shot.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
-                    .flatMap { $0["data"] as? String }.flatMap { Data(base64Encoded: $0) }.flatMap(Self.thumbnail(fromViewport:))
+                let viewport = shot.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+                    .flatMap { $0["data"] as? String }.flatMap { Data(base64Encoded: $0) }
+                let image = viewport.flatMap(Self.thumbnail(fromViewport:))
+                // The same picture says what the page drew along its top edge (PageTopColor).
+                let edge = viewport.map(Self.topEdge(ofViewport:)) ?? []
                 DispatchQueue.main.async {
-                    if let image, let rt, self?.runtimes[id] === rt { rt.snapshot = image }
+                    if let rt, let self, self.runtimes[id] === rt {
+                        if let image { rt.snapshot = image }
+                        if rt.navigationRevision == revision { self.takeTopColor(id, rt, edge: edge) }
+                    }
                     completion?()
                 }
+            }
+        }
+    }
+
+    // MARK: The bar's colour
+
+    /// How many points across the page's top edge are read.
+    nonisolated private static let edgeSamples = 64
+
+    /// The page's top edge from a picture of its viewport: `edgeSamples` pixels across, taken a
+    /// few rows down so a 1 px border or the window's own edge doesn't count. Nearest pixels, not
+    /// averages: a blend of a logo and its ground is a colour the page never drew.
+    nonisolated private static func topEdge(ofViewport data: Data) -> [PageTopColor.RGB] {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let full = CGImageSourceCreateImageAtIndex(source, 0, nil), full.width >= edgeSamples, full.height > 8,
+              let row = full.cropping(to: CGRect(x: 0, y: 4, width: full.width, height: 1)) else { return [] }
+        var bytes = [UInt8](repeating: 0, count: edgeSamples * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let ctx = CGContext(data: buffer.baseAddress, width: edgeSamples, height: 1, bitsPerComponent: 8, bytesPerRow: edgeSamples * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return false }
+            ctx.interpolationQuality = .none
+            ctx.draw(row, in: CGRect(x: 0, y: 0, width: edgeSamples, height: 1))
+            return true
+        }
+        guard drawn else { return [] }
+        return (0..<edgeSamples).map { PageTopColor.RGB(bytes[$0 * 4], bytes[$0 * 4 + 1], bytes[$0 * 4 + 2]) }
+    }
+
+    /// The bar takes the colour the page drew along its top edge; a page that can't be read
+    /// (hidden, no picture) keeps what its script named.
+    private func takeTopColor(_ id: UUID, _ rt: TabRuntime, edge: [PageTopColor.RGB]) {
+        // The ground under the page's top edge: what its script found there (the colour a glow
+        // or a picture sits on), else what the page paints behind everything.
+        let top = PageTopColor.RGB(hex: rt.namedTopColor), body = PageTopColor.RGB(hex: rt.backgroundColor)
+        guard !edge.isEmpty, let read = PageTopColor.color(pixels: edge, background: top ?? body) else {
+            if !rt.namedTopColor.isEmpty { setThemeColor(id, rt.namedTopColor) }
+            return
+        }
+        setThemeColor(id, PageTopColor.settled(read, named: [top, body].compactMap { $0 }).hex)
+    }
+
+    private func setThemeColor(_ id: UUID, _ hex: String) {
+        guard let rt = runtimes[id], rt.themeColor.caseInsensitiveCompare(hex) != .orderedSame else { return }
+        rt.themeColor = hex
+        store.setThemeColor(id, hex)
+        delegate?.browserManagerDidUpdate(id)
+    }
+
+    /// Reads the top edge of a page on screen now: once its load ends, and again when its script
+    /// reports after late styles. A picture without a clip, as for thumbnails (a clip makes
+    /// Chromium redraw the live page at the clip's size).
+    private func readTopColor(_ id: UUID) {
+        guard let rt = runtimes[id], visibleTabIDs.contains(id) else {
+            if let rt = runtimes[id], !rt.namedTopColor.isEmpty { setThemeColor(id, rt.namedTopColor) }
+            return
+        }
+        let revision = rt.navigationRevision
+        rt.browser.sendDevToolsMethod("Page.captureScreenshot", params: #"{"format":"jpeg","quality":90,"optimizeForSpeed":true}"#) { [weak self, weak rt] shot, _ in
+            let take = { (edge: [PageTopColor.RGB]) in
+                DispatchQueue.main.async {
+                    guard let self, let rt, self.runtimes[id] === rt, rt.navigationRevision == revision else { return }
+                    self.takeTopColor(id, rt, edge: edge)
+                }
+            }
+            // No picture (a page that can't be captured): what the script named, without the detour.
+            guard let shot else { return take([]) }
+            DispatchQueue.global(qos: .userInitiated).async {
+                take((try? JSONSerialization.jsonObject(with: Data(shot.utf8)) as? [String: Any])
+                    .flatMap { $0["data"] as? String }.flatMap { Data(base64Encoded: $0) }.map(Self.topEdge(ofViewport:)) ?? [])
             }
         }
     }
@@ -571,7 +650,7 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
                                                   count: min(protectedRecentTabs, TabSleepPolicy.freezeProtectedTabs))
         for (id, rt) in runtimes {
             let b = rt.browser
-            let vote = !recent.contains(id) && !rt.discarded && rt.hiddenAt.map { $0 < cutoff } == true && b.isCreated && !b.isClosed
+            let vote = TabSleepPolicy.freezes(sleepPage(rt), recent: recent, before: cutoff) && !rt.discarded && b.isCreated && !b.isClosed
                 && !(nowPlaying?.entries.contains { $0.id == id } ?? false)
             if vote != rt.freezeVoted { setFreezingVote(rt, vote) }
         }
@@ -595,7 +674,11 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
 
     private var sleepPages: [TabSleepPolicy.Page] {
         // A discarded page has given its memory back, like a closed one: it holds none of the 10 places.
-        runtimes.values.filter { !$0.discarded }.map { TabSleepPolicy.Page(id: $0.tabID, hiddenAt: $0.hiddenAt, audibleAt: $0.audibleAt) }
+        runtimes.values.filter { !$0.discarded }.map(sleepPage)
+    }
+
+    private func sleepPage(_ rt: TabRuntime) -> TabSleepPolicy.Page {
+        TabSleepPolicy.Page(id: rt.tabID, hiddenAt: rt.hiddenAt, audibleAt: rt.audibleAt, favorite: store.isFavorite(rt.tabID))
     }
 
     /// The tabs on screen now, then the ones hidden most recently, up to `protectedRecentTabs`.
@@ -1208,7 +1291,7 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
             watchClearBrowsingData(browser)
             hideChromiumAbout(browser)
         }
-        store.recordVisit(url: url, title: title.isEmpty ? (store.item(id)?.tab?.savedTitle ?? "") : title)
+        store.recordVisit(url: url, title: title.isEmpty ? (store.item(id)?.tab?.savedTitle ?? "") : title, profileID: store.profileID(item: id))
     }
 
     /// A restored tab's extension page, asked for before --load-extension loaded the extension,
@@ -1249,9 +1332,9 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
     func browser(_ browser: NicheBrowser, didReportThemeColor hex: String) {
         // The blank document a discard leaves answers the load end's probe with white (#237).
         guard let id = tabID(of: browser), runtimes[id]?.discarded != true else { return }
-        runtimes[id]?.themeColor = hex
-        store.setThemeColor(id, hex)
-        delegate?.browserManagerDidUpdate(id)
+        // What the script names is a guess from one point; the page's pixels decide (PageTopColor).
+        runtimes[id]?.namedTopColor = hex
+        readTopColor(id)
     }
 
     func browser(_ browser: NicheBrowser, didReportBackgroundColor hex: String) {

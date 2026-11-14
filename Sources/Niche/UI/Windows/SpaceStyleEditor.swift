@@ -1,6 +1,31 @@
 import AppKit
 import SwiftUI
 
+private enum Palette {
+    /// What darkens the space's own theme behind the editor, ~58% (Arc: #CDC2A5 behind → #554F37).
+    static let dim = Color.black.opacity(0.58)
+    /// The grain dial's face, under the texture.
+    static let dialFace = Color.black.opacity(0.12)
+    /// The hairline around the dial's face.
+    static let rim = Color(nsColor: Design.hairlineOnDark)
+    /// What lifts a knob off the pad.
+    static let knobShadow = Color(nsColor: Design.Shadow.cardColor)
+}
+
+private enum Metrics {
+    /// The dotted colour pad.
+    static let pad: CGFloat = 340
+    /// A preset swatch, and a paging arrow beside the row of them.
+    static let swatch: CGFloat = 24
+    static let arrow = CGSize(width: 36, height: 30)
+    /// The intensity slider, the grain dial, and the row that holds both.
+    static let slider = CGSize(width: 224, height: 50)
+    static let dial: CGFloat = 70
+    /// A knob on the pad: the main colour's, and a second or third colour's.
+    static let knob: CGFloat = 44
+    static let knobSmall: CGFloat = 27
+}
+
 /// Arc 1.171's theme editor (SpaceStyleEditor), which Edit Theme Color… opens beside the
 /// sidebar and the Edit Space sheet shows inline. Measured from 2x captures of an offline Arc
 /// (1 Nov): a 355 × 503 pt card, the window behind it darkened by ~58%; a 340 pt dotted colour pad
@@ -28,23 +53,25 @@ struct SpaceStyleEditor: View {
         self.onChange = onChange
     }
 
+    /// The card, Arc's.
+    static let size = CGSize(width: 355, height: 503)
     private static let pageKey = "themeEditorPresetPage"
     @State private var swatchPage: Int
 
     var body: some View {
         VStack(spacing: 0) {
             ColorPad(pad: $pad)
-                .frame(width: 340, height: 340)
-                .padding(.top, 9)
+                .frame(width: Metrics.pad, height: Metrics.pad)
+                .padding(.top, Design.Space.m)
             HStack(spacing: 0) {
                 pageArrow("chevron.left", to: swatchPage - 1, label: "Move to previous preset page.")
-                HStack(spacing: 5.5) {
+                HStack(spacing: Design.Space.s) {
                     let page = SpaceColorPresets.pages[swatchPage]
                     ForEach(Array(page.swatches.enumerated()), id: \.offset) { i, colors in
                         Button { pad.key = colors } label: {
                             Circle()
                                 .fill(LinearGradient(colors: colors.map { Color(hex: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing))
-                                .frame(width: 24, height: 24)
+                                .frame(width: Metrics.swatch, height: Metrics.swatch)
                                 .contentShape(Circle())
                         }
                         .buttonStyle(ColorPillButtonStyle())
@@ -54,26 +81,26 @@ struct SpaceStyleEditor: View {
                 }
                 pageArrow("chevron.right", to: swatchPage + 1, label: "Move to next preset page.")
             }
-            .padding(.top, 16.75)
+            .padding(.top, Design.Space.xl)
             HStack(spacing: 0) {
-                WaveSlider(value: $pad.intensity).frame(width: 224, height: 50)
+                WaveSlider(value: $pad.intensity).frame(width: Metrics.slider.width, height: Metrics.slider.height)
                 Spacer(minLength: 0)
-                GrainDial(value: $pad.noise).frame(width: 70, height: 70)
+                GrainDial(value: $pad.noise).frame(width: Metrics.dial, height: Metrics.dial)
             }
-            .frame(height: 70)
-            .padding(.leading, 17)
-            .padding(.trailing, 23)
-            .padding(.top, 22)
+            .frame(height: Metrics.dial)
+            .padding(.leading, Design.Space.xl)
+            .padding(.trailing, Design.Space.xxxl)
+            .padding(.top, Design.Space.xxl)
             Spacer(minLength: 0)
         }
-        .frame(width: 355, height: 503)
-        // The space's own theme, darkened ~58% (Arc: #CDC2A5 behind → #554F37).
+        .frame(width: Self.size.width, height: Self.size.height)
+        // The space's own theme, darkened.
         .background(
             ZStack {
                 SpaceBackground(palette: theme.palette)
-                Color.black.opacity(0.58)
+                Palette.dim
             }
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous))
         )
         .environment(\.colorScheme, .dark)
         // Opening the editor leaves the theme as it is; the first change rebuilds it from the pad.
@@ -92,8 +119,8 @@ struct SpaceStyleEditor: View {
     }
 }
 
-/// A paging arrow: white 0.55, brighter under the pointer with a pointing hand (Arc's
-/// SpaceStyleButtonStyle); the arrow past the last page is 0.2 and does neither. Not a SwiftUI
+/// A paging arrow: secondary white ink, primary under the pointer with a pointing hand (Arc's
+/// SpaceStyleButtonStyle); the arrow past the last page is quaternary and does neither. Not a SwiftUI
 /// Button: a Button keeps the plain arrow pointer whatever pointer style it's given.
 private struct PageArrow: View {
     let symbol: String
@@ -105,10 +132,10 @@ private struct PageArrow: View {
 
     var body: some View {
         let hot = enabled && isHovered
-        Image(systemName: symbol).font(.system(size: 15, weight: .medium)).frame(width: 36, height: 30)
+        Image(systemName: symbol).font(.system(size: Design.Icon.bar, weight: .medium)).frame(width: Metrics.arrow.width, height: Metrics.arrow.height)
             .contentShape(Rectangle())
-            .foregroundStyle(.white.opacity(enabled ? (hot ? 0.85 : 0.55) : 0.2))
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hot)
+            .foregroundStyle(Design.onDarkColor(enabled ? (hot ? .primary : .secondary) : .quaternary))
+            .animation(reduceMotion ? nil : .easeOut(duration: Design.Motion.fast), value: hot)
             .onHover { isHovered = $0 }
             .onTapGesture { if enabled { action() } }
             .editorPointer(enabled ? .link : nil)
@@ -145,32 +172,32 @@ private struct ColorPad: View {
             let size = geo.size
             let centre = CGPoint(x: size.width / 2, y: size.height / 2)
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(0.04))
+                RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(Design.fillOnDarkColor(.subtle))
                 Canvas { ctx, s in
                     var p = Path()
                     for x in stride(from: 4.0, to: s.width, by: 4) {
                         for y in stride(from: 4.0, to: s.height, by: 4) { p.addEllipse(in: CGRect(x: x - 0.5, y: y - 0.5, width: 1, height: 1)) }
                     }
-                    ctx.fill(p, with: .color(.white.opacity(0.12)))
+                    ctx.fill(p, with: .color(Design.fillOnDarkColor(.pressed)))
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous))
                 .contentShape(Rectangle())
                 // Arc: pressing anywhere on the pad brings the main colour there, and it follows the drag.
                 .gesture(DragGesture(minimumDistance: 0).onChanged { g in place(handle: 0, at: g.location, centre: centre) })
                 // Under the knobs: a knob resting over a button can still be grabbed and moved away.
                 VStack {
-                    AppearanceToggles(appearance: $pad.appearance).padding(.top, 24)
+                    AppearanceToggles(appearance: $pad.appearance).padding(.top, Design.Space.xxxl)
                     Spacer()
-                    HStack(spacing: 16) {
+                    HStack(spacing: Design.Space.xl) {
                         padButton("minus", enabled: pad.key.count > 1) { pad.key.removeLast() }
                         padButton("plus", enabled: !pad.key.isEmpty && pad.key.count < 3) { addColor() }
                     }
-                    .padding(.bottom, 20)
+                    .padding(.bottom, Design.Space.xxl)
                 }
                 if pad.key.isEmpty {
                     Text("Tap to pick a color for this space")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .font(Design.Font.section)
+                        .foregroundStyle(Design.onDarkColor(.primary))
                         .allowsHitTesting(false)
                 }
                 ForEach(Array(pad.key.prefix(3).enumerated()), id: \.offset) { i, hex in
@@ -178,13 +205,13 @@ private struct ColorPad: View {
                     Circle()
                         .fill(Color(hex: hex))
                         .overlay(Circle().strokeBorder(.white, lineWidth: main ? 4.5 : 2.5))
-                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-                        .frame(width: main ? 44 : 27, height: main ? 44 : 27)
+                        .shadow(color: Palette.knobShadow, radius: Design.Shadow.cardRadius, y: Design.Shadow.cardOffset)
+                        .frame(width: main ? Metrics.knob : Metrics.knobSmall, height: main ? Metrics.knob : Metrics.knobSmall)
                         // Arc's PadWheel knob: grows under the pointer, shrinks while held (the
                         // swatches' scales); an open hand over it, a closed one while dragging.
                         .scaleEffect(draggingKnob == i ? ColorPillButtonStyle.pressed : hoveredKnob == i ? ColorPillButtonStyle.hovered : 1)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hoveredKnob == i)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: draggingKnob == i)
+                        .animation(reduceMotion ? nil : .easeOut(duration: Design.Motion.fast), value: hoveredKnob == i)
+                        .animation(reduceMotion ? nil : .easeOut(duration: Design.Motion.fast), value: draggingKnob == i)
                         .onHover { inside in
                             if inside { hoveredKnob = i } else if hoveredKnob == i { hoveredKnob = nil }
                         }
@@ -205,10 +232,10 @@ private struct ColorPad: View {
 
     private func padButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).frame(width: 24, height: 24)
+            Image(systemName: symbol).font(.system(size: Design.Icon.bar, weight: .medium)).frame(width: Design.Space.controlCompact, height: Design.Space.controlCompact)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(SpaceStyleButtonStyle(opacity: enabled ? 0.55 : 0.18, enabled: enabled))
+        .buttonStyle(SpaceStyleButtonStyle(opacity: enabled ? Design.Emphasis.secondary.rawValue : Design.Emphasis.quaternary.rawValue, enabled: enabled))
         .disabled(!enabled)
     }
 
@@ -251,7 +278,7 @@ private struct AppearanceToggles: View {
     @Binding var appearance: String
 
     var body: some View {
-        HStack(spacing: 7.5) {
+        HStack(spacing: Design.Space.m) {
             toggle("auto", symbol: "sparkles")
             toggle("light", symbol: "sun.max.fill")
             toggle("dark", symbol: "moon.stars.fill")
@@ -261,12 +288,12 @@ private struct AppearanceToggles: View {
     private func toggle(_ value: String, symbol: String) -> some View {
         Button { appearance = value } label: {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
-                .frame(width: 32, height: 32)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(appearance == value ? 0.12 : 0)))
+                .font(.system(size: Design.Icon.bar, weight: .medium))
+                .frame(width: Design.Space.controlLarge, height: Design.Space.controlLarge)
+                .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(appearance == value ? Design.fillOnDarkColor(.pressed) : Color.clear))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(SpaceStyleButtonStyle(opacity: appearance == value ? 0.8 : 0.55, enabled: appearance != value))
+        .buttonStyle(SpaceStyleButtonStyle(opacity: appearance == value ? Design.Emphasis.primary.rawValue : Design.Emphasis.secondary.rawValue, enabled: appearance != value))
     }
 }
 
@@ -288,9 +315,9 @@ private struct WaveSlider: View {
             }
             let style = StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round)
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.1)).frame(height: 15)
-                wave.stroke(.white.opacity(0.25), style: style)
-                wave.stroke(.white.opacity(0.75), style: style).mask(Rectangle().frame(width: x).frame(maxWidth: .infinity, alignment: .leading))
+                Capsule().fill(Design.fillOnDarkColor(.selected)).frame(height: 15)
+                wave.stroke(Design.onDarkColor(.quaternary), style: style)
+                wave.stroke(Design.onDarkColor(.secondary), style: style).mask(Rectangle().frame(width: x).frame(maxWidth: .infinity, alignment: .leading))
                 Capsule().fill(.white).frame(width: 16, height: 46.5).position(x: x, y: h / 2)
             }
             .contentShape(Rectangle())
@@ -313,12 +340,12 @@ private struct GrainDial: View {
                 ForEach(0..<count, id: \.self) { i in
                     let a = Double(i) / Double(count) * 2 * .pi - .pi / 2
                     Circle()
-                        .fill(.white.opacity(Double(i) / Double(count) <= value ? 0.55 : 0.18))
+                        .fill(Design.onDarkColor(Double(i) / Double(count) <= value ? .secondary : .quaternary))
                         .frame(width: 3.5, height: 3.5)
                         .position(x: c.x + 34 * cos(a), y: c.y + 34 * sin(a))
                 }
-                Circle().fill(.black.opacity(0.12)).overlay(NoiseDisc(amount: value)).clipShape(Circle())
-                    .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 1))
+                Circle().fill(Palette.dialFace).overlay(NoiseDisc(amount: value)).clipShape(Circle())
+                    .overlay(Circle().strokeBorder(Palette.rim, lineWidth: 1))
                     .frame(width: 41, height: 41)
                 Capsule().fill(.white).frame(width: 4.5, height: 12)
                     .rotationEffect(.radians(knob + .pi / 2))
@@ -343,7 +370,7 @@ private struct NoiseDisc: View {
 }
 
 /// Arc's ColorPillButtonStyle for the preset swatches: a circle grows a little under the pointer and
-/// shrinks while pressed, both eased; scaled, never resized, so the row keeps its 29.5 pt pitch.
+/// shrinks while pressed, both eased; scaled, never resized, so the row keeps its 30 pt pitch.
 /// The pad's knobs use the same scales (GitHub #189).
 struct ColorPillButtonStyle: ButtonStyle {
     static let hovered: CGFloat = 1.08
@@ -354,8 +381,8 @@ struct ColorPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? Self.pressed : isHovered ? Self.hovered : 1)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovered)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : .easeOut(duration: Design.Motion.fast), value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: Design.Motion.fast), value: configuration.isPressed)
             .onHover { isHovered = $0 }
     }
 }
@@ -371,8 +398,8 @@ struct SpaceStyleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let hot = enabled && isHovered
         return configuration.label
-            .foregroundStyle(.white.opacity(hot ? min(1, opacity + 0.3) : opacity))
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hot)
+            .foregroundStyle(hot ? Design.onDarkColor(.primary) : Color.white.opacity(opacity))
+            .animation(reduceMotion ? nil : .easeOut(duration: Design.Motion.fast), value: hot)
             .onHover { isHovered = $0 }
     }
 }

@@ -48,6 +48,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     private var lastSidebarVisible = true
     /// The theme the background and placeholder root views were made with.
     private var shownTheme: SpaceTheme?
+    /// The empty window's home (HomeView), made when it first shows and kept in step from `refresh`.
+    private var homeHost: NSHostingView<HomeView>?
+    private var shownHome: HomeView.Model?
     private var lastSidebarWidth: CGFloat = 0
     private var commandBarOpenedAt = Date.distantPast
     private var commandBarClosingClick = DismissingClick()
@@ -171,6 +174,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
 
         commandPanel = CommandBarPanel()
         commandHost = CommandBarView(controller: commandBar, favicons: app.favicons)
+        shell.onHasTabChange = { [weak self] in
+            guard let self, !self.isTornDown else { return }
+            self.refreshHome(theme: self.focusedSpace.theme.shown)
+        }
         commandPanel.contentView = commandHost
         commandPanel.delegate = self
         tabSwitcherPanel.contentView = TabSwitcherView(switcher: tabSwitcher, favicons: app.favicons)
@@ -438,10 +445,36 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         }
     }
 
+    /// With no tab open the window shows its home: the mark, a way into the command bar and the
+    /// pages last closed here. Rebuilt only when what it shows changes.
+    private func refreshHome(theme: SpaceTheme) {
+        guard !shell.hasTab, !store.isIncognito(space: focusedSpaceID) else {
+            homeHost?.isHidden = true
+            return
+        }
+        let keys = app.bindings.action("newTab")?.primary.map { ArcTooltipLabel.split("New Tab (\($0.display))").1 } ?? []
+        let model = HomeView.Model(theme: theme, recents: HomeScreen.recents(store.commandBarArchive(window: windowID)), newTabKeys: keys)
+        let view = HomeView(model: model, favicon: { [weak self] in self?.app.favicons.image(for: $0) },
+                            openCommandBar: { [weak self] in self?.openCommandBar(.newTab) },
+                            restore: { [weak self] in _ = self?.store.restoreArchived($0) })
+        if let homeHost {
+            homeHost.isHidden = false
+            if shownHome != model { homeHost.rootView = view }
+        } else {
+            let host = NSHostingView(rootView: view)
+            host.frame = shell.placeholderHost.bounds
+            host.autoresizingMask = [.width, .height]
+            shell.placeholderHost.addSubview(host)
+            homeHost = host
+        }
+        shownHome = model
+    }
+
     func refresh() {
         guard !isTornDown, !isPutAway else { return }
         let space = focusedSpace
         let palette = space.theme.palette
+        refreshHome(theme: space.theme.shown)
         // Its extensions belong to the space's profile.
         if siteControlCenter.isShown, siteControlCenterSpaceID != space.id { siteControlCenter.close() }
         // refresh runs on every store change (each page title, each window move). A new root
@@ -453,7 +486,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
             // A swipe in the floating sidebar changes space under it (issue #12).
             floatingSidebar?.refreshBackdrop()
             shell.placeholderHost.wantsLayer = true
-            shell.placeholderHost.layer?.backgroundColor = (palette.isDark ? NSColor.white.withAlphaComponent(0.04) : NSColor.black.withAlphaComponent(0.03)).cgColor
+            shell.placeholderHost.layer?.backgroundColor = (palette.isDark ? NSColor.white : NSColor.black).withAlphaComponent(Design.Fill.subtle.rawValue).cgColor
             shell.isDarkTheme = palette.isDark
             // The space's light or dark goes to the window's content (sidebar, toolbar, pages'
             // frame), not to the window: AppKit hands a window's appearance to every menu, sheet,
@@ -640,7 +673,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         for id in ids {
             guard let rt = browsers.runtime(for: id) else { continue }
             nav[id] = TabNavState(canGoBack: rt.browser.canGoBack, canGoForward: rt.browser.canGoForward, isLoading: rt.browser.isLoading,
-                                  themeColor: rt.themeColor, protectedMedia: PageEngines.protectedMediaService(of: rt.browser))
+                                  themeColor: rt.themeColor, pageColor: rt.backgroundColor,
+                                  protectedMedia: PageEngines.protectedMediaService(of: rt.browser))
         }
         if nav != sidebarUI.navStates { sidebarUI.navStates = nav }
         if let id = browsers.visibleTabID, let service = nav[id]?.protectedMedia { tellAboutProtectedMedia(service) }
@@ -715,7 +749,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     private func toolbarColors(panes: [UUID]) -> [UUID: String] {
         var bars: [UUID: String] = [:]
         for id in Set(browsers.runtimes.keys).union(panes) {
-            bars[id] = ToolbarColor.hex(reported: browsers.runtime(for: id)?.themeColor, remembered: store.item(id)?.tab?.themeColor)
+            bars[id] = ToolbarColor.hex(reported: browsers.runtime(for: id)?.themeColor, remembered: store.item(id)?.tab?.themeColor,
+                                        ground: browsers.runtime(for: id)?.backgroundColor)
         }
         return bars
     }
@@ -815,7 +850,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         let id = download.identifier
         DispatchQueue.main.asyncAfter(deadline: .now() + flight + 30) { [weak self] in
             guard let self, self.sidebarUI.recentDownload?.id == id else { return }
-            withAnimation(.easeOut(duration: 0.15)) { self.sidebarUI.recentDownload = nil }
+            withAnimation(.easeOut(duration: Design.Motion.fast)) { self.sidebarUI.recentDownload = nil }
         }
     }
 
@@ -1540,7 +1575,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         w.isOpaque = true
         w.backgroundColor = .windowBackgroundColor
         if let cv = w.contentView {
-            cv.layer?.cornerRadius = 0
+            cv.layer?.cornerRadius = .zero
             cv.layer?.masksToBounds = false
         }
         let f = window.frame
@@ -1772,14 +1807,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// `peek` is opening over this window, or back with its tab (`animated` false, #242).
     func showPeekVeil(for peek: UUID, animated: Bool = true) {
         guard peekVeil.show(for: peek) else { return }
-        if animated { applyPeekVeil(duration: PeekLayout.openVeilDuration, timing: PeekTransition.easeOutCubic) } else { applyPeekVeil(duration: 0) }
+        if animated { applyPeekVeil(duration: PeekLayout.openVeilDuration, timing: PeekTransition.easeOutCubic) } else { applyPeekVeil(duration: .zero) }
     }
 
     /// `peek` waits on its tab while another is on screen (#242): the page snaps back, and the
     /// Peek can veil it again.
     func parkPeekVeil(for peek: UUID) {
         guard peekVeil.hide(for: peek) else { return }
-        applyPeekVeil(duration: 0)
+        applyPeekVeil(duration: .zero)
     }
 
     /// `peek` is closing: the page comes back over Arc's 0.2 s while the card lands.
@@ -1791,7 +1826,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// `peek`'s window is gone (Expand and Add To Split don't animate): the page snaps back.
     func endPeekVeil(for peek: UUID) {
         guard peekVeil.end(for: peek) else { return }
-        applyPeekVeil(duration: 0)
+        applyPeekVeil(duration: .zero)
     }
 
     /// niche://debug?peekShown: the page behind a Peek as it is set now (the peek-backdrop scenario).
@@ -2163,17 +2198,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         }
     }
 
+    /// One Library page swapping for the next: Arc's 0.05 s, close to a cut.
+    private static let libraryPageSwap: TimeInterval = 0.05
+
     /// The Library takes over the sidebar, which widens for its page rail (LibraryView).
     func showLibrary(_ page: LibraryPage) {
         sidebarUI.lastLibraryPage = page
         let opening = sidebarUI.libraryPage == nil
         let resize = !opening && sidebarUI.libraryPage.map(libraryWidth) != libraryWidth(page)
-        withAnimation(.easeOut(duration: 0.05)) { sidebarUI.libraryPage = page }
+        withAnimation(.easeOut(duration: Self.libraryPageSwap)) { sidebarUI.libraryPage = page }
         // The Spaces page sizes itself to its cards; every other page can be dragged wider.
         shell.sidebarResizable = page != .spaces
         if resize {
             shell.sidebarWidth = libraryWidth(page)
-            shell.animateSidebar(visible: true, floating: false, fullscreen: shell.contentFullscreen, width: shell.sidebarWidth, duration: 0.1)
+            shell.animateSidebar(visible: true, floating: false, fullscreen: shell.contentFullscreen, width: shell.sidebarWidth, duration: Design.Motion.fast)
         }
         guard opening else { return }
         sidebarUI.downloadsListOpen = false
@@ -2207,7 +2245,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
 
     func closeLibrary(hidingSidebar: Bool = false) {
         guard sidebarUI.libraryPage != nil else { return }
-        withAnimation(.easeOut(duration: 0.1)) { sidebarUI.libraryPage = nil }
+        withAnimation(.easeOut(duration: Design.Motion.fast)) { sidebarUI.libraryPage = nil }
         shell.sidebarResizable = true
         let width = CGFloat(store.prefs.sidebarWidth)
         if libraryShowedSidebar || hidingSidebar {
@@ -2218,7 +2256,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         } else {
             shell.sidebarWidth = width
             shell.pageSidebarWidth = nil
-            shell.animateSidebar(visible: shell.sidebarVisible, floating: false, fullscreen: shell.contentFullscreen, width: width, duration: 0.1)
+            shell.animateSidebar(visible: shell.sidebarVisible, floating: false, fullscreen: shell.contentFullscreen, width: width, duration: Design.Motion.fast)
         }
         currentBrowser?.setFocused(true)
     }
@@ -2335,7 +2373,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// the open pinned tab unloads and stays pinned, another pinned tab is archived.
     private func middleClickClose(_ id: UUID) {
         let group = sidebarUI.group(for: id, in: store)
-        withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+        withAnimation(.snappy(duration: Design.Motion.standard, extraBounce: 0)) {
             if group.count == 1, store.isPinned(id), selectedTabID != id {
                 store.archiveTab(id, reason: .manual)
             } else {
@@ -3332,6 +3370,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         let effectiveMode: CommandBarMode = (mode == .editURL && (selectedTab == nil || fillingEmptyPane)) ? .newTab : mode
         commandBar.highlight = focusedSpace.theme.palette.commandHighlight
         commandBar.focusedSpaceID = focusedSpaceID
+        commandBar.fillsSplitPane = fillingEmptyPane && selectedTabID.flatMap { store.splitContaining($0) } != nil
         commandBar.open(mode: effectiveMode, prefill: prefill)
         // Arc draws the New Tab row as the active one while the bar makes a new tab; the
         // sidebar scrolls to it (SpaceListView.revealActiveRow).
@@ -3397,7 +3436,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         w.collectionBehavior = [.fullScreenAuxiliary]
         let shade = NSView()
         shade.wantsLayer = true
-        shade.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.2).cgColor
+        shade.layer?.backgroundColor = Design.scrim.cgColor
         shade.layer?.cornerRadius = Self.windowCornerRadius
         shade.layer?.cornerCurve = .continuous
         w.contentView = shade
@@ -3418,7 +3457,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         }
         dim.orderFront(nil)
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.16
+            ctx.duration = Design.Motion.standard
             dim.animator().alphaValue = 1
         }
     }
@@ -3427,7 +3466,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         let dim = commandDim
         guard dim.parent != nil else { return }
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.12
+            ctx.duration = Design.Motion.fast
             dim.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
@@ -3520,7 +3559,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         switch s.kind {
         case .switchToTab(let id):
             store.recordQuerySelection(query: query, url: s.url ?? "")
-            store.selectTab(id, window: windowID)
+            // An empty split pane is waiting for this row (Add Split View): the tab fills it.
+            switch selectedTabID.flatMap({ store.fillEmptyPane($0, with: id, window: windowID) }) {
+            case .opens(let url)?: loadInSelectedTab(url)
+            case .joined?: break
+            case nil: store.selectTab(id, window: windowID)
+            }
         case .archived(let id):
             store.restoreArchived(id)
         case .navigate:
@@ -3795,7 +3839,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window else { return }
             // The page behind a Peek shrinks around its new centre.
-            if self.peekVeil.isOn { self.applyPeekVeil(duration: 0) }
+            if self.peekVeil.isOn { self.applyPeekVeil(duration: .zero) }
             self.toast.follow(page: self.shell.webContainer.convert(self.shell.webContainer.bounds, to: nil), in: window)
         }
         saveFrame()
@@ -4088,7 +4132,7 @@ final class NicheWindow: NSWindow {
         if !hide { for b in buttons where b.isHidden { b.alphaValue = 0; b.isHidden = false } }
         // Same timing as the sidebar's slide (ShellView.animateSidebar).
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.085
+            ctx.duration = SidebarMotion.duration
             for b in buttons { b.animator().alphaValue = hide ? 0 : 1 }
         } completionHandler: { [weak self] in
             guard let self, self.appliedTrafficLightsHidden == hide else { return }

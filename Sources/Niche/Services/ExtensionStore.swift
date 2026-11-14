@@ -321,10 +321,18 @@ final class ExtensionStore {
             for p in e.disabledProfiles.subtracting(old.disabledProfiles).sorted() { NicheLog.note("extension \(e.extensionID) turned off in \(p)") }
             for p in old.disabledProfiles.subtracting(e.disabledProfiles).sorted() { NicheLog.note("extension \(e.extensionID) turned on in \(p)") }
         }
+        let added = ExtensionInstallNotice.added(before: entries.map(\.extensionID), after: next.map(\.extensionID), firstRead: !hasRead)
+        hasRead = true
         entries = next
         pinned.removeAll { id in !entries.contains { $0.extensionID == id } }
         noteProxyControllers(settings: settings)
+        for id in added {
+            NotificationCenter.default.post(name: .nicheExtensionAdded, object: nil, userInfo: ["id": id])
+        }
     }
+
+    /// The list was read once: what a later read adds was installed since (ExtensionInstallNotice).
+    private var hasRead = false
 
     // MARK: Proxy (GitHub #107)
 
@@ -759,6 +767,8 @@ final class ExtensionStore {
 
 extension Notification.Name {
     static let nichePinnedExtensionsChanged = Notification.Name("nichePinnedExtensionsChanged")
+    /// An extension was installed while Niche runs; `userInfo["id"]` is its extension ID.
+    static let nicheExtensionAdded = Notification.Name("nicheExtensionAdded")
 }
 
 extension ExtensionBadge.RGBA {
