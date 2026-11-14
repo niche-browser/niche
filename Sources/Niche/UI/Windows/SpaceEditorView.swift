@@ -33,15 +33,24 @@ struct SpaceEditorView: View {
     @State private var icon: SpaceIcon
     @State private var theme: SpaceTheme
     @State private var profile: SpaceProfileChoice
-    @State private var newProfileName = ""
+    /// The new profile's name once typed; until then it follows the space's name.
+    @State private var typedProfileName: String?
 
-    /// `initialProfile` is a new space's starting profile (the focused space's).
-    init(existing: Space?, profiles: [BrowserProfile], initialProfile: UUID? = nil,
+    /// A new space starts on a profile of its own (`SpaceProfiles.forNewSpace`).
+    init(existing: Space?, profiles: [BrowserProfile],
          onSave: @escaping (String, SpaceIcon, SpaceTheme, SpaceProfileChoice, String) -> Void, onCancel: @escaping () -> Void,
          onPreview: @escaping (SpaceTheme) -> Void = { _ in }) {
         self.existing = existing
         self.profiles = profiles
-        _profile = State(initialValue: .existing(existing == nil ? initialProfile : existing?.profileID))
+        let start: SpaceProfileChoice
+        if let existing {
+            start = .existing(existing.profileID)
+        } else {
+            switch SpaceProfiles.forNewSpace(from: nil, profiles: profiles) {
+            case .ownProfile: start = .new
+            }
+        }
+        _profile = State(initialValue: start)
         self.onSave = onSave
         self.onCancel = onCancel
         self.onPreview = onPreview
@@ -138,6 +147,9 @@ struct SpaceEditorView: View {
         }
     }
 
+    private var newProfileName: String {
+        typedProfileName ?? SpaceProfiles.newProfileName(spaceTitle: title, taken: profiles.map(\.name))
+    }
     private var trimmedProfileName: String { newProfileName.trimmingCharacters(in: .whitespaces) }
 
     private var profileSection: some View {
@@ -154,7 +166,7 @@ struct SpaceEditorView: View {
                 .settingsMenu()
             }
             if profile == .new {
-                SettingsTextField(placeholder: "Profile name", text: $newProfileName)
+                SettingsTextField(placeholder: "Profile name", text: Binding(get: { newProfileName }, set: { typedProfileName = $0 }))
             }
             Text(profileNote).font(Design.Font.detail).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -167,7 +179,9 @@ struct SpaceEditorView: View {
             return "Each profile has its own browser data, so you may be signed out of some websites or need to reinstall extensions. Open tabs in this space reload."
         }
         if profile == .new {
-            return "This space starts fresh in a new profile, signed out of every website."
+            return existing == nil
+                ? "This space gets its own profile: it starts signed out of every website and shares nothing with your other spaces. To share sign-ins with a space, pick its profile."
+                : "This space starts fresh in a new profile, signed out of every website."
         }
         return "Profiles keep spaces separate, with their own logins, cookies and site data. Spaces on the same profile share them."
     }

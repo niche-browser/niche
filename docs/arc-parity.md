@@ -69,6 +69,10 @@ the space's name ("the maintainer ⌃1"); "Hide Sidebar" → "Show/Hide Sidebar"
 "Edit Space…" → "Edit Theme…" and "Rename Space"; Tabs menu "New Folder" → "New Folder…"; File
 gains "New Profile".
 
+Where Niche differs on purpose: a new space starts on a profile of its own, signed out of every
+website (owner, 13 Nov 2026); Arc puts it on the profile of the space it was made from. The New
+Space sheet's Profile menu puts it on an existing profile to share sign-ins (`SpaceProfiles`).
+
 ## 3. Right-click menus
 
 | Where | Arc items Niche lacks |
