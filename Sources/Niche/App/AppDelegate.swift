@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func announceInstalledExtensions() {
         NotificationCenter.default.addObserver(forName: .nicheExtensionAdded, object: nil, queue: .main) { [weak self] note in
             MainActor.assumeIsolated {
+                ChromiumDialogTitleBar.closeAddedBubbles()
                 guard let self, let main = self.main, let id = note.userInfo?["id"] as? String,
                       let entry = ExtensionStore.shared.entries.first(where: { $0.extensionID == id }) else { return }
                 let profile = main.profileDirectoryName

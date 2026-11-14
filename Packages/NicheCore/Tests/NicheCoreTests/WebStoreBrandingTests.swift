@@ -102,6 +102,32 @@ struct WebStoreBrandingTests {
         #expect(js.evaluateScript("button.textContent").toString() == "Add to Niche")
     }
 
+    @Test func theSwitchToChromeCalloutInGooglesBarIsHidden() throws {
+        // 13 Nov 2026: Google moved "Switch to Chrome?" out of the page into its header bar, as a
+        // frame named "callout" from another origin (no #promo-header to find, no text to read)
+        // in a box laid over the install button. The box goes, when the bar adds it later too.
+        let js = try #require(JSContext())
+        var failure: String?
+        js.exceptionHandler = { _, e in failure = e?.toString() }
+        js.evaluateScript(Self.fakeDocument)
+        js.evaluateScript("page();")
+        js.evaluateScript(WebStoreBranding.script(appName: "Niche"))
+        js.evaluateScript("""
+            var bar = document.body.appendChild(new El('HEADER'));
+            var box = bar.appendChild(new El('DIV'));
+            var callout = box.appendChild(new El('IFRAME')); callout.setAttribute('name', 'callout');
+            var other = document.body.appendChild(new El('DIV'));
+            var proxy = other.appendChild(new El('IFRAME')); proxy.setAttribute('name', 'apiproxy');
+            changed(document.body); flush();
+            """)
+        #expect(failure == nil)
+        #expect(js.evaluateScript("box.style.display").toString() == "none")
+        // Only that frame's box: the bar and the store's other frames stay.
+        #expect(js.evaluateScript("bar.style.display === undefined && other.style.display === undefined").toBool())
+        // And the rule is in the page's style, so the box never shows for a frame.
+        #expect(js.evaluateScript(#"document.querySelectorAll('style').some(s => s.textContent.includes('iframe[name="callout"]'))"#).toBool())
+    }
+
     @Test func theNameIsQuotedForTheScript() {
         #expect(WebStoreBranding.script(appName: "Ni\"che").contains(#""Ni\"che""#))
     }

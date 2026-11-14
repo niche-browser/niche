@@ -123,13 +123,15 @@ built release app with a test profile. Note anything that fails in the release's
 - **#203:** import a store extension from Arc, open a page, then reload the extension in
   `chrome://extensions`: it stays on and shows as from the Web Store. "Add to Chrome" puts
   nothing in `~/Downloads` and shows no save panel.
-- With the window against the screen's left edge, install an extension from the Chrome Web
-  Store, then remove it with the store's Remove from Chrome: "… has been added" and "Remove …?"
-  both open whole at the page's top right (niche.log: `bubble … placed`), and "Add …?" stays
-  centred.
+- With the window in the middle of the screen, and again against the screen's left edge, install
+  an extension from the Chrome Web Store: "Add …?" stays centred, then Niche's "Added <name>"
+  toast shows at the window's top right with Pin, and nothing shows in the screen's top-left
+  corner (niche.log: `bubble … closed`; Chromium's "… has been added to Chromium" bubble opened
+  there, half off the screen). Remove it with the store's Remove from Niche: "Remove …?" opens
+  whole at the page's top right (niche.log: `bubble … placed`).
 - Open an extension's page on the Chrome Web Store: the button says "Add to Niche" (and "Remove
-  from Niche" once installed), with no "Switch to Chrome?" card and no "Switch to Chrome to
-  install" banner. Google renames its page's parts now and then; this is where it shows. Do it
+  from Niche" once installed), with no "Switch to Chrome?" card (since 13 Nov 2026 a frame named
+  `callout` in Google's header bar) and no "Switch to Chrome to install" banner. Google renames its page's parts now and then; this is where it shows. Do it
   three ways: a tab you type the address into, the "Chrome Web Store" link on
   `chrome://extensions` (the store writes a new document over the first one there), and another
   item clicked inside the store.
