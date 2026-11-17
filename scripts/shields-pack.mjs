@@ -32,6 +32,8 @@ const manifest = JSON.parse(readFileSync(join(root, 'resources/shields/lists.jso
 // A list is text with rules in it; an error page or an empty answer is not.
 const minimumBytes = 200;
 async function download(list) {
+  // The addresses come from resources/shields/lists.json, reviewed with the repository; only https.
+  if (!/^https:\/\//.test(list.url)) throw new Error(`${list.id}: not an https address (${list.url})`);
   for (let attempt = 1; ; attempt++) {
     try {
       const answer = await fetch(list.url, { headers: { 'user-agent': 'niche-shields-pack' }, redirect: 'follow', signal: AbortSignal.timeout(120000) });
