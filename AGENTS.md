@@ -8,7 +8,8 @@ English.
   `just` lists every script.
 - Layout: `Packages/NicheCore` (decisions, no AppKit), `Sources/Niche` (the app),
   `Sources/NicheCEF` (Objective-C++ bridge to CEF), `Sources/NicheHelper` (Chromium subprocess),
-  `brand/` (logo sources), `scripts/` (build, test, CEF).
+  `Sources/NicheShields` (Rust: the filter engine), `brand/` (logo sources), `scripts/` (build,
+  test, CEF).
 
 ## Rules
 
@@ -29,6 +30,8 @@ English.
 - Code layout, test instances, `niche://` scripting hooks: docs/development.md.
 - Reviewing a PR: docs/reviewing.md.
 - Speed, hangs and the perf budgets: docs/performance.md.
+- What is blocked, the privacy panel and what it can't see: docs/privacy.md.
+- The filter engine, its lists and the daily packs: docs/shields.md.
 - Arc behaviour Niche follows, and how it was measured: docs/arc-parity.md,
   docs/arc-reverse-engineering.md.
 - Releases, signing, the CEF pin: docs/release.md and docs/release-checklist.md.

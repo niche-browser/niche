@@ -40,7 +40,7 @@ issue when a newer stable CEF is out; `scripts/update-cef.sh` moves the pin.
   space themes, Arc theme import, the favorites grid), visible in every `Sources/Niche` file.
   The layer rules are in [CLAUDE.md](../CLAUDE.md)
 - `Tests/` — the harnesses that compile production files against fakes, and the smoke test
-- `resources/` — app icon, brand PNGs, the ad and tracker blocklist with its licence notices
+- `resources/` — app icon, brand PNGs, licence notices, the list of filter lists Shields is built from (`shields/lists.json`)
 - `scripts/` — build, release, CEF and test tooling; `scripts/clips` records release clips
 - `docs/arc-reverse-engineering.md` — what was learned from Arc and how
 - `docs/release.md` — signing, notarization and the release workflow
@@ -178,6 +178,19 @@ download's file name by hand; `NICHE_TIDY_FAKE_MODEL=off` (or `preparing`, `inel
 without Apple Intelligence would. `niche://debug?tidy=1` runs Tidy on the window's space without
 hovering the divider, `niche://debug?undoTidy=1` is ⌘Z's undo and `niche://debug?settingsPane=max`
 opens Settings on a pane.
+
+Downloads and privacy: `downloads=1|0` opens the downloads tray, `downloadsHover=<row>` shows a
+row's buttons as the pointer would (0 is the top row, -1 none), `downloadAction=<DownloadAction>&row=<n>`
+runs a row's action, `downloadsClear=1` is the tray's Clear and `downloadsList=<label>` logs the
+rows by state. `privacyPanel=1|0` opens or closes the privacy panel (`light`/`dark` draw it in that
+appearance), `privacy=<label>` logs what Niche has recorded for the page on screen (panel open
+or not: every page is recorded), and
+`privacyRule=<choice>&party=<id>` and `privacyProtection=off|on` do what its buttons and switch do
+([privacy.md](privacy.md)). `shields=<label>&url=…&page=…&type=script` logs what the filter engine
+says about a request, and without `url` how much is loaded ([shields.md](shields.md)). A test
+instance takes its filter lists from `NICHE_SHIELDS_SOURCE` (a `file://` folder, or `off`), never
+the network. A test site with third parties is the run's own server under other
+names: `--host-resolver-rules="MAP *.test 127.0.0.1"` on Niche's command line.
 
 `niche://debug?dragEnd=<text>` ends a drag of the window's tab whose URL holds the text, let go
 with nothing taking it, the way a drag out of the sidebar ends: outside every Niche window it opens

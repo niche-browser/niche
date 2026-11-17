@@ -1,34 +1,21 @@
-// Third-party ad and tracker blocking: the domain matching behind
-// +[NicheCEFRuntime setContentBlockingEnabled:]. Plain C++ with no CEF or Cocoa
-// dependency so it can be tested on its own.
-//
-// A request is blocked when its host, or any parent domain of it, is on the
-// list and the request is third-party to the top-level page. Lookups run on
-// CEF's IO thread for every subresource, so the list is an immutable set
-// published through an atomic pointer and never locked.
+// The user's own say over what a page may load, and the host and site arithmetic the blocker
+// and the privacy panel share. What is an ad or a tracker is the filter engine's business
+// (Shields, Sources/NicheShields); this is what comes before it: whether a request is to
+// another site than the page's, and whether the user allowed it, blocked it, or switched
+// protection off for the page's site. Plain C++ with no CEF or Cocoa dependency so it can be
+// tested on its own. Lookups run on CEF's IO thread for every request, so the rules are an
+// immutable value published through an atomic pointer and never locked.
 #pragma once
 
 #include <atomic>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace niche_blocker {
 
 using DomainSet = std::unordered_set<std::string>;
-
-inline std::atomic<bool>& Enabled() { static std::atomic<bool> v{false}; return v; }
-
-// Replaced sets are never freed: an IO-thread lookup may still be reading the
-// old one, and the list is swapped once per launch in practice.
-inline std::atomic<const DomainSet*>& Domains() { static std::atomic<const DomainSet*> v{nullptr}; return v; }
-
-inline void Publish(const DomainSet* set) { Domains().store(set, std::memory_order_release); }
-
-inline size_t Count() {
-    const DomainSet* s = Domains().load(std::memory_order_acquire);
-    return s ? s->size() : 0;
-}
 
 inline char Lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c; }
 
@@ -43,37 +30,6 @@ inline std::string NormalizeHost(std::string_view h) {
         r.push_back(l);
     }
     return r;
-}
-
-// Adds one line of a list file: a bare domain, or a hosts-file line
-// ("0.0.0.0 example.com"). Comments and blank lines are skipped.
-inline void AddListLine(DomainSet& set, std::string_view line) {
-    if (size_t hash = line.find('#'); hash != std::string_view::npos) line = line.substr(0, hash);
-    auto isSpace = [](char c) { return c == ' ' || c == '\t' || c == '\r'; };
-    while (!line.empty() && isSpace(line.front())) line.remove_prefix(1);
-    while (!line.empty() && isSpace(line.back())) line.remove_suffix(1);
-    if (line.empty()) return;
-    size_t sp = line.find_first_of(" \t");
-    if (sp != std::string_view::npos) {  // hosts syntax: take the name after the address
-        line = line.substr(sp);
-        while (!line.empty() && isSpace(line.front())) line.remove_prefix(1);
-        line = line.substr(0, line.find_first_of(" \t"));
-    }
-    std::string d = NormalizeHost(line);
-    if (d.empty() || d.find('.') == std::string::npos || d == "localhost") return;
-    set.insert(std::move(d));
-}
-
-inline DomainSet* ParseList(std::string_view text) {
-    auto* set = new DomainSet();
-    set->reserve(32768);
-    while (!text.empty()) {
-        size_t nl = text.find('\n');
-        AddListLine(*set, text.substr(0, nl));
-        if (nl == std::string_view::npos) break;
-        text.remove_prefix(nl + 1);
-    }
-    return set;
 }
 
 // The listed domain covering `host` (host itself or a parent), or empty. A bare
@@ -96,7 +52,8 @@ inline bool IsSubdomainOrSame(std::string_view host, std::string_view domain) {
 }
 
 // Approximate registrable domain (eTLD+1) without the Public Suffix List: the
-// last two labels, or three under the common "co.uk"-style second levels. A
+// last two labels, or three under the common "co.uk"-style second levels and
+// under the hosts that give every customer a name ("someone.github.io"). A
 // miss only ever makes two hosts look like one site, which fails open.
 inline std::string_view Site(std::string_view host) {
     size_t last = host.rfind('.');
@@ -110,7 +67,16 @@ inline std::string_view Site(std::string_view host) {
     bool cc = tld.size() == 2;
     bool sl = false;
     for (auto s : kSecondLevels) sl = sl || s == sld;
-    if (cc && sl && second > 0) {
+    // Hosts that give each customer a name of their own: one name there is one site.
+    static const std::string_view kHosted[] = {
+        "github.io", "gitlab.io", "pages.dev", "workers.dev", "vercel.app", "netlify.app", "web.app", "firebaseapp.com",
+        "herokuapp.com", "azurewebsites.net", "cloudfront.net", "amazonaws.com", "appspot.com", "blogspot.com",
+        "wordpress.com", "myshopify.com", "glitch.me", "onrender.com", "fly.dev", "surge.sh", "neocities.org",
+        "wixsite.com", "webflow.io", "framer.app", "notion.site", "substack.com", "tumblr.com", "typepad.com"};
+    std::string_view two = host.substr(second + 1);
+    bool hosted = false;
+    for (auto h : kHosted) hosted = hosted || h == two;
+    if (((cc && sl) || hosted) && second > 0) {
         size_t third = host.rfind('.', second - 1);
         return third == std::string_view::npos ? host : host.substr(third + 1);
     }
@@ -123,18 +89,78 @@ inline bool IsIPLiteral(std::string_view host) {
     return !host.empty();
 }
 
-// The decision for one subresource request. Hosts must be normalized; an empty
-// page host (non-web top-level page) never blocks.
-inline bool ShouldBlock(const std::string& requestHost, const std::string& pageHost) {
-    if (!Enabled().load(std::memory_order_relaxed)) return false;
-    const DomainSet* set = Domains().load(std::memory_order_acquire);
-    if (!set || set->empty() || requestHost.empty() || pageHost.empty() || IsIPLiteral(requestHost)) return false;
-    std::string entry = MatchedEntry(*set, requestHost);
-    if (entry.empty()) return false;
-    // First-party: the page is on the listed domain itself, or on the same site.
-    if (IsSubdomainOrSame(pageHost, entry)) return false;
-    if (!IsIPLiteral(pageHost) && Site(requestHost) == Site(pageHost)) return false;
-    return true;
+// A host's site for telling first party from third: the registrable domain, or the address itself.
+inline std::string_view SiteOrHost(std::string_view host) { return IsIPLiteral(host) ? host : Site(host); }
+
+// The user's own decisions from the privacy panel, on top of the filter lists. Domains cover
+// their subdomains; sites are SiteOrHost() of the tab's top-level page. An immutable value
+// behind an atomic pointer, never freed (a handful of swaps per session, each a few hundred
+// bytes): an IO-thread lookup may still be reading the old one.
+struct Rules {
+    DomainSet blocked;   // on every site
+    DomainSet allowed;   // on every site, though listed
+    std::unordered_map<std::string, DomainSet> blockedOn;   // by the page's site
+    std::unordered_map<std::string, DomainSet> allowedOn;
+    std::unordered_set<std::string> offSites;   // protection is off on these sites
+};
+
+inline std::atomic<const Rules*>& UserRules() { static std::atomic<const Rules*> v{nullptr}; return v; }
+inline void PublishRules(const Rules* rules) { UserRules().store(rules, std::memory_order_release); }
+
+inline bool Covers(const DomainSet& set, const std::string& host) { return !set.empty() && !MatchedEntry(set, host).empty(); }
+
+// What the user decided about a request, before the filter engine is asked.
+enum class Choice : int {
+    kNone = 0,      // nothing: the engine decides
+    kAllowed = 1,   // allowed here or everywhere, whatever the lists say
+    kBlocked = 2,   // blocked here or everywhere
+    kOff = 3,       // protection is off for the page's site: everything loads
+};
+
+struct UserSay {
+    Choice choice = Choice::kNone;
+    bool thirdParty = false;   // another site than the page's
+};
+
+// The user's say over one request. In this order: a site with protection off loads everything;
+// a request to the page's own site is the engine's alone (the user's rules name other companies);
+// the choice for this site (allow, then block); the choice for every site (allow, then block).
+// Hosts must be normalized.
+inline UserSay Say(const std::string& requestHost, const std::string& pageHost) {
+    UserSay say;
+    if (requestHost.empty() || pageHost.empty()) return say;
+    std::string page(SiteOrHost(pageHost));
+    say.thirdParty = SiteOrHost(requestHost) != std::string_view(page);
+    const Rules* r = UserRules().load(std::memory_order_acquire);
+    if (!r) return say;
+    if (r->offSites.count(page)) { say.choice = Choice::kOff; return say; }
+    if (!say.thirdParty) return say;
+    if (auto it = r->allowedOn.find(page); it != r->allowedOn.end() && Covers(it->second, requestHost)) { say.choice = Choice::kAllowed; return say; }
+    if (auto it = r->blockedOn.find(page); it != r->blockedOn.end() && Covers(it->second, requestHost)) { say.choice = Choice::kBlocked; return say; }
+    if (Covers(r->allowed, requestHost)) { say.choice = Choice::kAllowed; return say; }
+    if (Covers(r->blocked, requestHost)) say.choice = Choice::kBlocked;
+    return say;
+}
+
+// What happens to a request, for the privacy panel.
+enum class Verdict : int { kAllowed = 0, kBlockedByList = 1, kBlockedByUser = 2 };
+
+// The user's say and the engine's answer (`listed`: one of its rules would block the request)
+// as one verdict: protection off or the user's allow lets it load; the user's block or the
+// engine's stops it.
+inline Verdict Combine(const UserSay& say, bool listed) {
+    switch (say.choice) {
+        case Choice::kOff: case Choice::kAllowed: return Verdict::kAllowed;
+        case Choice::kBlocked: return Verdict::kBlockedByUser;
+        case Choice::kNone: return listed ? Verdict::kBlockedByList : Verdict::kAllowed;
+    }
+    return Verdict::kAllowed;
+}
+
+// Whether the user turned protection off for the site of this page's host.
+inline bool ProtectionOff(const std::string& pageHost) {
+    const Rules* r = UserRules().load(std::memory_order_acquire);
+    return r && r->offSites.count(std::string(SiteOrHost(pageHost))) > 0;
 }
 
 // Host of an http(s)/ws(s) URL, normalized; empty for other schemes. Parses just

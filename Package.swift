@@ -13,10 +13,13 @@ let cefCXXFlags: [String] = [
     "-fobjc-call-cxx-cdtors", "-fno-strict-aliasing",
     "-Wno-unused-parameter", "-Wno-deprecated-declarations",
     "-I", cefRoot,
+    // Shields' C interface (Sources/NicheShields, Rust; scripts/build-shields.sh builds the library).
+    "-I", "\(Context.packageDirectory)/Sources/NicheShields/include",
 ]
 
 let cefLinkerFlags: [String] = [
     "-L\(cefRoot)/build/libcef_dll_wrapper",
+    "-L\(Context.packageDirectory)/vendor/shields",
 ]
 
 // Sparkle, the updater framework Arc ships, lives in vendor/sparkle (scripts/fetch-sparkle.sh);
@@ -45,6 +48,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags(cefLinkerFlags),
                 .linkedLibrary("cef_dll_wrapper"),
+                .linkedLibrary("niche_shields"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("IOSurface"),
             ]
@@ -58,6 +62,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags(cefLinkerFlags),
                 .linkedLibrary("cef_dll_wrapper"),
+                .linkedLibrary("niche_shields"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("IOSurface"),
             ]

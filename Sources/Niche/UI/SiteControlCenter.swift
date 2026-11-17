@@ -19,6 +19,9 @@ struct SiteControlCenterActions {
     var clearCache: () -> Void = {}
     var clearCookies: () -> Void = {}
     var siteSettings: () -> Void = {}
+    /// Opens or closes the window's privacy panel; whether it is open now.
+    var togglePrivacyPanel: () -> Void = {}
+    var privacyPanelOpen = false
     /// The lock: the page's certificate. nil without one (http, Chromium's pages).
     var showCertificate: (() -> Void)?
     /// A WebKit page's "Learn more" (docs/protected-media.md).
@@ -179,13 +182,23 @@ final class SiteControlCenterView: NSView {
         let store = store, url = url
         var rowsSpec: [(String, String, String, Bool, () -> Void)] = [
             ("hammer.fill", "Developer Mode", developer ? "On" : "Off", developer, { store.settings.toggleDeveloperMode(url: url) }),
-            ("shield.fill", "Block Ads & Trackers", store.settings.blockAdsAndTrackers ? "On" : "Off",
-             store.settings.blockAdsAndTrackers, { store.settings.blockAdsAndTrackers.toggle() }),
+            ("shield.fill", "Block Ads & Trackers", store.settings.blockAds || store.settings.blockTrackers ? "On" : "Off",
+             store.settings.blockAds || store.settings.blockTrackers, {
+                 let on = !(store.settings.blockAds || store.settings.blockTrackers)
+                 store.settings.blockAds = on
+                 store.settings.blockTrackers = on
+             }),
             ("gearshape.fill", "Automatic Picture-In-Picture", store.settings.autoPictureInPicture ? "Allowed" : "Disabled",
              store.settings.autoPictureInPicture, { store.settings.autoPictureInPicture.toggle() }),
         ]
-        // Chromium's blocker doesn't see a WebKit page: no switch that does nothing there.
-        if protectedMedia != nil { rowsSpec.remove(at: 1) }
+        // Who the page talks to: the privacy panel, with what was blocked here so far.
+        let blocked = tab.map { PrivacyMonitor.shared.blocked(tab: $0, pageURL: url) } ?? 0
+        let panelOpen = actions.privacyPanelOpen
+        let togglePanel = actions.togglePrivacyPanel
+        rowsSpec.insert(("shield.lefthalf.filled", "Privacy Panel", blocked > 0 ? "\(blocked) blocked on this page" : "See who this page talks to",
+                         panelOpen, togglePanel), at: 2)
+        // Chromium's blocker doesn't see a WebKit page: no switch or panel that does nothing there.
+        if protectedMedia != nil { rowsSpec.removeSubrange(1...2) }
         // A page that plays DRM, or one in WebKit: which engine plays this site (docs/protected-media.md).
         if let on = safariEngine {
             let choose = actions.chooseSafariEngine
@@ -801,6 +814,7 @@ final class SiteControlCenterPopover: NSObject, NSPopoverDelegate {
         acts.siteSettings = closing(actions.siteSettings)
         acts.clearCache = closing(actions.clearCache)
         acts.clearCookies = closing(actions.clearCookies)
+        acts.togglePrivacyPanel = closing(actions.togglePrivacyPanel)
         acts.showCertificate = actions.showCertificate.map(closing)
         acts.learnAboutProtectedMedia = closing(actions.learnAboutProtectedMedia)
         // The page opens again in the other engine: the popover's content would be the old page's.

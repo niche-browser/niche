@@ -52,6 +52,10 @@ final class PaneToolbarView: NSView {
         /// The developer address field's selected text.
         var selection = NSColor.selectedTextBackgroundColor
         var tabID: UUID?
+        /// Requests blocked on this page, and whether the window's privacy panel is open: the
+        /// shield at the end of the address shows while either says something.
+        var blocked = 0
+        var privacyOpen = false
     }
 
     private var model = Model()
@@ -61,6 +65,8 @@ final class PaneToolbarView: NSView {
     private var left: [ToolbarGlyphButton] = []
     private var right: [NSView] = []
     private let urlButton = ToolbarURLButton()
+    /// The shield with the page's blocked count, before the right-hand buttons (ToolbarPrivacyChip).
+    private let privacyChip = ToolbarPrivacyChip()
     private let placeholderLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
     private let hairline = NSView()
     private let devDivider = NSView()
@@ -99,7 +105,8 @@ final class PaneToolbarView: NSView {
         urlButton.onEditingChange = { [weak self] in self?.editVeil.isHidden = !$0 }
         editVeil.wantsLayer = true
         editVeil.layer?.backgroundColor = Design.fillOnDark(.selected).cgColor
-        for v in [hairline, editVeil, devDivider, devTrailingDivider, urlButton, placeholderLabel] as [NSView] {
+        privacyChip.action = { [weak self] in self?.togglePrivacy() }
+        for v in [hairline, editVeil, devDivider, devTrailingDivider, urlButton, placeholderLabel, privacyChip] as [NSView] {
             v.isHidden = true
             addSubview(v)
         }
@@ -179,6 +186,8 @@ final class PaneToolbarView: NSView {
             if Easel.id(fromURL: t.url) != nil { m.host = item.displayTitle; m.path = "" }
         }
         m.protectedMedia = m.tabID.flatMap { ui.navState(for: $0).protectedMedia }
+        if let id = m.tabID { m.blocked = PrivacyMonitor.shared.blocked(tab: id, pageURL: m.url) }
+        m.privacyOpen = ui.privacyPanelOpen
         let extensions = ExtensionStore.shared
         let profile = item.map { store.profileDirectoryName(item: $0.id) }
             ?? store.profileDirectoryName(space: store.focusedSpaceID(window: ui.windowID))
@@ -487,6 +496,22 @@ final class PaneToolbarView: NSView {
                 }
             }
         }
+        // The shield, before everything on the right: on every website (with the page's blocked
+        // count when there is one) and while the panel is open. A bar too narrow for the address
+        // beside it goes without.
+        let showsChip = (m.kind == .normal || m.kind == .developer) && m.protectedMedia == nil
+            && (m.blocked > 0 || m.privacyOpen || PrivacySite.site(ofURL: m.url) != nil)
+        privacyChip.isHidden = true
+        if showsChip {
+            privacyChip.show(blocked: m.blocked, lit: m.privacyOpen, ink: m.fg, hover: m.hover)
+            let cw = privacyChip.fittingWidth
+            let needed = m.kind == .normal ? urlButton.idealWidth : ToolbarPrivacyChip.addressMinimum
+            if rx - PaneToolbarView.rightGap - cw - leftEnd - 2 * (8 + 6) >= needed {
+                rx -= PaneToolbarView.rightGap + cw
+                privacyChip.frame = NSRect(x: rx, y: (h - bh) / 2, width: cw, height: bh)
+                privacyChip.isHidden = false
+            }
+        }
         let rightStart = rx
         // The middle, between the groups with the HStack's 6 pt spacing around it.
         let a = leftEnd + (left.isEmpty ? 0 : 6), b = rightStart - (right.isEmpty ? 0 : 6)
@@ -526,6 +551,11 @@ final class PaneToolbarView: NSView {
     private func editURL() {
         if model.kind == .developer, !urlButton.isHidden { urlButton.beginEditing(); return }
         if let id = paneTabID { actions.editPaneURL(id) } else { actions.openCommandBar(model.kind == .noTab ? .newTab : .editURL) }
+    }
+
+    private func togglePrivacy() {
+        if let id = paneTabID { actions.focusPane(id) }
+        actions.performAction("togglePrivacyPanel")
     }
 
     private func copyURL() {
@@ -1048,5 +1078,95 @@ final class DeveloperStripesView: NSView {
         }
         Self.stripe.setFill()
         path.fill()
+    }
+}
+
+/// The toolbar's shield: a glyph and how many requests Niche blocked on the page. A click opens
+/// the privacy panel; while that is open the chip keeps its plate.
+final class ToolbarPrivacyChip: NSView {
+    /// The least an address needs beside the chip on the developer bar.
+    static let addressMinimum: CGFloat = 120
+    var action: () -> Void = {}
+    private let glyph = NSImageView()
+    private let count = NSTextField.sidebarLabel(size: Design.TextSize.caption.rawValue, weight: .medium)
+    private var tip: ArcTooltipAnchorView?
+    private var lit = false
+    private var hoverFill = Design.barFill(.hover, onLight: false)
+    private var hovering = false { didSet { if hovering != oldValue { refreshFill() } } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = Design.Radius.inset
+        layer?.cornerCurve = .continuous
+        glyph.image = Design.Icon.symbol("shield.lefthalf.filled", size: Design.Icon.regular, weight: .medium)
+        glyph.imageScaling = .scaleNone
+        addSubview(glyph)
+        count.font = Design.Font.digits(.caption, .medium)
+        addSubview(count)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    var fittingWidth: CGFloat {
+        let text = count.stringValue.isEmpty ? 0 : Design.Space.xs + ceil(count.intrinsicContentSize.width)
+        return Design.Space.m + Design.Icon.bar + text + Design.Space.m
+    }
+
+    func show(blocked: Int, lit: Bool, ink: NSColor, hover: NSColor) {
+        let badge = PrivacyWords.badge(blocked)
+        if count.stringValue != badge { count.stringValue = badge; needsLayout = true }
+        count.textColor = ink
+        glyph.contentTintColor = ink
+        self.lit = lit
+        hoverFill = hover
+        let label = PrivacyWords.shieldLabel(blocked: blocked, sawYou: nil)
+        setAccessibilityLabel(label)
+        if let tip { tip.text = label } else { tip = ArcTooltipAnchorView.attach(to: self, help: label) }
+        refreshFill()
+    }
+
+    private func refreshFill() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.backgroundColor = (hovering || lit ? hoverFill : .clear).cgColor
+        CATransaction.commit()
+    }
+
+    override func layout() {
+        super.layout()
+        let side = Design.Icon.bar
+        glyph.frame = NSRect(x: Design.Space.m, y: (bounds.height - side) / 2, width: side, height: side)
+        let h = ceil(count.intrinsicContentSize.height)
+        count.frame = NSRect(x: glyph.frame.maxX + Design.Space.xs - SidebarText.inset, y: (bounds.height - h) / 2,
+                             width: max(0, bounds.width - glyph.frame.maxX - Design.Space.xs - Design.Space.m) + 2 * SidebarText.inset, height: h)
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { !isHiddenOrHasHiddenAncestor && frame.contains(point) ? self : nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func viewDidHide() { hovering = false }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { action() }
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard !isHiddenOrHasHiddenAncestor else { return false }
+        action()
+        return true
     }
 }

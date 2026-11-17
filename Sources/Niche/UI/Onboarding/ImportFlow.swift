@@ -190,10 +190,12 @@ final class ImportFlowModel {
         }
     }
 
-    /// Dia's disclosure step: the ad and tracker blocker checkbox.
-    var blockAdsAndTrackers: Bool {
-        get { store.settings.blockAdsAndTrackers }
-        set { store.settings.blockAdsAndTrackers = newValue }
+    /// The privacy step's choice: a level sets Shields' switches (PrivacyLevel), and Settings ▸
+    /// Privacy shows the same three. A Mac whose switches match no level starts on the
+    /// recommended one without changing anything until a card is picked.
+    var privacyLevel: PrivacyLevel {
+        get { PrivacyLevel.level(of: store.settings) ?? .recommended }
+        set { newValue.apply(to: &store.settings) }
     }
 
     func continueFromPrivacy() { go(.source) }

@@ -59,7 +59,7 @@ EOF
 run() {
   local n="$1" what="$2"
   cp "$DATA/windows.json" "$TEST_DIR/expected-$n.json"
-  NICHE_DATA_DIR="$DATA" NICHE_COMMAND_FILE="$TEST_DIR/commands" NICHE_TEST_BACKGROUND=1 \
+  NICHE_SHIELDS_SOURCE=off NICHE_DATA_DIR="$DATA" NICHE_COMMAND_FILE="$TEST_DIR/commands" NICHE_TEST_BACKGROUND=1 \
     "$APP/Contents/MacOS/$EXE" > "$TEST_DIR/run-$n.log" 2>&1 &
   PID=$!
   # The command file appears once the app has finished launching.

@@ -1,0 +1,51 @@
+# Shields (17 Nov 2026): the filter engine on a small pack of fixture lists (Tests/Fixtures/Shields,
+# built for the run by scripts/shields-fixture-pack.py; nothing comes from the network). What it
+# blocks, what it answers with a stand-in, what it takes off an address, what it hides on a page,
+# and that a list's script runs before the page's own.
+port 8132
+arg --host-resolver-rules=MAP *.test 127.0.0.1
+budget rss=800 stalls50=12
+expect-log Shields ready: 2 lists
+
+# Requests: another site's tracker, an ad the site serves itself, a script answered with a
+# stand-in, a click identifier on an address, and something no list names.
+niche://debug?shields=tracker&url=https://stats.g.doubleclick.net/t.js&page=https://news.test/&type=script
+expect-log shields\[tracker\] blocked=1 exception=0 group=2 stand-in=0
+niche://debug?shields=own&url=https://news.test/js/shields-first-party-ad.js&page=https://news.test/&type=script
+expect-log shields\[own\] blocked=1
+niche://debug?shields=standin&url=https://shields-stand-in.test/analytics.js&page=https://news.test/&type=script
+expect-log shields\[standin\] blocked=1 exception=0 group=2 stand-in=1
+niche://debug?shields=codes&url=https://shop.test/item?id=5%26fbclid=abc&type=document
+expect-log shields\[codes\] blocked=0 .*rewritten=https://shop\.test/item\?id=5
+niche://debug?shields=plain&url=https://cdn.widgets.test/lib.js&page=https://news.test/&type=script
+expect-log shields\[plain\] blocked=0 exception=0 group=-1 stand-in=0 rewritten=-
+
+# A page: the list's script ran before the page had a body.
+niche://open?url=${PAGE}?n=shields
+expect-log loaded 127\.0\.0\.1 \(HTTP 200\)
+wait 1
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'answered-' + window.__shields_answered"}
+expect-log Niche cdp Runtime.evaluate .*"value":"answered-start"
+
+# A cookie notice the page adds later is hidden by a generic rule and by the site's own rule;
+# a pop-up is found by its text; what no rule names stays. (No "#" in these lines: in a
+# niche:// address it would cut the rest off.)
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const add=(tag,id,cls,text)=>{const e=document.createElement(tag);if(id)e.id=id;if(cls)e.className=cls;e.textContent=text;document.body.append(e);};add('div','','shields-cookie-banner','We use cookies');add('div','shields-consent-wall','','Accept all');add('div','','shields-promo','Subscribe to our newsletter');add('div','','shields-promo','Read more');add('div','kept','','Kept');return 'added'})()"}
+expect-log Niche cdp Runtime.evaluate .*"value":"added"
+wait 2
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const d=s=>getComputedStyle(document.querySelector(s)).display;const promos=[...document.querySelectorAll('.shields-promo')].map(e=>getComputedStyle(e).display).join('/');return [d('.shields-cookie-banner'),d('[id=shields-consent-wall]'),promos,d('[id=kept]')].join('-')})()"}
+expect-log Niche cdp Runtime.evaluate .*"value":"none-none-none/block-block"
+
+# A blocked script the lists name a stand-in for is answered with it: the page asks another
+# host (this run's server under another name) for analytics.js and gets the stand-in's mark,
+# while a blocked script with no stand-in fails to load.
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const load=(src,name)=>{const s=document.createElement('script');s.src=src;s.onload=()=>{window['__load_'+name]='loaded'};s.onerror=()=>{window['__load_'+name]='failed'};document.head.append(s);};load('http://shields-stand-in.test:8132/analytics.js','standin');load('http://127.0.0.1:8132/shields-first-party-ad.js','own');return 'asked'})()"}
+expect-log Niche cdp Runtime.evaluate .*"value":"asked"
+wait 2
+niche://debug?cdp=Runtime.evaluate&params={"expression":"[window.__shields_stand_in, window.__load_standin, window.__load_own].join('-')"}
+expect-log Niche cdp Runtime.evaluate .*"value":"1-loaded-failed"
+
+# Nothing of it is a global of the page.
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'leaked-' + (typeof setFlag) + '-' + (typeof scriptletGlobals)"}
+expect-log Niche cdp Runtime.evaluate .*"value":"leaked-undefined-undefined"
+niche://debug?checkStore=1

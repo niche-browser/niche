@@ -32,7 +32,7 @@ or Arc-only service), per CONTRIBUTING.md.
 | Theme data for websites | Settings ▸ Advanced "Allow websites to get your theme data" | done | `--arc-palette-*` and `--arc-background-*` as #RRGGBBAA, from the space's theme (ArcThemeData; fitted to Arc's stored palette, checked live). |
 | Window dragging from the top of webpages | Settings ▸ Advanced | done | With the toolbar hidden, a drag from the top 56 pt of a page moves the window; a click there still reaches the page (PageTopDrag). Settings ▸ Advanced, on by default as in Arc. |
 | Restore windows from previous session | Settings ▸ Advanced | done | Settings ▸ Advanced; off keeps the window in use last. |
-| Block Cookie Banners | Settings ▸ General | done | Settings ▸ Privacy; hides the common consent managers' banners (CookieBanners), off by default as in Arc. |
+| Block Cookie Banners | Settings ▸ General | done | Settings ▸ Privacy ▸ Cookie notices: the cookie-notice filter lists (Shields), which hide notices and answer the ones they know with “essential only”. On by default, unlike Arc: privacy is why Niche exists (owner, 17 Nov 2026) |
 | Archive Little Arcs after | Settings ▸ Links (6 hours default) | done | Settings ▸ Tabs ▸ Links; a Little Window left alone that long closes into the archive. |
 | Previews (Gmail, Calendar on Favorites) | Settings ▸ General ▸ Previews Settings…, a Calendar favorite's menu ▸ Live Calendar | done | Gmail: the unread mail from Gmail's Atom feed (the space's own sign-in) in Arc's card, rows, ＋ and motion, measured on the maintainer's signed-in Arc 8 Nov. Calendar: Arc's timeline card, gear menu, Live Calendar ▸ submenu, tile countdown and meeting link; events read through Google's Calendar embed (Arc's own fetch says "Failed to update" in 1.172.1). See "Previews, measured". |
 | Join Meeting ⌃⌘J | Shortcuts | done | The call on now, else the next one today, from a Live Calendar favorite. |
@@ -157,7 +157,7 @@ in this sweep (Essential Shortcuts window, Library pages).
 - Boosts: New Boost, the editor, Zap, CSS/JS code, Library ▸ Boosts, Window ▸ View Boosts…, the Advanced switch.
 - Window dragging from the top of webpages (the maintainer's choice, 7 Nov: on, as in Arc).
 - AppleScript, Arc's dictionary (the maintainer's choice, 7 Nov: like Arc, JavaScript off by default).
-- Settings ▸ Privacy ▸ Block cookie banners (Arc's "Block Cookie Banners", off by default).
+- Settings ▸ Privacy ▸ Cookie notices (Arc's "Block Cookie Banners"; on by default in Niche, and done with the community's cookie-notice lists rather than a short list of Niche's own).
 - Easels, first version: File ▸ New Easel (⌃⇧E) opens a canvas in the tab (EaselBrowser, a page
   engine of its own like WebKitBrowser, so sidebar.json is unchanged: the tab's address is
   easel://<id>, the drawing Easels/<id>.json); Library ▸ Easels and Window ▸ View Easels….
@@ -243,6 +243,16 @@ in this sweep (Essential Shortcuts window, Library pages).
 - Boost rows: the site's icon on a 43 pt light tile with a white rim, name 14 pt over the site; under
   the pointer a rounded card and a 36 × 22 pt switch; off = the tile struck through; right-click
   Rename (in place), Delete.
+
+## Where Niche goes its own way on purpose (14 Nov 2026)
+
+- **Downloads tray:** Arc's rows are a thumbnail, a name and an age. Niche's also carry a
+  progress bar, the time left, buttons to pause, resume, cancel, try again and remove, a
+  right-click menu and a "Downloads" / Clear line on top (docs/design.md, "Downloads").
+- **Privacy:** Arc has one "Block Ads & Trackers" switch. Niche adds third-party cookie
+  blocking, tracking-code removal and Global Privacy Control, on by default, and the privacy
+  panel with its shield in the address field (docs/privacy.md). The shield is not one of Arc's
+  URL-field accessories and shows only when a page has something blocked.
 
 ## Left for later, and why
 

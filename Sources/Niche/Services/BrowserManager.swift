@@ -1228,7 +1228,6 @@ final class BrowserManager: NSObject, @preconcurrency NicheBrowserDelegate {
         if committed {
             shareTheme(id, with: browser)
             applyBoost(to: browser, clearing: false)
-            if let css = store.cookieBannerCSS(item: id) { adopt(css, as: "__nicheCookieBanners", in: browser) }
         }
         delegate?.browserManagerDidUpdate(id)
     }

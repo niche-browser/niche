@@ -5,3 +5,6 @@ vendor/
 *.xcworkspace
 .DS_Store
 .swiftpm/
+
+# Shields (Rust): cargo builds under .build/shields; nothing is written here.
+Sources/NicheShields/target/

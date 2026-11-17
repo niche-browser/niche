@@ -63,6 +63,10 @@ final class ShellView: NSView {
     var sidePanelWidth: CGFloat = 0 { didSet { if sidePanelWidth != oldValue { needsLayout = true } } }
     /// The panel page's area (window coordinates), nil while no panel shows.
     var onSidePanelFrame: ((NSRect?) -> Void)?
+    /// The privacy panel (PrivacyPanelCard) at the far right of the panes, right of an extension's
+    /// side panel when both show. Its width is its own; 0 while it is closed.
+    let privacyPanel = PrivacyPanelCard()
+    var privacyPanelWidth: CGFloat = 0 { didSet { if privacyPanelWidth != oldValue { needsLayout = true } } }
     /// Reports the dock area (window coordinates) so the DevTools child window follows it.
     var onDevToolsFrame: ((NSRect) -> Void)?
     /// Reports each pane's page area (window coordinates) so Chrome-style page windows follow it.
@@ -343,6 +347,8 @@ final class ShellView: NSView {
         sidePanelHandle.isHidden = true
         contentContainer.addSubview(sidePanel)
         contentContainer.addSubview(sidePanelHandle)
+        privacyPanel.isHidden = true
+        contentContainer.addSubview(privacyPanel)
         for h in [statusHost, findHost] as [NSView] {
             h.isHidden = true
             contentContainer.addSubview(h)
@@ -517,9 +523,39 @@ final class ShellView: NSView {
     private func sidePanelShownWidth(in bounds: NSRect) -> CGFloat {
         let gap = Double(SplitPaneLayout.Constants.gap)
         let pages = sidePanelPageMinimum
+        // What the privacy panel takes is not there for the side panel.
+        let container = Double(bounds.width - privacyPanelSpace(in: bounds))
         guard sidePanelWidth > 0, hasTab, !contentFullscreen,
-              ExtensionSidePanelWidth.fits(container: Double(bounds.width), gap: gap, pages: pages) else { return 0 }
-        return CGFloat(ExtensionSidePanelWidth.clamp(Double(sidePanelWidth), container: Double(bounds.width), gap: gap, pages: pages)).rounded()
+              ExtensionSidePanelWidth.fits(container: container, gap: gap, pages: pages) else { return 0 }
+        return CGFloat(ExtensionSidePanelWidth.clamp(Double(sidePanelWidth), container: container, gap: gap, pages: pages)).rounded()
+    }
+
+    /// The privacy panel's width in `bounds`, 0 when it doesn't show: closed, no tab, a page in
+    /// full screen, or a window too narrow to keep the panes their minimum beside it.
+    private func privacyPanelShownWidth(in bounds: NSRect) -> CGFloat {
+        guard privacyPanelWidth > 0, hasTab, !contentFullscreen,
+              PrivacyPanelFit.fits(content: Double(bounds.width), panel: Double(privacyPanelWidth),
+                                   gap: Double(SplitPaneLayout.Constants.gap), pages: privacyPanelPageMinimum) else { return 0 }
+        return privacyPanelWidth
+    }
+
+    /// What the panes keep beside the privacy panel (`PrivacyPanelFit`).
+    private var privacyPanelPageMinimum: Double {
+        PrivacyPanelFit.pageMinimum(panes: paneCards.count, paneMinimum: Double(SplitPaneLayout.Constants.minimumPaneLength),
+                                    gap: Double(SplitPaneLayout.Constants.gap), sideBySide: splitOrientation == .horizontal)
+    }
+
+    /// How much wider the window must be for a privacy panel `width` wide to show beside the
+    /// pages; 0 when it fits.
+    func privacyPanelShortfall(width: CGFloat) -> CGFloat {
+        CGFloat(PrivacyPanelFit.shortfall(content: Double(contentContainer.bounds.width), panel: Double(width),
+                                          gap: Double(SplitPaneLayout.Constants.gap), pages: privacyPanelPageMinimum))
+    }
+
+    /// The privacy panel with the gap before it.
+    private func privacyPanelSpace(in bounds: NSRect) -> CGFloat {
+        let w = privacyPanelShownWidth(in: bounds)
+        return w > 0 ? w + SplitPaneLayout.Constants.gap : 0
     }
 
     /// What the panes need beside the side panel: each split pane keeps its minimum.
@@ -531,8 +567,9 @@ final class ShellView: NSView {
     /// The panes' share of `bounds`: all of it, less the side panel and its gap on the right.
     private func paneArea(in bounds: NSRect) -> NSRect {
         let w = sidePanelShownWidth(in: bounds)
-        guard w > 0 else { return bounds }
-        return NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width - w - SplitPaneLayout.Constants.gap, height: bounds.height)
+        let taken = privacyPanelSpace(in: bounds) + (w > 0 ? w + SplitPaneLayout.Constants.gap : 0)
+        guard taken > 0 else { return bounds }
+        return NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width - taken, height: bounds.height)
     }
 
     private func paneLayout(in bounds: NSRect) -> SplitPaneLayout.Result {
@@ -826,12 +863,21 @@ final class ShellView: NSView {
     }
 
     private func layoutSidePanel(in cb: NSRect) {
+        let privacy = privacyPanelShownWidth(in: cb)
+        privacyPanel.isHidden = privacy == 0
+        if privacy > 0 {
+            let f = NSRect(x: cb.maxX - privacy, y: cb.minY, width: privacy, height: cb.height)
+            if privacyPanel.frame != f { privacyPanel.frame = f }
+            privacyPanel.cornerRadius = edgeToEdge ? 0 : NicheMetrics.contentCornerRadius
+            privacyPanel.castsShadow = !edgeToEdge
+            privacyPanel.layoutSubtreeIfNeeded()
+        }
         let w = sidePanelShownWidth(in: cb)
         sidePanel.isHidden = w == 0
         sidePanelHandle.isHidden = w == 0
         guard w > 0 else { onSidePanelFrame?(nil); return }
         let gap = SplitPaneLayout.Constants.gap
-        let f = NSRect(x: cb.maxX - w, y: cb.minY, width: w, height: cb.height)
+        let f = NSRect(x: cb.maxX - privacyPanelSpace(in: cb) - w, y: cb.minY, width: w, height: cb.height)
         if sidePanel.frame != f { sidePanel.frame = f }
         sidePanel.cornerRadius = edgeToEdge ? 0 : NicheMetrics.contentCornerRadius
         sidePanel.castsShadow = !edgeToEdge

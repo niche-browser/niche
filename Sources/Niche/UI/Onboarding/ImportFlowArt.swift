@@ -117,7 +117,7 @@ struct ImportArtPanel: View {
             case .cover:
                 CoverArt(colors: colors)
             case .privacy:
-                EmptyView()
+                PrivacyArt(level: model.privacyLevel, colors: colors)
             case .personalization:
                 // A live preview of a Niche window in the picked theme colour and layout.
                 WindowMock(theme: theme, colors: colors, origin: CGPoint(x: 90, y: 80), sidebarWidth: 210,
@@ -250,6 +250,141 @@ private struct ArtBackdrop: View {
                 .opacity(dark ? Palette.grainDark : Palette.grainLight).blendMode(dark ? .screen : .multiply)
         }
         .frame(width: Metrics.panel.width, height: Metrics.panel.height)
+    }
+}
+
+// MARK: - Privacy
+
+/// The privacy step's scene: Niche's shield with what the web throws at a page drifting round
+/// it. What the picked level stops is struck out and held off beyond the shield's ring; what it
+/// lets through comes in close. Under it, the level's three promises.
+private struct PrivacyArt: View {
+    let level: PrivacyLevel
+    let colors: ImportColors
+    @State private var drift = false
+
+    /// What comes at a page, where it sits round the shield (degrees, 0 at the top), and the
+    /// lowest level that stops it.
+    private static let threats: [(name: String, symbol: String, angle: Double, from: PrivacyLevel)] = [
+        ("Ads", "megaphone", 0, .balanced),
+        ("Cookie notices", "checkmark.rectangle.stack", 55, .balanced),
+        ("Cross-site cookies", "person.2", 125, .balanced),
+        ("Pop-ups", "bell", 180, .strict),
+        ("Dangerous sites", "exclamationmark.triangle", 235, .relaxed),
+        ("Trackers", "eye", 305, .relaxed),
+    ]
+
+    private func stops(_ from: PrivacyLevel) -> Bool {
+        PrivacyLevel.allCases.firstIndex(of: level)! >= PrivacyLevel.allCases.firstIndex(of: from)!
+    }
+
+    var body: some View {
+        let m = PrivacyArtMetrics.self
+        let glow = Design.accent
+        ZStack(alignment: .topLeading) {
+            // The shield's reach: rings that tighten as the level rises.
+            ForEach(Array(m.rings.enumerated()), id: \.offset) { i, radius in
+                Circle()
+                    .strokeBorder(i == 0 ? glow.opacity(m.ringStrong) : colors.ink.opacity(m.ringFaint), lineWidth: i == 0 ? Design.Space.hair + Design.Space.hair / 2 : Design.Space.hair)
+                    .frame(width: radius * 2, height: radius * 2)
+                    .position(m.centre)
+            }
+            Circle().fill(glow.opacity(level == .relaxed ? m.haloLow : level == .balanced ? m.haloMid : m.haloHigh))
+                .frame(width: m.halo, height: m.halo).blur(radius: m.haloBlur)
+                .position(m.centre)
+            Image(systemName: level.symbol)
+                .font(.system(size: m.shield, weight: .regular))
+                .foregroundStyle(LinearGradient(colors: [glow.blendedToward(.white, m.shieldLift), glow], startPoint: .top, endPoint: .bottom))
+                .shadow(color: glow.opacity(m.shieldGlow), radius: m.shieldGlowRadius)
+                .contentTransition(.symbolEffect(.replace))
+                .position(m.centre)
+                .accessibilityHidden(true)
+            ForEach(Array(Self.threats.enumerated()), id: \.offset) { i, threat in
+                let stopped = stops(threat.from)
+                let radius = stopped ? m.held : m.near
+                let angle = (threat.angle - 90) * .pi / 180
+                PrivacyThreatChip(name: threat.name, symbol: threat.symbol, stopped: stopped, colors: colors)
+                    .position(x: m.centre.x + cos(angle) * radius * m.squash, y: m.centre.y + sin(angle) * radius)
+                    .offset(y: drift ? m.drift : -m.drift)
+                    .animation(Design.Motion.reduced ? nil : .easeInOut(duration: m.driftPeriod + Double(i) * m.driftStagger).repeatForever(autoreverses: true), value: drift)
+            }
+            VStack(alignment: .leading, spacing: Design.Space.m) {
+                ForEach(level.points, id: \.self) { point in
+                    HStack(spacing: Design.Space.m) {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: Design.Icon.bar)).foregroundStyle(glow)
+                        Text(point).font(Design.Font.control).foregroundStyle(colors.title)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+            .id(level)
+            .padding(.horizontal, Design.Space.xl).padding(.vertical, Design.Space.l)
+            .frame(width: m.promises, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous).fill(colors.dark ? Design.fillOnDarkColor(.hover) : Palette.glassLight))
+            .overlay(RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous).strokeBorder(colors.dark ? colors.hairline : Palette.rimLight))
+            .position(x: m.centre.x, y: m.promisesY)
+            .accessibilityElement(children: .combine)
+        }
+        .onAppear { drift = true }
+    }
+}
+
+private enum PrivacyArtMetrics {
+    /// The shield's middle in the panel, its glyph, and the glow behind it.
+    static let centre = CGPoint(x: 262, y: 196)
+    static let shield: CGFloat = 104
+    static let shieldLift = 0.3
+    static let shieldGlow = 0.55
+    static let shieldGlowRadius: CGFloat = 26
+    static let halo: CGFloat = 210
+    static let haloBlur: CGFloat = 46
+    static let haloLow = 0.16
+    static let haloMid = 0.26
+    static let haloHigh = 0.38
+    /// The shield's ring, and two fainter ones outside it.
+    static let rings: [CGFloat] = [96, 138, 180]
+    static let ringStrong = 0.7
+    static let ringFaint = 0.08
+    /// How far from the shield a chip sits when it is let through, and when it is held off; the
+    /// ellipse is narrower than tall so chips stay inside the panel.
+    static let near: CGFloat = 126
+    static let held: CGFloat = 172
+    static let squash: CGFloat = 0.8
+    /// The chips' slow bob.
+    static let drift: CGFloat = 4
+    static let driftPeriod: TimeInterval = 2.6
+    static let driftStagger: TimeInterval = 0.35
+    /// The card of promises under the scene.
+    static let promises: CGFloat = 300
+    static let promisesY: CGFloat = 452
+    /// A stopped chip.
+    static let stoppedOpacity = 0.55
+}
+
+/// One thing the web throws at a page: struck out when the level stops it.
+private struct PrivacyThreatChip: View {
+    let name: String
+    let symbol: String
+    let stopped: Bool
+    let colors: ImportColors
+
+    var body: some View {
+        HStack(spacing: Design.Space.s) {
+            Image(systemName: stopped ? "xmark" : symbol)
+                .font(.system(size: Design.Icon.small, weight: .semibold))
+                .foregroundStyle(stopped ? Design.accent : colors.body)
+                .contentTransition(.symbolEffect(.replace))
+            Text(name).font(Design.Font.ui(.caption, .medium))
+                .strikethrough(stopped, color: colors.caption)
+                .foregroundStyle(stopped ? colors.caption : colors.title)
+        }
+        .padding(.horizontal, Design.Space.l).padding(.vertical, Design.Space.s)
+        .background(Capsule().fill(colors.dark ? Design.panelDarkColor : Palette.discLight))
+        .overlay(Capsule().strokeBorder(stopped ? Design.accent.opacity(PrivacyArtMetrics.stoppedOpacity) : colors.hairline))
+        .shadow(color: colors.dark ? Palette.float : Palette.lift, radius: Design.Shadow.cardRadius, y: Design.Shadow.cardOffset)
+        .opacity(stopped ? PrivacyArtMetrics.stoppedOpacity + (1 - PrivacyArtMetrics.stoppedOpacity) / 2 : 1)
+        .fixedSize()
+        .accessibilityLabel(stopped ? "\(name): stopped" : "\(name): let through")
     }
 }
 

@@ -70,6 +70,7 @@ build() {
   touch "$STAMP"
   scripts/fetch-cef.sh >/dev/null || return 1
   scripts/fetch-sparkle.sh >/dev/null || return 1
+  scripts/build-shields.sh || return 1
   swift build -c debug --scratch-path "$SCRATCH" || return 1
   local bin
   bin="$(swift build -c debug --scratch-path "$SCRATCH" --show-bin-path)" || return 1
@@ -95,7 +96,7 @@ build() {
     fi
   done
   cp "$bin/Niche" "$APP/Contents/MacOS/$NAME" || return 1
-  for d in web brand blocklist browsers app-icons licenses fonts; do
+  for d in web brand browsers app-icons licenses fonts; do
     if [ -d "resources/$d" ]; then
       rsync -a --delete "resources/$d/" "$APP/Contents/Resources/$d/" || return 1
     fi

@@ -1,0 +1,6 @@
+! Scenario fixture: cookie notices hidden by a generic rule and a site rule, and one answered
+! by a scriptlet before the page's own scripts run.
+##.shields-cookie-banner
+127.0.0.1###shields-consent-wall
+127.0.0.1##+js(set-flag, answered)
+127.0.0.1##.shields-promo:has-text(Subscribe)

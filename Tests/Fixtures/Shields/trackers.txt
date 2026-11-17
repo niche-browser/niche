@@ -1,0 +1,6 @@
+! Scenario fixture: what the test instance's Shields block. The hosts are the run's own server
+! under other names (host-resolver-rules), so nothing leaves the Mac.
+||doubleclick.net^$third-party
+/shields-first-party-ad.js$script
+||shields-stand-in.test^*analytics.js$script,redirect=noop.js
+$removeparam=fbclid

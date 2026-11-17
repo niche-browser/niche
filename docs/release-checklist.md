@@ -109,6 +109,30 @@ built release app with a test profile. Note anything that fails in the release's
   point, also in the first seconds; with the pointer away it is the bare video. On hover: Back to
   Tab on the left (with its words from 400 pt wide), the host centred and whole, Close on the
   right, one even dim layer.
+- Start a large download and hover its row in the tray over the Library button: pause holds it
+  (the file stops growing, the bar turns grey), resume carries on, ✕ cancels and the row says
+  "Cancelled" with its name; Try Again on it starts over, and on a failed one (pull the network
+  mid-download) carries on from the bytes it has. A long name ends short of the sidebar's edge.
+  Right-click a finished row: Move to Trash, Show in Finder, Copy Download Link; Clear empties
+  the list and leaves the files.
+- Browse to a news site with the privacy panel closed, then click the shield in the address
+  field: the panel has the whole page at once (companies, "On this page", "Who is here") and asks
+  for no reload. Go to another page and Back: each page shows its own record. In a window about
+  1000 pt wide the panel still shows; in a narrower one the window grows. On youtube.com Google is
+  "This site", not a tracker. Click a link from one site to another where you are signed in: you
+  arrive signed in. In an incognito window block a company, close the window, and check
+  privacy.json and privacy-stats.json did not change.
+- Shields: on a new profile the first launch gets the filter lists within seconds (Settings ▸
+  Privacy says how many rules are loaded). A news site shows no ad slots and no cookie notice;
+  womex.com opens without its notice (answered "essential only"). Switch Ads off in Settings: ads
+  come back on the next load, and the level reads Custom. Pick Strict, then Balanced: the
+  switches follow. "Update Now" reports nothing new on a second press. Onboarding's privacy
+  step: the three cards, the shield filling with the level, and the chips struck out to match.
+- The panel lists the companies, the blocked ones in green outside the ring. Open one that "Sees you", press Block on
+  This Site, Reload: it moves to Blocked and the page still reads. Undo, and turn "Protect me on
+  this site" off and on. Check it in light and dark, and with the toolbar shown (View ▸ Show
+  Toolbar): the shield sits before the sliders. Sign in to a site with an embedded login or
+  comments (third-party cookies are blocked by default): what breaks is worth an issue.
 - **#178:** in a split, the focused pane's ring shows (also over docked DevTools), and so does
   the card shadow.
 - Add Split View (⌃⇧=) on a tab, then pick a favorite in the bar: its page opens in the new

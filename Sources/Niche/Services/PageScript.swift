@@ -20,6 +20,9 @@ import Foundation
 ///   the page's world tells this world through the same per-launch event name.
 /// - On the Chrome Web Store only, `WebStoreBranding` (NicheCore): "Add to Niche" on the install
 ///   button and no "Switch to Chrome" card or banner.
+/// - `probes`: what the page was seen reading to recognise this Mac (`PrivacyProbeScript`), kept
+///   until the privacy panel reads it. The page's world gets the watch that notices on every
+///   page (Settings ▸ Privacy, "Notice fingerprinting").
 /// - `lt`: the top frame's long tasks (50 ms or more) for the performance recorder (GitHub #91):
 ///   a count, the total and the last 100 durations, which Niche reads and resets for the visible
 ///   tab every few seconds. No attribution, no addresses; the observer only runs when a long
@@ -46,14 +49,35 @@ enum PageScript {
     })();
     """
 
+    /// The event the fingerprinting watch (`PrivacyProbeScript`) reports on, from the page's world
+    /// to Niche's: random per launch like the others.
+    static let probeEvent = channel + "p"
+
+    /// The page's world in Chromium: the Widevine wrapper, and Global Privacy Control's property
+    /// when Settings ▸ Privacy sends the signal (the header goes out with it, NicheCEFRuntime).
+    static func mainWorld(globalPrivacyControl: Bool) -> String {
+        guard globalPrivacyControl else { return mainWorld }
+        return mainWorld + """
+
+        (() => {
+          const proto = window.Navigator?.prototype;
+          if (!proto || 'globalPrivacyControl' in proto) return;
+          Object.defineProperty(proto, 'globalPrivacyControl', { configurable: true, enumerable: true, get: { get globalPrivacyControl() { return true; } }
+            .__lookupGetter__('globalPrivacyControl') });
+        })();
+        """
+    }
+
     /// The page's world, in both engines: the Widevine request wrapper.
     static let mainWorld = """
     (() => {
       const proto = window.Navigator?.prototype, request = proto?.requestMediaKeySystemAccess;
       if (!request) return;
+      // Taken now: a page that replaces them later doesn't learn the event's name.
+      const dispatch = EventTarget.prototype.dispatchEvent, Told = CustomEvent;
       Object.defineProperty(proto, 'requestMediaKeySystemAccess', { configurable: true, writable: true,
         value: { requestMediaKeySystemAccess(keySystem, configs) {
-          if (String(keySystem).startsWith('com.widevine')) dispatchEvent(new CustomEvent('\(channel)d'));
+          if (String(keySystem).startsWith('com.widevine')) dispatch.call(window, new Told('\(channel)d'));
           return request.call(this, keySystem, configs);
         } }.requestMediaKeySystemAccess });
     })();
@@ -71,6 +95,7 @@ enum PageScript {
       }, true);
       addEventListener('\(channel)r', e => { niche.handlers = String(e.detail || '').split(',').filter(Boolean); });
       addEventListener('\(channel)d', () => { niche.drm = true; });
+      \(PrivacyProbeScript.listener(event: probeEvent))
       niche.send = action => dispatchEvent(new CustomEvent('\(channel)', { detail: action }));
       niche.query = () => (niche.send('?'), niche.handlers);
       if (window.top === window) try {

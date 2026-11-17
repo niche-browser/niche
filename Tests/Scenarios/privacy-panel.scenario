@@ -1,0 +1,51 @@
+# The privacy panel (14 Nov 2026): who a page talks to, what was blocked, and the user's own block.
+# The fixture page asks three other hosts for a script: an ad host on the block list, a host
+# nobody knows whose script reads a canvas back (fingerprinting), and a CDN. The hosts are this
+# run's own server under other names, so nothing leaves the Mac.
+port 8131
+arg --host-resolver-rules=MAP *.test 127.0.0.1, MAP *.doubleclick.net 127.0.0.1, MAP *.jsdelivr.net 127.0.0.1
+budget rss=800 stalls50=12
+expect-log Shields ready: 2 lists
+
+# Never opened: the page is recorded all the same, from its first request, on the first page of
+# a new tab (17 Nov 2026: the panel used to know only what was blocked until the page was
+# reloaded with it open). Everyone the page talks to, and the canvas read.
+niche://open?url=http://news.test:8131/privacy.html
+expect-log loaded news\.test \(HTTP 200\)
+wait 3
+niche://debug?privacy=closed
+expect-log privacy\[closed\] open=false site=news\.test companies=3 blocked=1 see-you=1 other=1 requests-blocked=1 .*widgets\.test=sees-you\(0/1\) probes=canvas google=blocked\(1/1\) jsdelivr=allowed\(0/1\)
+
+# Opened afterwards: the same story, with no reload.
+niche://debug?privacyPanel=1
+expect-log Privacy panel opened
+wait 1
+niche://debug?privacy=watched
+expect-log privacy\[watched\] open=true site=news\.test companies=3 blocked=1 see-you=1 other=1 requests-blocked=1 .*widgets\.test=sees-you\(0/1\) probes=canvas google=blocked\(1/1\) jsdelivr=allowed\(0/1\)
+
+# The user's own block, on this site: the CDN is cut off from the next load on.
+niche://debug?privacyRule=blockedHere&party=jsdelivr
+expect-log Privacy rule: blockedHere
+niche://action/hardReload
+wait 4
+niche://debug?privacy=ruled
+expect-log privacy\[ruled\] open=true site=news\.test companies=3 blocked=2 see-you=1 other=0 requests-blocked=2 .*jsdelivr=blocked\(1/1\)
+
+# Protection off for the site: nothing is blocked there, the user's block included.
+niche://debug?privacyProtection=off
+expect-log Privacy protection off for a site
+niche://action/hardReload
+wait 4
+niche://debug?privacy=unprotected
+expect-log privacy\[unprotected\] open=true site=news\.test companies=3 blocked=0 see-you=2 other=1 requests-blocked=0
+
+# Back on, the rule undone, the panel closed: as it began.
+niche://debug?privacyProtection=on
+niche://debug?privacyRule=standard&party=jsdelivr
+niche://debug?privacyPanel=0
+expect-log Privacy panel closed
+niche://action/hardReload
+wait 3
+niche://debug?privacy=after
+expect-log privacy\[after\] open=false site=news\.test companies=3 blocked=1 see-you=1 other=1 requests-blocked=1
+niche://debug?checkStore=1

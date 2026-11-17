@@ -1,0 +1,11 @@
+adblock-rust
+https://github.com/brave/adblock-rust
+Copyright (c) Brave Software, Inc. and contributors
+
+Niche's Shields engine is built on adblock-rust, used unmodified under the Mozilla Public
+License, version 2.0. Its source is at the address above; the licence is at
+https://www.mozilla.org/MPL/2.0/.
+
+The filter lists Shields downloads (EasyList, EasyPrivacy, uBlock Origin's uAssets, AdGuard's
+filters and others) and uBlock Origin's scriptlets are not part of Niche. Each is credited, with
+its licence, in Settings > Privacy > Credits.

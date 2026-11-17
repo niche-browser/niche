@@ -6,3 +6,5 @@ TEST_DIR="$(mktemp -d /tmp/niche-engine-policy-tests.XXXXXX)"
 trap 'rm -rf "$TEST_DIR"' EXIT
 xcrun clang++ -std=c++20 -Wall -Wextra -Werror Tests/Engine/ProtocolPolicyTests.cc -o "$TEST_DIR/engine-policy-tests"
 "$TEST_DIR/engine-policy-tests"
+xcrun clang++ -std=c++20 -Wall -Wextra -Werror Tests/Engine/ContentBlockerTests.cc -o "$TEST_DIR/content-blocker-tests"
+"$TEST_DIR/content-blocker-tests"

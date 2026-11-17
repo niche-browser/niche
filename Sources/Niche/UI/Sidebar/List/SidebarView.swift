@@ -39,7 +39,7 @@ final class SidebarView: NSView {
         palette = store.focusedSpace(window: ui.windowID).theme.palette
         topBar = SidebarTopBarView(store: store, ui: ui, actions: actions)
         pager = SpacePagerView(store: store, ui: ui, actions: actions, favicons: favicons)
-        trayHost = DownloadsTrayView(ui: ui)
+        trayHost = DownloadsTrayView(ui: ui, showAll: { actions.showLibrary(.downloads) })
         player = NowPlayingTrayView(store: store, ui: ui, favicons: favicons)
         dock = SpaceDockView(store: store, ui: ui, actions: actions)
         super.init(frame: .zero)
@@ -145,6 +145,9 @@ final class SidebarView: NSView {
     }
 
     private var bannerHeight: CGFloat = 0
+
+    /// `niche://debug?downloadsHover=<row>` (DownloadsTrayView.debugHover).
+    func debugHoverDownload(row: Int) { trayHost.debugHover(row: row) }
 
     /// DownloadsTrayMask: the tab list is hidden from 3 pt above the downloads list's first row
     /// and fades back in over the 170 pt above that.
@@ -471,7 +474,8 @@ final class SidebarTopBarView: NSView {
                 }
             }
             pill.show(text: text, url: url, hasTab: tab != nil, colors: colors, active: active,
-                      pinned: pinned, protectedMedia: tab.flatMap { ui.navState(for: $0.id).protectedMedia })
+                      pinned: pinned, protectedMedia: tab.flatMap { ui.navState(for: $0.id).protectedMedia },
+                      blocked: tab.map { PrivacyMonitor.shared.blocked(tab: $0.id, pageURL: url) } ?? 0, privacyOpen: ui.privacyPanelOpen)
         }
         needsLayout = true
         if wasCompact != compact { superview?.superview?.needsLayout = true }
@@ -703,6 +707,11 @@ final class SidebarURLPill: NSView {
     private var colors = SidebarColors()
     private var hasTab = false
     private var model: (pinned: [(String, String, NSImage?)], active: Bool)?
+    /// The shield with the page's blocked count (ToolbarPrivacyChip): there, hovered or not, while
+    /// the page has blocked requests to count or the privacy panel is open. It is the way into the
+    /// panel with the toolbar hidden, and not one of Arc's accessories.
+    private let privacyChip = ToolbarPrivacyChip()
+    private var showsPrivacyChip = false
 
     override init(frame: NSRect) {
         tip = ArcTooltipAnchorView(frame: .zero)
@@ -715,6 +724,9 @@ final class SidebarURLPill: NSView {
         tip.followsCursor = true
         tip.autoresizingMask = [.width, .height]
         addSubview(tip)
+        privacyChip.isHidden = true
+        privacyChip.action = { [weak self] in self?.actions?.performAction("togglePrivacyPanel") }
+        addSubview(privacyChip)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -723,7 +735,10 @@ final class SidebarURLPill: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     func show(text: String, url: String, hasTab: Bool, colors: SidebarColors, active: Bool,
-              pinned: [(String, String, NSImage?)], protectedMedia: String? = nil) {
+              pinned: [(String, String, NSImage?)], protectedMedia: String? = nil, blocked: Int = 0, privacyOpen: Bool = false) {
+        // On every website, counting or not: the way into the privacy panel is always in the same place.
+        showsPrivacyChip = hasTab && protectedMedia == nil && (blocked > 0 || privacyOpen || PrivacySite.site(ofURL: url) != nil)
+        privacyChip.show(blocked: blocked, lit: privacyOpen, ink: colors.textSecondary, hover: colors.plate(.hover))
         self.protectedMedia = protectedMedia
         self.colors = colors
         self.hasTab = hasTab
@@ -804,6 +819,14 @@ final class SidebarURLPill: NSView {
         for v in accessories.reversed() {
             right -= 28
             v.frame = NSRect(x: right, y: (h - 28) / 2, width: 28, height: 28)
+        }
+        // The shield, before the accessories; a field too narrow for an address beside it goes without.
+        let cw = privacyChip.fittingWidth
+        let chip = showsPrivacyChip && right - cw - Design.Space.xxs > ToolbarPrivacyChip.addressMinimum
+        privacyChip.isHidden = !chip
+        if chip {
+            right -= cw + (accessories.isEmpty ? 0 : Design.Space.xxs)
+            privacyChip.frame = NSRect(x: right, y: (h - Design.Space.controlCompact) / 2, width: cw, height: Design.Space.controlCompact)
         }
         let x: CGFloat = 12
         let lh = label.intrinsicContentSize.height
@@ -1370,15 +1393,19 @@ final class LibraryButtonView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     private func observe() {
-        let (download, active, live) = withObservationTracking { (ui.recentDownload, ui.appActive, DownloadHistory.shared.live) } onChange: { [weak self] in
+        let (download, active, live, trayOpen) = withObservationTracking {
+            (ui.recentDownload, ui.appActive, DownloadHistory.shared.live, ui.downloadsListOpen)
+        } onChange: { [weak self] in
             Task { @MainActor in self?.observe() }
         }
         let progress = DownloadProgressRing.ring(for: live)
         // The thumbnail carries the progress when there is one; the ring round the glyph otherwise.
-        ring.isHidden = download != nil
+        // With the list open the file is a row in it; its thumbnail steps aside so it doesn't sit
+        // on the last row, and the ring carries the progress meanwhile.
+        ring.isHidden = download != nil && !trayOpen
         show(progress)
         guard let download else { bin.isHidden = true; shownDownload = nil; return }
-        bin.isHidden = false
+        bin.isHidden = trayOpen
         binImage.contents = download.image
         binFill.contents = download.image
         fillBin(progress)

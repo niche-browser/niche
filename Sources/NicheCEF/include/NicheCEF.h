@@ -29,6 +29,73 @@ typedef NS_ENUM(NSInteger, NicheLinkWindow) {
 @property (nonatomic) int64_t totalBytes;
 @property (nonatomic) NSInteger percent;
 @property (nonatomic) NicheDownloadState state;
+/// In progress, but held by Pause until Resume.
+@property (nonatomic) BOOL paused;
+@end
+
+/// What a page did that the privacy panel shows (NicheCEFRuntime.setPrivacyEventHandler).
+typedef NS_ENUM(NSInteger, NichePrivacyEventKind) {
+    /// The tab asked for another top-level page: what was gathered for the last one is over.
+    NichePrivacyEventKindNavigation = 0,
+    /// A request to another site than the page's: let through, or blocked (`verdict`).
+    NichePrivacyEventKindRequest = 1,
+    /// A cookie a request to another site would carry (`detail` is its name); `verdict` 1 when
+    /// it was held back.
+    NichePrivacyEventKindCookieSent = 2,
+    /// A cookie another site's answer would leave (`detail` its name, `cookieDays` how long it
+    /// lasts); `verdict` 1 when it was held back.
+    NichePrivacyEventKindCookieSaved = 3,
+    /// Click identifiers were taken off the page's address before it was asked for.
+    NichePrivacyEventKindCleanedAddress = 4,
+};
+
+@interface NichePrivacyEvent : NSObject
+@property (nonatomic) NichePrivacyEventKind kind;
+/// The browser it happened in (NicheBrowser.browserIdentifier).
+@property (nonatomic) NSInteger browser;
+/// The host asked, its site (registrable domain) and the site of the tab's top-level page.
+@property (nonatomic, copy) NSString *host;
+@property (nonatomic, copy) NSString *site;
+@property (nonatomic, copy) NSString *pageSite;
+/// What was asked for: page, frame, script, style, image, font, media, data, ping or other.
+@property (nonatomic, copy) NSString *resource;
+/// 0 let through, 1 blocked by the list, 2 blocked by the user's own rule.
+@property (nonatomic) NSInteger verdict;
+/// On the ad and tracker list, blocked or not.
+@property (nonatomic) BOOL listed;
+/// For a request that was let through: the method, whether it says which site it came from and
+/// which page, and how many bytes it sends up.
+@property (nonatomic, copy) NSString *method;
+@property (nonatomic) BOOL sendsSite;
+@property (nonatomic) BOOL sendsPage;
+@property (nonatomic) int64_t bytesSent;
+/// A cookie's name.
+@property (nonatomic, copy) NSString *detail;
+/// How long a saved cookie lasts, in days; 0 until the browser quits.
+@property (nonatomic) double cookieDays;
+/// A request's address as a hash: the same address asked for twice has the same key. Never the
+/// address itself.
+@property (nonatomic) uint64_t key;
+/// The top-level page it happened on, as `privacyPageKeyForURL:` numbers it. For a page change,
+/// the page asked for.
+@property (nonatomic) uint64_t pageKey;
+/// For a request the lists blocked: the group of the list that did (as given to
+/// NicheShieldsBuild); -1 otherwise.
+@property (nonatomic) NSInteger group;
+@end
+
+/// Builds a Shields engine from filter lists and makes it the one in use. Building parses
+/// hundreds of thousands of rules (about a tenth of a second): do it off the main thread.
+@interface NicheShieldsBuild : NSObject
+/// One list's text. `group` is the caller's number for what the list is for; it comes back
+/// with every request the list blocks. `trusted`: the list may use the scriptlets that set
+/// cookies and storage (the lists Niche ships, never one the user added).
+- (void)addList:(NSData *)text group:(NSInteger)group trusted:(BOOL)trusted;
+/// Resources as JSON (adblock-rust's format): scriptlets (`forPages`) and the stand-ins served
+/// for blocked requests.
+- (void)addResources:(NSData *)json forPages:(BOOL)forPages;
+/// Builds and installs. Returns how many rules the lists held. The builder is spent.
+- (NSInteger)install;
 @end
 
 /// The connection of the page on screen (Chromium's SSL status of the visible navigation entry).
@@ -166,6 +233,8 @@ typedef NS_ENUM(NSInteger, NicheLinkWindow) {
 /// Anything you want to hang on the browser (Swift stores the tab id).
 @property (nonatomic, strong, nullable) id userInfo;
 /// Runs in the shared off-the-record profile (+[NicheCEFRuntime endIncognitoSession]).
+/// Chromium's number for this browser (0 before it exists), as NichePrivacyEvent.browser names it.
+@property (nonatomic, readonly) NSInteger browserIdentifier;
 @property (nonatomic, readonly) BOOL isIncognito;
 /// The profile folder this page's cookies, logins and storage live in (a space's own
 /// profile, under the cache root), or nil for the Default profile.
@@ -269,16 +338,49 @@ typedef NS_ENUM(NSInteger, NicheLinkWindow) {
 /// document already loaded): `script` in the page's world, `isolatedScript` in the isolated
 /// world named `world` (invisible to the page). Set before browsers are created.
 + (void)setDocumentStartScript:(NSString *)script isolatedScript:(NSString *)isolatedScript world:(NSString *)world;
-/// Third-party ad and tracker blocking: subresource and subframe requests whose host
-/// (or a parent domain) is on the blocked list are cancelled when they are third-party
-/// to the tab's top-level page. Main-frame navigations always load. Takes effect for
-/// the next request, any time, from any thread. Off until enabled.
-+ (void)setContentBlockingEnabled:(BOOL)enabled;
-+ (BOOL)contentBlockingEnabled;
+/// Shields, the filter engine (Sources/NicheShields): a request a page makes is cancelled when
+/// one of the installed lists' rules says so (unless the user allowed it, or switched protection
+/// off for the page's site), a blocked script some pages need is answered with a harmless
+/// stand-in, tracking codes come off a page's address, and pages are told what to hide. Nothing
+/// is blocked until an engine is installed (NicheShieldsBuilder).
++ (BOOL)shieldsInstalled;
+/// Takes the engine out: nothing is blocked or hidden by the lists.
++ (void)removeShields;
+/// Settings ▸ Privacy "Remove tracking codes from links": the installed lists' rules for it apply
+/// to a page's address before it is asked for.
++ (void)setTrackingCodeRemoval:(BOOL)enabled;
+/// NicheCore's ShieldsPageScript.content: what pages are given to hide what the lists say.
++ (void)setShieldsPageScript:(NSString *)script;
+/// What the engine says about one request, for checks and the log: "blocked=1 exception=0
+/// group=1 stand-in=0 rewritten=-", or "no engine".
++ (NSString *)shieldsVerdictForURL:(NSString *)url onPageURL:(NSString *)pageURL type:(NSString *)type;
+/// The privacy panel's feed, on the main thread in batches a few times a second at most: every
+/// page change, every request to another site than the page's and every cookie it gets back or
+/// leaves, all the time, so a panel opened later has the page's whole story. Nothing is kept
+/// by the bridge.
++ (void)setPrivacyEventHandler:(void (^)(NSArray<NichePrivacyEvent *> *events))handler;
+/// A page's address as events name it (`NichePrivacyEvent.pageKey`): a hash of it without its
+/// fragment, the same for the run of the app.
++ (uint64_t)privacyPageKeyForURL:(NSString *)url;
+/// The user's own rules on top of the list (niche_blocker::Rules): domains blocked or allowed on
+/// every site, the same per site of the top-level page, and sites where nothing is blocked.
+/// Domains cover their subdomains. Takes effect for the next request.
++ (void)setPrivacyRulesBlocked:(NSArray<NSString *> *)blocked allowed:(NSArray<NSString *> *)allowed
+                     blockedOn:(NSDictionary<NSString *, NSArray<NSString *> *> *)blockedOn
+                     allowedOn:(NSDictionary<NSString *, NSArray<NSString *> *> *)allowedOn
+                      offSites:(NSArray<NSString *> *)offSites;
+/// Global Privacy Control: every request says "Sec-GPC: 1" (do not sell or share my data).
++ (void)setGlobalPrivacyControl:(BOOL)enabled;
 /// Chrome's HTTPS-Only Mode ("Always use secure connections") in every profile:
 /// http:// navigations are upgraded, and a site without HTTPS shows Chrome's warning
 /// page before it loads. Profiles that load later get it too. Off until enabled.
 + (void)setHttpsOnlyModeEnabled:(BOOL)enabled;
+/// "Block third-party cookies" in every profile: a site embedded in another site's page
+/// neither gets its cookies back nor sets new ones, on the network or from a script. On a site
+/// where the user turned protection off the network side is lifted; a script in an embedded
+/// frame still can't use cookies there (Chromium's profile setting has no per-site exception
+/// Niche can set: docs/privacy.md). Profiles that load later get it too.
++ (void)setThirdPartyCookiesBlocked:(BOOL)blocked;
 /// Arc's View ▸ Appearance ("Websites, Easels, and Notes will use:"): 0 Automatic (the Mac's),
 /// 1 Light, 2 Dark. Chrome's colour mode in every profile, which pages' prefers-color-scheme and
 /// Chrome's own pages follow; profiles that load later get it too.
@@ -297,15 +399,6 @@ typedef NS_ENUM(NSInteger, NicheLinkWindow) {
 /// Called on the main queue once Chromium is ready (at once if it already is) and after the
 /// secure DNS setting changes.
 + (void)setSecureDNSChangeHandler:(nullable void (^)(void))handler;
-/// Replaces the blocked list (bare domains; a domain also covers its subdomains).
-+ (void)setBlockedDomains:(NSArray<NSString *> *)domains;
-/// Reads and installs a list file off the main thread: one domain per line or
-/// hosts-file lines ("0.0.0.0 example.com"), # comments. The completion gets the
-/// domain count (0 when the file can't be read) on the main queue.
-+ (void)loadBlockedDomainsFromFile:(NSString *)path completion:(nullable void (^)(NSInteger count))completion;
-+ (NSInteger)blockedDomainCount;
-/// The blocking decision for a request made by a page, for diagnostics and tests.
-+ (BOOL)shouldBlockRequestURL:(NSString *)requestURL onPageURL:(NSString *)pageURL;
 /// Unpacked extension folders to load with --load-extension, set before initializing, and
 /// for each in the same order the profile folders that load it ("Default|Profile <id>", "*"
 /// for every profile), comma-separated; nil when every one loads in every profile.
@@ -349,6 +442,16 @@ typedef NS_ENUM(NSInteger, NicheLinkWindow) {
 /// the user closed). Without a handler downloads go to ~/Downloads.
 + (void)setDownloadDestinationHandler:(void (^)(NSString * _Nullable profilePath, NSString *suggestedName,
                                                 void (^completion)(NSString * _Nullable path)))handler;
+/// A download by its identifier (NicheDownloadInfo): hold it, carry on (also one that was
+/// interrupted, from the bytes it has), or stop it for good. NO when Chromium has nothing left to
+/// act on: it finished, was cancelled, or belongs to an earlier run. The change comes back through
+/// the delegate's didUpdateDownload.
++ (BOOL)pauseDownload:(uint32_t)identifier;
++ (BOOL)resumeDownload:(uint32_t)identifier;
++ (BOOL)cancelDownload:(uint32_t)identifier;
+/// Downloads the same address again, as a new download, in the browser it came from (or another
+/// one still open). NO when this run never saw the download or no page is open.
++ (BOOL)restartDownload:(uint32_t)identifier;
 /// Renderer trouble and failed loads, for Niche's performance recorder (GitHub #91): `kind` is
 /// terminated, unresponsive, responsive or loadError; `detail` how it ended or the net error
 /// code; `site` the host (nil for incognito, Niche's own pages or a closed tab). Never a URL.
