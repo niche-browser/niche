@@ -1,0 +1,42 @@
+name: Shields
+
+# Builds the filter packs Niche downloads (docs/shields.md): the lists in
+# resources/shields/lists.json with uBlock Origin's scriptlets, signed, as assets of the
+# "shields" release. Daily; a list that is down fails the run and yesterday's packs stay.
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shields
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    name: Build and publish the packs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Build the packs
+        env:
+          SHIELDS_SIGNING_KEY: ${{ secrets.SHIELDS_SIGNING_KEY }}
+        run: |
+          test -n "$SHIELDS_SIGNING_KEY" || { echo "SHIELDS_SIGNING_KEY is not set: the packs would be unsigned"; exit 1; }
+          node scripts/shields-pack.mjs --out packs
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view shields >/dev/null 2>&1 || gh release create shields --prerelease --title "Shields filter packs" \
+            --notes "The filter packs Niche downloads once a day (docs/shields.md). Not an app release."
+          gh release upload shields packs/* --clobber

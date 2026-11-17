@@ -71,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         installURLEventHandler()
         PerfCEF.install(app: self)
         NicheCEFRuntime.setChromeHosting(store.settings.chromeEngine)
-        NicheCEFRuntime.setDocumentStartScript(PageScript.mainWorld, isolatedScript: PageScript.isolatedWorld + WebStoreBranding.script(appName: "Niche"), world: PageScript.world)
+        installDocumentStartScript()
         startContentBlocking()
         observeGlobalShortcut()
         observeMenuBarMode()
@@ -212,13 +212,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApp.terminate(nil)
     }
 
-    /// Third-party ad and tracker blocking (Settings > Privacy, Dia's onboarding
-    /// checkbox). The bundled list (resources/blocklist) is parsed off the main thread;
-    /// the switch follows the setting live, no restart.
+    /// Shields (Settings ▸ Privacy, and onboarding's privacy level): the filter engine is built
+    /// off the main thread from the downloaded lists (ShieldsService), and the switches are
+    /// followed live, no restart.
     private func startContentBlocking() {
-        if let path = Bundle.main.path(forResource: "domains", ofType: "txt", inDirectory: "blocklist") {
-            NicheCEFRuntime.loadBlockedDomains(fromFile: path, completion: nil)
-        }
         observeContentBlocking()
         observeHttpsOnly()
         // Arc's "Archive Little Arcs after:": a Little Window left alone that long closes, its page archived.
@@ -318,7 +315,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var globalHotkey: GlobalHotkey?
 
     private func observeContentBlocking() {
-        observeChanges(of: { [store] in store.settings.blockAdsAndTrackers }, apply: NicheCEFRuntime.setContentBlockingEnabled)
+        observeChanges(of: { [store] in store.settings.shieldsGroups }) { [composition] in ShieldsService.shared.start(groups: $0, clock: composition.clock) }
+        observeChanges(of: { [store] in store.settings.blockThirdPartyCookies }, apply: NicheCEFRuntime.setThirdPartyCookiesBlocked)
+        observeChanges(of: { [store] in store.settings.removeTrackingParameters }, apply: NicheCEFRuntime.setTrackingCodeRemoval)
+        // The header on every request from now on; the page's navigator.globalPrivacyControl in
+        // tabs opened from now on (a page's start script is fixed when its browser is made).
+        observeChanges(of: { [store] in store.settings.sendGlobalPrivacyControl }) { [weak self] on in
+            NicheCEFRuntime.setGlobalPrivacyControl(on)
+            self?.installDocumentStartScript()
+        }
+        // In tabs opened from now on, like the property above.
+        observeChanges(of: { [store] in store.settings.noticeFingerprinting }) { [weak self] _ in self?.installDocumentStartScript() }
+        PrivacyMonitor.shared.install()
+    }
+
+    /// The scripts every page starts with (PageScript), in the page's world and in Niche's own.
+    /// Every page starts with the fingerprinting watch (PrivacyProbeScript) unless Settings ▸
+    /// Privacy turns it off, so the privacy panel knows what a page read whenever it is opened.
+    private func installDocumentStartScript() {
+        var page = PageScript.mainWorld(globalPrivacyControl: store.settings.sendGlobalPrivacyControl)
+        if store.settings.noticeFingerprinting { page += "\n" + PrivacyProbeScript.script(event: PageScript.probeEvent) }
+        NicheCEFRuntime.setDocumentStartScript(page, isolatedScript: PageScript.isolatedWorld + WebStoreBranding.script(appName: "Niche"),
+                                               world: PageScript.world)
     }
 
     private func installURLEventHandler() {
@@ -1076,6 +1094,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
             // Opens what normally needs a pointer or a held key, for screenshots.
             if let v = dict["downloads"] { main.sidebarUI.downloadsListOpen = v == "1"; return }
+            if let row = dict["downloadsHover"].flatMap({ Int($0) }) { main.debugHoverDownload(row: row); return }
+            // downloadAction=<pause|resume|cancel|retry|remove|moveToTrash|…>&row=<n>: that action on
+            // the tray's nth row (0 is the top one), as its button or menu row would run it.
+            if let action = dict["downloadAction"].flatMap(DownloadAction.init(rawValue:)), let row = dict["row"].flatMap({ Int($0) }) {
+                let rows = DownloadHistory.shared.recent
+                guard rows.indices.contains(row) else { NicheLog.note("download action: no row \(row)"); return }
+                DownloadHistory.shared.perform(action, on: rows[row])
+                return
+            }
+            // privacy=<label>: what the privacy panel has for the page on screen, on a log line;
+            // privacyPanel=1|0 opens or closes it.
+            // privacyPanel=light|dark draws the open panel in that appearance, whatever the Mac's.
+            // privacyRule=<PrivacyRules.Choice>&party=<company id or site>: that choice for the page
+            // on screen's site, as the panel's buttons make it; privacyProtection=off|on its switch.
+            if let v = dict["privacyPanel"] {
+                switch v {
+                case "1": main.showPrivacyPanel()
+                case "light", "dark": main.shell.privacyPanel.appearance = NSAppearance(named: v == "light" ? .aqua : .darkAqua)
+                default: main.hidePrivacyPanel()
+                }
+                return
+            }
+            if let label = dict["privacy"] { main.debugPrivacy(label: label); return }
+            // shields=<label>: what the filter engine says about a request (url, page, type as
+            // in NicheShields.h), or without a url how much is loaded.
+            if let label = dict["shields"] {
+                if let url = dict["url"] {
+                    NicheLog.note("shields[\(label)] " + NicheCEFRuntime.shieldsVerdict(forURL: url, onPageURL: dict["page"] ?? url, type: dict["type"] ?? "other"))
+                } else {
+                    let shields = ShieldsService.shared
+                    NicheLog.note("shields[\(label)] status=\(shields.status) lists=\(shields.credits.map(\.id).joined(separator: ","))")
+                }
+                return
+            }
+            if let choice = dict["privacyRule"].flatMap(PrivacyRules.Choice.init(rawValue:)), let party = dict["party"],
+               let site = store.selectedTab?.tab.flatMap({ PrivacySite.site(ofURL: $0.url) }) {
+                PrivacyMonitor.shared.setChoice(choice, for: party, on: site)
+                return
+            }
+            if let v = dict["privacyProtection"], let site = store.selectedTab?.tab.flatMap({ PrivacySite.site(ofURL: $0.url) }) {
+                PrivacyMonitor.shared.setProtection(off: v == "off", on: site)
+                return
+            }
+            // downloadsClear=1: the tray's Clear.
+            if dict["downloadsClear"] != nil { DownloadHistory.shared.clear(); return }
+            // downloadsList=<label>: the tray's rows on a log line, by state only (no names).
+            if let label = dict["downloadsList"] {
+                let rows = DownloadHistory.shared.recent
+                NicheLog.note("downloads[\(label)] \(rows.count) rows: " + rows.map(\.state.word).joined(separator: " ")
+                              + " clearable=\(DownloadHistory.shared.canClear)")
+                return
+            }
             // The sidebar as if Niche were in front (1) or behind (0), until the app's next activation change:
             // a background test copy is in either state depending on what it was sent.
             if let v = dict["appActive"] { main.sidebarUI.appActive = v == "1"; return }
@@ -1321,6 +1391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         switch id {
         case "toggleSidebar": return main.sidebarVisible ? "Hide Sidebar" : "Show Sidebar"
         case "toggleToolbar": return store.settings.showToolbar ? "Hide Toolbar" : "Show Toolbar"
+        case "togglePrivacyPanel": return main.privacyPanelOpen ? "Hide Privacy Panel" : "Show Privacy Panel"
         case "collapsePinned": return store.isPinnedCollapsed(main.focusedSpaceID) ? "Expand Pinned Tabs" : "Collapse Pinned Tabs"
         default: return nil
         }
@@ -1589,6 +1660,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case "jumpToSelection": main.jumpToSelection()
         case "toggleSidebar": main.toggleSidebar()
         case "toggleToolbar": store.settings.showToolbar.toggle()
+        case "togglePrivacyPanel": main.togglePrivacyPanel()
         case "toggleDeveloperMode": if let url = store.selectedTab?.tab?.url { store.settings.toggleDeveloperMode(url: url) }
         case "reload": main.currentBrowser?.reload()
         case "hardReload": main.currentBrowser?.reloadIgnoringCache()
@@ -1703,6 +1775,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Windows
 
+    /// Settings, opened on a pane.
+    func showSettings(_ pane: SettingsPane) {
+        showSettingsWindow()
+        settingsController?.show(pane)
+    }
+
     func showSettingsWindow() {
         if settingsController == nil {
             let actions = SettingsActions(
@@ -1730,6 +1808,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 newProfile: { [weak self] in
                     guard let self, let w = self.settingsWindow else { return }
                     self.main.showNewProfileDialog(over: w)
+                },
+                showPrivacyPanel: { [weak self] in
+                    guard let self else { return }
+                    let window = self.useNormalWindow()
+                    window.showWindow(nil)
+                    window.showPrivacyPanel()
                 })
             let c = SettingsWindowController(store: store, bindings: bindings, actions: actions)
             settingsController = c
@@ -1828,7 +1912,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         view.addItem(submenu: appearance, title: "Appearance")
         view.addItem(.separator())
-        view.addItem(item("toggleSidebar")); view.addItem(item("toggleToolbar")); view.addItem(item("collapsePinned"))
+        view.addItem(item("toggleSidebar")); view.addItem(item("toggleToolbar")); view.addItem(item("togglePrivacyPanel")); view.addItem(item("collapsePinned"))
         view.addItem(.separator())
         view.addItem(item("stop")); view.addItem(item("reload")); view.addItem(item("hardReload"))
         // Arc's View menu order: cookies, then cache.

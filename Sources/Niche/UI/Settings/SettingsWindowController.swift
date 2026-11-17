@@ -10,6 +10,8 @@ struct SettingsActions {
     var openProfilePage: (String, UUID?) -> Void = { _, _ in }
     var exportDiagnostics: () -> Void = {}
     var newProfile: () -> Void = {}
+    /// Brings the browser window forward with its privacy panel open.
+    var showPrivacyPanel: () -> Void = {}
 }
 
 /// The Settings panes, in sidebar order. Intelligence holds the features that run on the Mac's

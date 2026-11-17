@@ -497,9 +497,23 @@ public struct AppSettings: Codable, Equatable {
     public var folderPreviews: Bool = true
     /// Arc: "Enable Picture in Picture when you leave a video tab".
     public var autoPictureInPicture: Bool = true
-    /// Dia's onboarding privacy choice "Block third-party ads and trackers": requests
-    /// to listed ad and tracker domains are cancelled unless they are first-party.
+    /// Settings ▸ Privacy "Trackers" (`ShieldsGroup.trackers`), on by default. The key keeps the
+    /// name it had when one switch covered ads and trackers; code reads it as `blockTrackers`.
     public var blockAdsAndTrackers: Bool = true
+    /// Settings ▸ Privacy "Ads" (`ShieldsGroup.ads`). A settings file from before 17 Nov 2026
+    /// has no key for it: it follows the one switch there was.
+    public var blockAds: Bool = true
+    /// Settings ▸ Privacy "Cookie notices" (`ShieldsGroup.cookies`), on by default. (Until
+    /// 17 Nov 2026 this was "Block cookie banners", a short list of Niche's own, off by default;
+    /// that key is no longer read.)
+    public var blockCookieNotices: Bool = true
+    /// Settings ▸ Privacy "Pop-ups and nags" (`ShieldsGroup.annoyances`), off by default: on at
+    /// the Strict level.
+    public var blockAnnoyances: Bool = false
+    /// Settings ▸ Privacy "Dangerous sites" (`ShieldsGroup.malware`), on by default.
+    public var blockMaliciousSites: Bool = true
+    /// Settings ▸ Privacy "Lists for your languages" (`ShieldsGroup.regional`), on by default.
+    public var useRegionalLists: Bool = true
     /// Dia's Tabs ▸ "Haptic feedback when reordering tabs" (tabReorderingHapticsEnabled).
     public var hapticFeedbackOnReorder: Bool = true
     /// Dia's Advanced ▸ "Warn before quitting" (shouldWarnBeforeQuitting, off by default).
@@ -535,8 +549,18 @@ public struct AppSettings: Codable, Equatable {
     public var restoreWindows: Bool = true
     /// Arc's Settings ▸ Advanced "Allow websites to get your theme data" (ArcThemeData), on by default.
     public var shareThemeWithWebsites: Bool = true
-    /// Arc's Settings ▸ General "Block Cookie Banners" (CookieBanners), off by default as in Arc.
-    public var blockCookieBanners: Bool = false
+    /// Settings ▸ Privacy "Block third-party cookies": a site embedded in another site's page gets
+    /// no cookies there (Chromium's own setting). On by default, like Safari; nil in a settings
+    /// file from before 14 Nov 2026 reads as on.
+    public var blockThirdPartyCookies: Bool = true
+    /// Settings ▸ Privacy "Remove tracking codes from links" (the filter lists' rules for it), on by default.
+    public var removeTrackingParameters: Bool = true
+    /// Settings ▸ Privacy "Tell websites not to sell or share my data": Global Privacy Control, on
+    /// by default.
+    public var sendGlobalPrivacyControl: Bool = true
+    /// Settings ▸ Privacy "Notice fingerprinting": every page is watched for scripts that read
+    /// what tells this Mac from others (`PrivacyProbeScript`), on by default.
+    public var noticeFingerprinting: Bool = true
     /// Arc's View ▸ Developer ▸ "Allow JavaScript from Apple Events": AppleScript's `execute`, off by default.
     public var allowAppleEventsJavaScript: Bool = false
     /// Arc's Settings ▸ Advanced "Allow window dragging from the top of webpages" (PageTopDrag), on by default.
@@ -760,6 +784,11 @@ extension AppSettings {
         chromeEngine = try c.decodeIfPresent(Bool.self, forKey: .chromeEngine) ?? true
         autoPictureInPicture = try c.decodeIfPresent(Bool.self, forKey: .autoPictureInPicture) ?? true
         blockAdsAndTrackers = try c.decodeIfPresent(Bool.self, forKey: .blockAdsAndTrackers) ?? true
+        blockAds = try c.decodeIfPresent(Bool.self, forKey: .blockAds) ?? blockAdsAndTrackers
+        blockCookieNotices = try c.decodeIfPresent(Bool.self, forKey: .blockCookieNotices) ?? true
+        blockAnnoyances = try c.decodeIfPresent(Bool.self, forKey: .blockAnnoyances) ?? false
+        blockMaliciousSites = try c.decodeIfPresent(Bool.self, forKey: .blockMaliciousSites) ?? true
+        useRegionalLists = try c.decodeIfPresent(Bool.self, forKey: .useRegionalLists) ?? true
         if let d = try? c.decodeIfPresent(LinkDestination.self, forKey: .defaultLinkDestination) {
             defaultLinkDestination = d
         } else {
@@ -790,7 +819,10 @@ extension AppSettings {
         littleWindowArchiveAfter = (try? c.decodeIfPresent(LittleWindowArchive.self, forKey: .littleWindowArchiveAfter)) ?? .sixHours
         restoreWindows = try c.decodeIfPresent(Bool.self, forKey: .restoreWindows) ?? true
         shareThemeWithWebsites = try c.decodeIfPresent(Bool.self, forKey: .shareThemeWithWebsites) ?? true
-        blockCookieBanners = try c.decodeIfPresent(Bool.self, forKey: .blockCookieBanners) ?? false
+        blockThirdPartyCookies = try c.decodeIfPresent(Bool.self, forKey: .blockThirdPartyCookies) ?? true
+        removeTrackingParameters = try c.decodeIfPresent(Bool.self, forKey: .removeTrackingParameters) ?? true
+        sendGlobalPrivacyControl = try c.decodeIfPresent(Bool.self, forKey: .sendGlobalPrivacyControl) ?? true
+        noticeFingerprinting = try c.decodeIfPresent(Bool.self, forKey: .noticeFingerprinting) ?? true
         allowAppleEventsJavaScript = try c.decodeIfPresent(Bool.self, forKey: .allowAppleEventsJavaScript) ?? false
         pageTopWindowDrag = try c.decodeIfPresent(Bool.self, forKey: .pageTopWindowDrag) ?? true
         boostsEnabled = try c.decodeIfPresent(Bool.self, forKey: .boostsEnabled) ?? true

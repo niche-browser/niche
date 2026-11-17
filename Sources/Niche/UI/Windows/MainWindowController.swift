@@ -72,6 +72,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// The side panel's page window joined this window's children: the overlay panels stay above it.
     func sidePanelPageAttached() { raiseOverlayPanels() }
 
+    /// The privacy panel's timers and scripts (MainWindowController+Privacy).
+    var privacy = PrivacyPanelState()
+
     /// This window's entry in the store (WindowSession): its space, open tabs, frame.
     let windowID: UUID
     /// Pages load in the off-the-record profile; nothing is saved (WindowSession.isIncognito).
@@ -611,6 +614,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         for (id, rt) in browsers.runtimes where sidebarUI.progress[id] != rt.progress { sidebarUI.progress[id] = rt.progress }
         syncNavStates(browsers.visibleTabIDs)
         syncSlowResponse()
+        // Here, not only when a page changes: selecting another tab changes whose page the panel shows.
+        syncPrivacyPanel()
     }
 
     /// The front tab still waiting for its first response after ten seconds says so in the toast,
@@ -777,12 +782,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
             showDownloadInSidebar(download, name: name)
         }
         // Progress and failures show in the downloads list, as in Arc (it has no download toast).
-        DownloadHistory.shared.report(id: download.identifier, name: name, path: download.fullPath, received: download.receivedBytes,
-                                      total: download.totalBytes, percent: download.percent, complete: download.state == .complete,
-                                      cancelled: download.state == .cancelled, failed: download.state == .interrupted)
+        DownloadHistory.shared.report(id: download.identifier, name: name, path: download.fullPath, url: download.url,
+                                      received: download.receivedBytes, total: download.totalBytes, percent: download.percent,
+                                      complete: download.state == .complete, cancelled: download.state == .cancelled,
+                                      failed: download.state == .interrupted, paused: download.paused)
         updateRecentDownload(download)
         if download.state == .complete, !download.fullPath.isEmpty, finishedDownloads.insert(download.identifier).inserted {
-            DownloadHistory.shared.add(path: download.fullPath, profile: browsers.downloadSourceTab.map(store.profileDirectoryName(item:)) ?? profileDirectoryName)
+            DownloadHistory.shared.add(path: download.fullPath, profile: browsers.downloadSourceTab.map(store.profileDirectoryName(item:)) ?? profileDirectoryName,
+                                       url: download.url, remembered: !isIncognito)
             // The address's scheme only, never the file: scenarios wait for this line.
             NicheLog.note("Download finished from a \(URL(string: download.url)?.scheme ?? "unknown"): address")
             let id = download.identifier
@@ -806,7 +813,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// good. A row that hasn't heard from Chromium for a while reads the file instead:
     /// gone means it ended, the full size with no .crdownload beside it means it's done.
     private func checkStalledDownloads() {
-        let inProgress = DownloadHistory.shared.live.filter { $0.running && windowDownloads.contains($0.id) }
+        // A paused download is silent because it was asked to be.
+        let inProgress = DownloadHistory.shared.live.filter { $0.running && !$0.paused && windowDownloads.contains($0.id) }
         guard !inProgress.isEmpty else {
             downloadWatchdog?.invalidate()
             downloadWatchdog = nil
@@ -2930,6 +2938,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         actions.manageExtensions = { [weak self] in self?.openTab("chrome://extensions") }
         actions.clearCache = { [weak self] in self?.currentBrowser?.clearSiteDataAndReload(cookies: false) }
         actions.clearCookies = { [weak self] in self?.currentBrowser?.clearSiteDataAndReload(cookies: true) }
+        actions.togglePrivacyPanel = { [weak self] in self?.togglePrivacyPanel() }
+        actions.privacyPanelOpen = privacyPanelOpen
         let ssl = currentBrowser?.sslStatus()
         let secure = ConnectionSecurity.isSecure(url: url, status: ssl.map {
             ConnectionSecurity.Status(secureConnection: $0.secureConnection, certStatus: $0.certStatus, contentStatus: $0.contentStatus)
@@ -2983,6 +2993,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     }
 
     /// Scenario hooks (#226): the sidebar's URL field hovered, its buttons logged as
+    /// `niche://debug?downloadsHover=<row>`: a tray row as the pointer would have it.
+    func debugHoverDownload(row: Int) { (shell.sidebarHost as? SidebarView)?.debugHoverDownload(row: row) }
+
     /// "url field: copyURL extensions" ("url field: none" while the toolbar has the address).
     func debugURLFieldHover(_ on: Bool) {
         let items = (shell.sidebarHost as? SidebarView)?.debugURLFieldHover(on)
@@ -3979,6 +3992,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         activeObservers.forEach(NotificationCenter.default.removeObserver)
         activeObservers = []
         tabSwitcher.cancel()
+        privacy.poll?.invalidate()
+        privacy.poll = nil
+        PrivacyMonitor.shared.unbind(window: ObjectIdentifier(self))
+        if isIncognito, !app.mainWindows.contains(where: { $0 !== self && $0.isIncognito }) { DownloadHistory.shared.forgetOffRecord() }
         app.mainWindowWillClose(self)
     }
 

@@ -19,6 +19,8 @@ BUILD_NUMBER="${NICHE_BUILD:-$(date +%Y%m%d%H%M)}"
 
 scripts/fetch-cef.sh
 scripts/fetch-sparkle.sh
+# Shields, the filter engine (Rust): vendor/shields/libniche_shields.a, which the app links.
+scripts/build-shields.sh
 
 swift build -c "$CONFIG"
 BIN="$(swift build -c "$CONFIG" --show-bin-path)"
@@ -43,7 +45,6 @@ echo -n "APPL????" > "$APP/Contents/PkgInfo"
 cp resources/Niche.sdef "$APP/Contents/Resources/Niche.sdef"
 [ -d resources/web ] && cp -R resources/web "$APP/Contents/Resources/web"
 [ -d resources/brand ] && cp -R resources/brand "$APP/Contents/Resources/brand"
-[ -d resources/blocklist ] && cp -R resources/blocklist "$APP/Contents/Resources/blocklist"
 [ -d resources/browsers ] && cp -R resources/browsers "$APP/Contents/Resources/browsers"
 [ -d resources/app-icons ] && cp -R resources/app-icons "$APP/Contents/Resources/app-icons"
 [ -d resources/licenses ] && cp -R resources/licenses "$APP/Contents/Resources/licenses"

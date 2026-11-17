@@ -23,6 +23,13 @@ private enum Metrics {
     /// window's corners plus its 5 pt inset.
     static let layoutArt = CGSize(width: 230, height: 180)
     static let layoutRing: CGFloat = 15
+    /// The privacy step: a level's card and its shield, how far the three sit under the
+    /// subtitle's second line, and the spring a choice moves with.
+    static let levelCard: CGFloat = 78
+    static let levelGlyph: CGFloat = 30
+    static let levelListDrop: CGFloat = 26
+    static let levelSpring: Double = 0.4
+    static let levelDamping: Double = 0.8
 }
 
 /// A two-line step title; the import steps use StepHeader (one line).
@@ -84,25 +91,74 @@ struct CoverStep: View {
     }
 }
 
-// MARK: - Privacy (Dia's DisclosureView, ad blocker half)
+// MARK: - Privacy
 
+/// The privacy step: one choice, how much Niche does for you, as three cards. The scene beside
+/// it (PrivacyArt) shows what the picked level keeps out.
 struct PrivacyStep: View {
     @Bindable var model: ImportFlowModel
     let c: ImportColors
     var body: some View {
         ZStack(alignment: .topLeading) {
-            TwoLineHeader(title: "Privacy in Niche,\nyou're in control",
-                          subtitle: "Niche works fully signed out. Your spaces, tabs and archive are plain files on your Mac.", c: c)
-            SelectableRow(c: c, checked: model.blockAdsAndTrackers, toggle: { model.blockAdsAndTrackers.toggle() }) {
-                RowSymbol(name: "hand.raised.fill", c: c)
-                RowTitle(title: "Block third-party ads and trackers",
-                         caption: "You won't see them. And they won't see you.", c: c)
+            TwoLineHeader(title: "Private from\nthe first page",
+                          subtitle: "Niche stops ads and trackers before they load. Pick how far it goes; you can change it any time in Settings.", c: c)
+            VStack(spacing: ImportMetrics.gap) {
+                ForEach(PrivacyLevel.allCases, id: \.self) { level in
+                    PrivacyLevelCard(level: level, selected: model.privacyLevel == level, c: c) {
+                        withAnimation(.spring(response: Metrics.levelSpring, dampingFraction: Metrics.levelDamping)) { model.privacyLevel = level }
+                    }
+                }
             }
             .frame(width: ImportMetrics.columnWidth)
-            .offset(y: ImportMetrics.listTop)
+            .offset(y: ImportMetrics.listTop + Metrics.levelListDrop)
             PrimaryButton(title: "Continue", c: c, enabled: true) { model.continueFromPrivacy() }
                 .offset(x: -1, y: ImportMetrics.buttonTop)
         }
+    }
+}
+
+/// One privacy level: a shield that fills with the level, its name and what it is for.
+private struct PrivacyLevelCard: View {
+    let level: PrivacyLevel
+    let selected: Bool
+    let c: ImportColors
+    let pick: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.card, style: .continuous)
+        HStack(spacing: Design.Space.l) {
+            Image(systemName: level.symbol)
+                .font(.system(size: Design.Icon.large, weight: .medium))
+                .foregroundStyle(selected ? Design.accent : c.body)
+                .frame(width: Metrics.levelGlyph)
+            VStack(alignment: .leading, spacing: Design.Space.xxs) {
+                HStack(spacing: Design.Space.m) {
+                    Text(level.title).font(Design.Font.ui(.title, .semibold)).foregroundStyle(c.title)
+                    if level == PrivacyLevel.recommended {
+                        Text("Recommended").font(Design.Font.ui(.micro, .semibold))
+                            .foregroundStyle(Design.accent)
+                            .padding(.horizontal, Design.Space.s).padding(.vertical, Design.Space.xxs)
+                            .background(Capsule().fill(Design.accentWash))
+                    }
+                }
+                Text(level.tagline).font(Design.Font.detail).foregroundStyle(c.caption)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Design.Space.m)
+            RadioDot(on: selected, c: c)
+        }
+        .padding(.horizontal, Design.Space.rowInset)
+        .frame(height: Metrics.levelCard)
+        .background(shape.fill(selected ? Design.accentWash : hover ? c.rowFillHover : c.rowFill))
+        .overlay(shape.strokeBorder(selected ? Design.accentRing : c.rowBorder, lineWidth: selected ? Design.Space.hair + Design.Space.hair / 2 : Design.Space.hair / 2))
+        .contentShape(shape)
+        .onHover { hover = $0 }
+        .onTapGesture(perform: pick)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(level.title): \(level.tagline)")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(.default, pick)
     }
 }
 

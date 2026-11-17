@@ -1559,20 +1559,13 @@ lives in `Sources/NicheCEF/NicheContentBlocker.h` (lock-free: an immutable set b
 pointer, plus an atomic switch), the API is `+[NicheCEFRuntime setContentBlockingEnabled:]`,
 `setBlockedDomains:`, `loadBlockedDomainsFromFile:completion:`, `shouldBlockRequestURL:onPageURL:`.
 
-The list is `resources/blocklist/domains.txt` (22,510 domains, copied into
-`Contents/Resources/blocklist` by `scripts/build.sh` and `scripts/dev.sh`), fetched 2026-10-25 and
-merged from:
-
-- AdAway default blocklist, https://github.com/AdAway/adaway.github.io (hosts.txt), CC BY 3.0.
-- Anudeep's Blacklist, https://github.com/anudeepND/blacklist (adservers.txt), MIT.
-
-Both allow redistribution in an MIT app with attribution, which is in
-`resources/blocklist/NOTICE.txt`. Rejected: EasyList/EasyPrivacy (GPL-3.0 / CC BY-SA), DuckDuckGo
-Tracker Radar (non-commercial), hagezi (GPL-3.0), Disconnect (GPL-3.0), StevenBlack unified hosts
-(MIT itself but includes non-commercial sources such as MVPS). Domain lists can't catch first-party
-ads served from a site's own hosts (YouTube video ads, Facebook/Instagram feed ads, sponsored
-search results) or cosmetic ad slots; requests from service workers and extension background pages
-(no browser) are not filtered.
+That was the blocker until 17 Nov 2026: one merged domain list (AdAway, CC BY 3.0, and Anudeep's
+Blacklist, MIT), chosen because both could ship inside an MIT app, with EasyList and the other
+GPL lists rejected for that reason. A domain list can't catch first-party ads, cosmetic ad slots
+or cookie notices, so the owner decided otherwise: Niche now runs a full filter engine on the
+community's lists (EasyList, EasyPrivacy, uBlock Origin's, AdGuard's), downloaded as data rather
+than shipped in the app. See [shields.md](shields.md); the domain list, its matcher and the API
+named above are gone.
 
 ## Dia space paging and window buttons (Dia 1.54.2, 25 Oct 2026, static only)
 [O] = read from the binary, [I] = inferred, not observed running.

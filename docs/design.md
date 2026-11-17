@@ -137,6 +137,64 @@ server gives no size; a download with no thumbnail in this window draws an accen
 Library glyph instead, which closes to a full circle before it fades. Under Reduce motion the
 thumbnail and ring show their state without moving.
 
+The tray over the Library button (`DownloadsTrayView`) starts with a line: "Downloads", which
+opens Library ▸ Downloads, and Clear when there is something to clear. A row is the thumbnail,
+the name (truncated in the middle, never to the sidebar's edge) over one line of state: "5 MB of
+20 MB — 38 s left", "Paused — 5 MB of 20 MB", "Failed to Download" in the danger colour, or how
+long ago it finished. A running or paused download has a 3 pt bar under its two lines: the
+accent over a faint track, the ink's colour while paused, a piece crossing the track when the
+server gave no size. Under the pointer a row gets a plate and the two buttons its state calls
+for (`DownloadAction.buttons`: pause or resume and cancel; try again and remove; show in Finder
+and remove), 24 pt with 11 pt glyphs, and its line shortens to the one thing that matters ("38 s
+left"). A right-click has every action (`DownloadAction.menu`) and Clear Downloads; VoiceOver
+gets them as the row's actions. The file's thumbnail over the Library button steps aside while
+the tray is open. Library ▸ Downloads rows carry the same bar, buttons and menu.
+
+## Privacy panel
+
+A 360 pt card at the right of the panes (`PrivacyPanelCard`), rounded and shadowed like a page's
+card, in the window's appearance; it fades in over `Design.Motion.standard` while the page makes
+room at once. A page keeps at least a phone's width beside it, and a window too narrow grows
+(`PrivacyPanelFit`). Everything in it is a row, a word or a count; no tables, no addresses unless
+a company's row is opened. Blocked is `Design.positive`, a tracker that sees the visit
+`Design.danger`, everything else neutral ink; the accent is only on the shield glyph, the switch
+and the one primary button.
+
+Top to bottom: the hero (a `Design.Radius.panel` card washed top to bottom in its state's colour:
+green protected, red when a tracker sees the visit, grey with protection off) holds the diagram,
+the site, the standing in `.headline` semibold with one line under it, and the three counts
+divided by hairlines; then cards of rows (`privacyCard()`: `Fill.subtle` and a hairline), each
+under a caption-size header: "On this page" (a tinted glyph plate, a title, the result at the
+right in its tone), the site's switch, "Who is here" (one bar split by kind, a colour per kind
+that tracks, grey for what makes the page work), the companies, "Happening now" with how long
+ago, and the totals with a seven-day bar chart.
+
+The diagram (`PrivacyOrbit`): the page's icon on a disc, a ring as the shield (a sweep of green
+with a soft glow; dashed and grey with protection off), parties that got through as lettered
+chips inside it joined to the page, blocked ones as chips outside it whose dashed line stops at
+the shield. A new block sends one ring out from the shield. Chips arrive scaled in over
+`Design.Motion.standard`; the "Live" dot breathes; nothing moves under Reduce motion. Counts keep
+monospaced digits. The wording is in NicheCore (`PrivacyReport`, `PrivacyLedger`, `PrivacyWords`,
+`TrackerCategory`) with tests: plain sentences a non-technical reader understands, and never a
+claim about what wasn't seen ([privacy.md](privacy.md)).
+
+The shield (`ToolbarPrivacyChip`): a half-filled shield, with the page's blocked count when there
+is one, at the end of the sidebar's address field and before the toolbar's right-hand buttons.
+It is there on every website, so the way into the panel is always in the same place; its plate
+is lit while the panel is open.
+
+## Privacy level
+
+Onboarding's privacy step and the top of Settings ▸ Privacy offer the same three levels
+(`PrivacyLevel`) as cards: a shield that fills with the level (`shield`, `shield.lefthalf.filled`,
+`shield.fill`), the name, one line, and "Recommended" on Balanced. The picked card takes the
+accent wash and ring; nothing else on the step uses the accent but the primary button. Beside
+the cards in onboarding, the scene (`PrivacyArt`) shows the shield glowing in its ring with six
+chips round it for what the web throws at a page: the ones the level stops are struck out and
+held off beyond the ring, the others come in to it, and three promises sit under it. A change
+of level moves the chips on a spring; they bob slowly otherwise; nothing moves under Reduce
+motion. Settings shows "Custom" in the footnote when the switches match no level.
+
 ## Boost editor
 
 A 248 pt glass panel (`NSVisualEffectView`, popover material, 16 pt corners) at the window's right

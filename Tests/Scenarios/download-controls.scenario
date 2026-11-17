@@ -1,0 +1,27 @@
+# A download's row can be taken off the list, and Clear Downloads empties it (14 Nov 2026: rows
+# had no controls). The files stay where they were saved.
+home
+seed settings.json {"hasSeenImportPrompt": true, "toolbarDefaultMigrated": true}
+budget rss=800 stalls50=12
+niche://open?url=file://${FIXTURES}/Pages/downloads.html
+expect-log loaded file:
+niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mousePressed","x":36,"y":24,"button":"left","clickCount":1}
+niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mouseReleased","x":36,"y":24,"button":"left","clickCount":1}
+expect-log Download finished from a data: address
+niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mousePressed","x":36,"y":56,"button":"left","clickCount":1}
+niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mouseReleased","x":36,"y":56,"button":"left","clickCount":1}
+wait 2
+niche://debug?downloadsList=two
+expect-log downloads\[two\] 2 rows: finished finished clearable=true
+
+# Remove from List: the row goes, the other stays.
+niche://debug?downloadAction=remove&row=0
+expect-log Download remove on a finished row
+niche://debug?downloadsList=one
+expect-log downloads\[one\] 1 rows: finished clearable=true
+
+# Clear Downloads: nothing left to list or to clear.
+niche://debug?downloadsClear=1
+niche://debug?downloadsList=none
+expect-log downloads\[none\] 0 rows: +clearable=false
+niche://debug?checkStore=1

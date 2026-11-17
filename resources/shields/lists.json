@@ -1,0 +1,674 @@
+{
+  "comment": "The filter lists Shields is built from (scripts/shields-pack.mjs). group: core lists are always used; the others belong to a switch in Settings ▸ Privacy; a regional list is used when one of its languages is among the Mac's. trusted lists may use the scriptlets that set cookies and storage (uBlock Origin's own lists only).",
+  "ublock": {
+    "repository": "https://github.com/gorhill/uBlock.git",
+    "ref": "master"
+  },
+  "lists": [
+    {
+      "id": "ublock-filters",
+      "group": "ads",
+      "title": "uBlock filters – Ads",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/uBlockOrigin/uAssets",
+      "trusted": true,
+      "url": "https://ublockorigin.github.io/uAssets/filters/filters.txt"
+    },
+    {
+      "id": "ublock-unbreak",
+      "group": "core",
+      "title": "uBlock filters – Unbreak",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/uBlockOrigin/uAssets",
+      "trusted": true,
+      "url": "https://ublockorigin.github.io/uAssets/filters/unbreak.txt"
+    },
+    {
+      "id": "ublock-quick-fixes",
+      "group": "core",
+      "title": "uBlock filters – Quick fixes",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/uBlockOrigin/uAssets",
+      "trusted": true,
+      "url": "https://ublockorigin.github.io/uAssets/filters/quick-fixes.txt"
+    },
+    {
+      "id": "easylist",
+      "group": "ads",
+      "title": "EasyList",
+      "licence": "GPL-3.0 or CC BY-SA 3.0",
+      "homepage": "https://easylist.to",
+      "trusted": false,
+      "url": "https://ublockorigin.github.io/uAssets/thirdparties/easylist.txt"
+    },
+    {
+      "id": "adguard-generic",
+      "group": "ads",
+      "title": "AdGuard – Ads",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/2_without_easylist.txt"
+    },
+    {
+      "id": "ublock-privacy",
+      "group": "trackers",
+      "title": "uBlock filters – Privacy",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/uBlockOrigin/uAssets",
+      "trusted": true,
+      "url": "https://ublockorigin.github.io/uAssets/filters/privacy.txt"
+    },
+    {
+      "id": "easyprivacy",
+      "group": "trackers",
+      "title": "EasyPrivacy",
+      "licence": "GPL-3.0 or CC BY-SA 3.0",
+      "homepage": "https://easylist.to",
+      "trusted": false,
+      "url": "https://ublockorigin.github.io/uAssets/thirdparties/easyprivacy.txt"
+    },
+    {
+      "id": "adguard-spyware-url",
+      "group": "trackers",
+      "title": "AdGuard/uBO – URL Tracking Protection",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/uBlockOrigin/uAssets",
+      "trusted": true,
+      "url": "https://ublockorigin.github.io/uAssets/filters/privacy-removeparam.txt"
+    },
+    {
+      "id": "plowe-0",
+      "group": "trackers",
+      "title": "Peter Lowe’s Ad and tracking server list",
+      "licence": "McRae GPL",
+      "homepage": "https://pgl.yoyo.org/adservers/",
+      "trusted": false,
+      "url": "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=1&mimetype=plaintext"
+    },
+    {
+      "id": "ublock-cookies-easylist",
+      "group": "cookies",
+      "title": "uBlock filters – Cookie Notices",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/uBlockOrigin/uAssets",
+      "trusted": true,
+      "url": "https://ublockorigin.github.io/uAssets/filters/annoyances-cookies.txt"
+    },
+    {
+      "id": "fanboy-cookiemonster",
+      "group": "cookies",
+      "title": "EasyList – Cookie Notices",
+      "licence": "GPL-3.0 or CC BY-SA 3.0",
+      "homepage": "https://easylist.to",
+      "trusted": false,
+      "url": "https://ublockorigin.github.io/uAssets/thirdparties/easylist-cookies.txt"
+    },
+    {
+      "id": "adguard-cookies",
+      "group": "cookies",
+      "title": "AdGuard – Cookie Notices",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/18.txt"
+    },
+    {
+      "id": "ublock-annoyances",
+      "group": "annoyances",
+      "title": "uBlock filters – Annoyances",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/uBlockOrigin/uAssets",
+      "trusted": true,
+      "url": "https://ublockorigin.github.io/uAssets/filters/annoyances.txt"
+    },
+    {
+      "id": "easylist-newsletters",
+      "group": "annoyances",
+      "title": "EasyList – Newsletter Notices",
+      "licence": "GPL-3.0 or CC BY-SA 3.0",
+      "homepage": "https://easylist.to",
+      "trusted": false,
+      "url": "https://ublockorigin.github.io/uAssets/thirdparties/easylist-newsletters.txt"
+    },
+    {
+      "id": "easylist-notifications",
+      "group": "annoyances",
+      "title": "EasyList – Notifications",
+      "licence": "GPL-3.0 or CC BY-SA 3.0",
+      "homepage": "https://easylist.to",
+      "trusted": false,
+      "url": "https://ublockorigin.github.io/uAssets/thirdparties/easylist-notifications.txt"
+    },
+    {
+      "id": "ublock-badware",
+      "group": "malware",
+      "title": "uBlock filters – Badware risks",
+      "licence": "GPL-3.0",
+      "homepage": "https://github.com/uBlockOrigin/uAssets",
+      "trusted": true,
+      "url": "https://ublockorigin.github.io/uAssets/filters/badware.txt"
+    },
+    {
+      "id": "urlhaus-1",
+      "group": "malware",
+      "title": "Online Malicious URL Blocklist",
+      "licence": "CC0 / MIT",
+      "homepage": "https://gitlab.com/malware-filter/urlhaus-filter",
+      "trusted": false,
+      "url": "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-vivaldi-online.txt"
+    }
+  ],
+  "regional": [
+    {
+      "id": "ALB-0",
+      "group": "regional",
+      "title": "Adblock List for Albania",
+      "languages": [
+        "sq"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/AnXh3L0/blocklist",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/AnXh3L0/blocklist/master/albanian-easylist-addition/Albania.txt"
+    },
+    {
+      "id": "ara-0",
+      "group": "regional",
+      "title": "Liste AR",
+      "languages": [
+        "ar",
+        "kab"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://forums.lanik.us/viewforum.php?f=98",
+      "trusted": false,
+      "url": "https://easylist-downloads.adblockplus.org/Liste_AR.txt"
+    },
+    {
+      "id": "BGR-0",
+      "group": "regional",
+      "title": "Bulgarian Adblock list",
+      "languages": [
+        "bg",
+        "mk"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://stanev.org/abp/",
+      "trusted": false,
+      "url": "https://stanev.org/abp/adblock_bg.txt"
+    },
+    {
+      "id": "CHN-0",
+      "group": "regional",
+      "title": "AdGuard Chinese (中文)",
+      "languages": [
+        "ug",
+        "zh"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters#adguard-filters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/224.txt"
+    },
+    {
+      "id": "CZE-0",
+      "group": "regional",
+      "title": "EasyList Czech and Slovak",
+      "languages": [
+        "cs",
+        "sk"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/tomasko126/easylistczechandslovak",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/tomasko126/easylistczechandslovak/master/filters.txt"
+    },
+    {
+      "id": "DEU-0",
+      "group": "regional",
+      "title": "EasyList Germany",
+      "languages": [
+        "de",
+        "dsb",
+        "hsb",
+        "lb",
+        "rm"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://forums.lanik.us/viewforum.php?f=90",
+      "trusted": false,
+      "url": "https://easylist.to/easylistgermany/easylistgermany.txt"
+    },
+    {
+      "id": "EST-0",
+      "group": "regional",
+      "title": "Eesti saitidele kohandatud filter",
+      "languages": [
+        "et"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/sander85/uBO-et",
+      "trusted": false,
+      "url": "https://ubo-et.lepik.io/list.txt"
+    },
+    {
+      "id": "FIN-0",
+      "group": "regional",
+      "title": "Adblock List for Finland",
+      "languages": [
+        "fi"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/finnish-easylist-addition/finnish-easylist-addition",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/finnish-easylist-addition/finnish-easylist-addition/gh-pages/Finland_adb.txt"
+    },
+    {
+      "id": "FRA-0",
+      "group": "regional",
+      "title": "AdGuard Français",
+      "languages": [
+        "ar",
+        "br",
+        "ff",
+        "fr",
+        "kab",
+        "lb",
+        "oc",
+        "son"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters#adguard-filters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/16.txt"
+    },
+    {
+      "id": "GRC-0",
+      "group": "regional",
+      "title": "Greek AdBlock Filter",
+      "languages": [
+        "el"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/kargig/greek-adblockplus-filter",
+      "trusted": false,
+      "url": "https://www.void.gr/kargig/void-gr-filters.txt"
+    },
+    {
+      "id": "HRV-0",
+      "group": "regional",
+      "title": "Dandelion Sprout's Serbo-Croatian filters",
+      "languages": [
+        "bs",
+        "hr",
+        "sr"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/DandelionSprout/adfilt#readme",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/DandelionSprout/adfilt/master/SerboCroatianList.txt"
+    },
+    {
+      "id": "HUN-0",
+      "group": "regional",
+      "title": "hufilter",
+      "languages": [
+        "hu"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/hufilter/hufilter",
+      "trusted": false,
+      "url": "https://cdn.jsdelivr.net/gh/hufilter/hufilter@gh-pages/hufilter-ublock.txt"
+    },
+    {
+      "id": "IDN-0",
+      "group": "regional",
+      "title": "ABPindo",
+      "languages": [
+        "id",
+        "ms"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/ABPindo/indonesianadblockrules",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/ABPindo/indonesianadblockrules/master/subscriptions/abpindo.txt"
+    },
+    {
+      "id": "IND-0",
+      "group": "regional",
+      "title": "IndianList",
+      "languages": [
+        "as",
+        "bn",
+        "gu",
+        "hi",
+        "kn",
+        "ml",
+        "mr",
+        "ne",
+        "pa",
+        "sat",
+        "si",
+        "ta",
+        "te"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/mediumkreation/IndianList",
+      "trusted": false,
+      "url": "https://easylist-downloads.adblockplus.org/indianlist.txt"
+    },
+    {
+      "id": "IRN-0",
+      "group": "regional",
+      "title": "فارسی (Persian)",
+      "languages": [
+        "fa",
+        "ps",
+        "tg"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/PersianBlocker/PersianBlocker",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/PersianBlocker/PersianBlocker/main/PersianBlocker.txt"
+    },
+    {
+      "id": "ISL-0",
+      "group": "regional",
+      "title": "Icelandic ABP List",
+      "languages": [
+        "is"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/brave/adblock-lists/issues",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/brave/adblock-lists/master/custom/is.txt"
+    },
+    {
+      "id": "ISR-0",
+      "group": "regional",
+      "title": "EasyList Hebrew",
+      "languages": [
+        "he"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/easylist/EasyListHebrew",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/easylist/EasyListHebrew/master/EasyListHebrew.txt"
+    },
+    {
+      "id": "ITA-0",
+      "group": "regional",
+      "title": "EasyList Italy",
+      "languages": [
+        "fur",
+        "it",
+        "lij",
+        "sc"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://forums.lanik.us/viewforum.php?f=96",
+      "trusted": false,
+      "url": "https://easylist-downloads.adblockplus.org/easylistitaly.txt"
+    },
+    {
+      "id": "JPN-1",
+      "group": "regional",
+      "title": "AdGuard Japanese",
+      "languages": [
+        "ja"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters#adguard-filters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/7.txt"
+    },
+    {
+      "id": "KOR-1",
+      "group": "regional",
+      "title": "한국어 (Korean)",
+      "languages": [
+        "ko"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/FilteringDev/filterslists-KO#filteringdevfilterslists-ko",
+      "trusted": false,
+      "url": "https://cdn.jsdelivr.net/npm/@filteringdev/filterslists-ko@latest/dist/filterslist-uBlockOrigin-classic.txt"
+    },
+    {
+      "id": "LTU-0",
+      "group": "regional",
+      "title": "EasyList Lithuania",
+      "languages": [
+        "lt"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/EasyList-Lithuania/easylist_lithuania",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/EasyList-Lithuania/easylist_lithuania/master/easylistlithuania.txt"
+    },
+    {
+      "id": "LVA-0",
+      "group": "regional",
+      "title": "Latvian List",
+      "languages": [
+        "lv"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/Latvian-List/adblock-latvian",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/Latvian-List/adblock-latvian/master/lists/latvian-list.txt"
+    },
+    {
+      "id": "MKD-0",
+      "group": "regional",
+      "title": "Macedonian adBlock Filters",
+      "languages": [
+        "mk"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/DeepSpaceHarbor/Macedonian-adBlock-Filters",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/DeepSpaceHarbor/Macedonian-adBlock-Filters/master/Filters"
+    },
+    {
+      "id": "NLD-0",
+      "group": "regional",
+      "title": "AdGuard Dutch",
+      "languages": [
+        "af",
+        "fy",
+        "nl"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters#adguard-filters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/8.txt"
+    },
+    {
+      "id": "NOR-0",
+      "group": "regional",
+      "title": "Dandelion Sprouts nordiske filtre",
+      "languages": [
+        "nb",
+        "nn",
+        "no",
+        "da",
+        "is"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/DandelionSprout/adfilt",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/DandelionSprout/adfilt/master/NorwegianList.txt"
+    },
+    {
+      "id": "POL-0",
+      "group": "regional",
+      "title": "Oficjalne Polskie Filtry do uBlocka Origin",
+      "languages": [
+        "szl",
+        "pl"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/MajkiIT/polish-ads-filter",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/MajkiIT/polish-ads-filter/master/polish-adblock-filters/adblock.txt"
+    },
+    {
+      "id": "POL-3",
+      "group": "regional",
+      "title": "CERT.PL's Warning List",
+      "languages": [
+        "szl",
+        "pl"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://cert.pl/lista-ostrzezen/",
+      "trusted": false,
+      "url": "https://hole.cert.pl/domains/v2/domains_ublock.txt"
+    },
+    {
+      "id": "ROU-1",
+      "group": "regional",
+      "title": "Romanian Ad (ROad) Block List Light",
+      "languages": [
+        "ro"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/tcptomato/ROad-Block",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/tcptomato/ROad-Block/master/road-block-filters-light.txt"
+    },
+    {
+      "id": "RUS-0",
+      "group": "regional",
+      "title": "RU AdList",
+      "languages": [
+        "be",
+        "kk",
+        "tt",
+        "ru",
+        "uz"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://forums.lanik.us/viewforum.php?f=102",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/easylist/ruadlist/master/RuAdList-uBO.txt"
+    },
+    {
+      "id": "spa-0",
+      "group": "regional",
+      "title": "EasyList Spanish",
+      "languages": [
+        "an",
+        "ast",
+        "ca",
+        "cak",
+        "es",
+        "eu",
+        "gl",
+        "gn",
+        "trs",
+        "quz"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://forums.lanik.us/viewforum.php?f=103",
+      "trusted": false,
+      "url": "https://easylist-downloads.adblockplus.org/easylistspanish.txt"
+    },
+    {
+      "id": "spa-1",
+      "group": "regional",
+      "title": "AdGuard Spanish/Portuguese",
+      "languages": [
+        "an",
+        "ast",
+        "ca",
+        "cak",
+        "es",
+        "eu",
+        "gl",
+        "gn",
+        "trs",
+        "pt",
+        "quz"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters#adguard-filters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/9.txt"
+    },
+    {
+      "id": "SVN-0",
+      "group": "regional",
+      "title": "Slovenian List",
+      "languages": [
+        "sl"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/betterwebleon/slovenian-list",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/betterwebleon/slovenian-list/master/filters.txt"
+    },
+    {
+      "id": "SWE-1",
+      "group": "regional",
+      "title": "Frellwit's Swedish Filter",
+      "languages": [
+        "sv"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/lassekongo83/Frellwits-filter-lists",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/lassekongo83/Frellwits-filter-lists/master/Frellwits-Swedish-Filter.txt"
+    },
+    {
+      "id": "THA-0",
+      "group": "regional",
+      "title": "EasyList Thailand",
+      "languages": [
+        "th"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/easylist-thailand/easylist-thailand",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/easylist-thailand/easylist-thailand/master/subscription/easylist-thailand.txt"
+    },
+    {
+      "id": "TUR-0",
+      "group": "regional",
+      "title": "AdGuard Turkish",
+      "languages": [
+        "tr"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters#adguard-filters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/13.txt"
+    },
+    {
+      "id": "UKR-0",
+      "group": "regional",
+      "title": "AdGuard Ukrainian",
+      "languages": [
+        "uk"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://github.com/AdguardTeam/AdguardFilters#adguard-filters",
+      "trusted": false,
+      "url": "https://filters.adtidy.org/extension/ublock/filters/23.txt"
+    },
+    {
+      "id": "VIE-1",
+      "group": "regional",
+      "title": "ABPVN List",
+      "languages": [
+        "vi"
+      ],
+      "licence": "see its homepage",
+      "homepage": "https://abpvn.com/",
+      "trusted": false,
+      "url": "https://raw.githubusercontent.com/abpvn/abpvn/master/filter/abpvn_ublock.txt"
+    }
+  ]
+}

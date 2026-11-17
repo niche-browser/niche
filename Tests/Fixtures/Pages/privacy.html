@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Privacy fixture</title>
+<!-- A page as a site with trackers on it sees itself: an ad script (on the block list), a script
+     that fingerprints, and a library from a CDN. The other hosts are this server under other
+     names (the scenario maps them with host-resolver-rules), so nothing leaves the Mac. -->
+<h1>Privacy fixture</h1>
+<p id="out"></p>
+<script>
+  const port = location.port;
+  for (const [host, file] of [["stats.g.doubleclick.net", "privacy-tracker.js"], ["cdn.widgets.test", "privacy-fingerprint.js"],
+                              ["cdn.jsdelivr.net", "privacy-tracker.js"]]) {
+    const s = document.createElement("script");
+    s.src = "http://" + host + ":" + port + "/" + file;
+    document.head.appendChild(s);
+  }
+</script>

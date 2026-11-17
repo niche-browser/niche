@@ -167,6 +167,9 @@ final class KeyBindingRegistry {
             // View
             KeyAction(id: "toggleSidebar", name: "Hide Sidebar", section: .view, shortcuts: [Shortcut("s", cmd)], triggers: ["sidebar", "hide sidebar", "show sidebar"]),
             KeyAction(id: "toggleToolbar", name: "Hide Toolbar", section: .view, shortcuts: [Shortcut("d", cmdShift)], triggers: ["toolbar"]),
+            // Who the page talks to, and the way to block them (PrivacyPanelView).
+            KeyAction(id: "togglePrivacyPanel", name: "Show Privacy Panel", section: .view, shortcuts: [],
+                      triggers: ["privacy", "trackers", "tracking", "shield", "who is tracking me"], symbol: "shield.lefthalf.filled"),
             // Arc: View ▸ Appearance, what websites see (Websites, Easels, and Notes will use:).
             KeyAction(id: "appearanceAutomatic", name: "Website Appearance: Automatic", section: .none, shortcuts: [], triggers: ["website appearance", "system appearance"], symbol: "circle.lefthalf.filled"),
             KeyAction(id: "appearanceLight", name: "Website Appearance: Light", section: .none, shortcuts: [], triggers: ["light mode", "light websites"], symbol: "sun.max"),

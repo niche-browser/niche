@@ -8,6 +8,7 @@
 | App | `Sources/Niche` | NicheCore, AppKit, SwiftUI, NicheCEF |
 | Bridge | `Sources/NicheCEF` | CEF (Objective-C++, seen by Swift through `include/`) |
 | Helper | `Sources/NicheHelper` | CEF (the Chromium subprocess) |
+| Shields | `Sources/NicheShields` | Rust: the filter engine behind a C interface, linked into the bridge and the helper ([shields.md](shields.md)) |
 | Dock tile | `Sources/NicheDockTile` | AppKit (the Dock icon plug-in) |
 
 NicheCore never imports AppKit, Cocoa, SwiftUI, UIKit or NicheCEF; `scripts/lint.py`

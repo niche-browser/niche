@@ -1,0 +1,28 @@
+# Shields: the filter engine behind Niche's ad, tracker and cookie-notice blocking. A thin C
+# interface over Brave's adblock-rust (MPL-2.0), built into libniche_shields.a by
+# scripts/build-shields.sh and linked into NicheCEF (the browser process) and NicheHelper
+# (page processes). See docs/shields.md.
+[package]
+name = "niche_shields"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Not `single-thread`: requests are checked on Chromium's IO thread while the app swaps
+# engines from another.
+adblock = { version = "=0.13.5", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling", "css-validation"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The rules page processes load travel with every tab: compressed, they are a third the size.
+miniz_oxide = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "debuginfo"

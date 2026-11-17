@@ -892,17 +892,8 @@ extension LibraryListView: NSMenuDelegate {
             }
             menu.addItem(.separator())
             MenuItems.add(menu, "Remove from Archive") { store.removeFromArchive(e.id) }
-        case .download(.live):
-            break
-        case .download(.finished(let e)):
-            let url = URL(fileURLWithPath: e.path)
-            MenuItems.add(menu, "Open") { NSWorkspace.shared.open(url) }
-            MenuItems.add(menu, "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-            menu.addItem(.separator())
-            MenuItems.add(menu, "Copy") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.writeObjects([url as NSURL])
-            }
+        case .download(let listed):
+            DownloadMenu.fill(menu, for: listed)
         }
     }
 }
@@ -956,6 +947,11 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
     /// A finished download's file: opened by a click, dragged out.
     private var download: DownloadHistory.Entry?
     private var isDownloadRow = false
+    /// A download's row: what it is, for its buttons; the bar while it runs.
+    private var listed: DownloadHistory.Listed?
+    private let progress = DownloadProgressBar()
+    private var actionButtons: [SidebarGlyphButton] = []
+    private var shownActions: [DownloadAction] = []
     private var restore: (() -> Void)?
     /// An archived tab's hover buttons (Arc 1.172.1): the bin removes it from the archive, the
     /// curved arrow brings it back.
@@ -987,6 +983,7 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         tile.addSubview(icon)
         card.addSubview(title)
         card.addSubview(detail)
+        card.addSubview(progress)
         for (b, symbol, label) in [(binButton, "trash", "Delete"), (restoreButton, "arrow.uturn.backward", "Restore")] {
             b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?.withSymbolConfiguration(Design.Icon.configuration(Design.Icon.bar, weight: .regular))
             b.imageScaling = .scaleNone
@@ -1006,6 +1003,9 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         self.colors = colors
         download = nil
         isDownloadRow = false
+        listed = nil
+        progress.show(nil)
+        setActions([])
         self.restore = restore
         self.remove = remove
         let ink: NSColor = colors.isDark ? .white : .black
@@ -1032,16 +1032,26 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         let ink: NSColor = colors.isDark ? .white : .black
         icon.isHidden = true
         let image: NSImage?
+        self.listed = listed
+        progress.colors = colors
         switch listed {
         case .finished(let e):
             download = e
             image = DownloadHistory.shared.thumbnail(for: e.path)
             detail.stringValue = Self.age.localizedString(for: min(e.date, Date()), relativeTo: Date())
+            progress.show(nil)
         case .live(let l):
             download = nil
             image = NSWorkspace.shared.icon(for: UTType(filenameExtension: (l.name as NSString).pathExtension) ?? .data)
-            detail.stringValue = DownloadRow.subtitle(l.row, now: Date())
+            // Beside the row's buttons there is room for one thing (as in the tray).
+            detail.stringValue = DownloadRow.subtitle(l.row, now: Date(), detail: hovering ? .brief : .compact)
+            switch l.row {
+            case .downloading: progress.show(.running(l.fraction))
+            case .paused: progress.show(.paused(l.fraction ?? 0))
+            case .failed, .cancelled, .finished: progress.show(nil)
+            }
         }
+        setActions(DownloadAction.buttons(for: listed.state))
         if let image {
             var rect = NSRect(x: 0, y: 0, width: 32, height: 32)
             let scale = window?.backingScaleFactor ?? 2
@@ -1056,6 +1066,24 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         title.lineBreakMode = .byTruncatingMiddle
         tip?.text = ""
         apply(ink: ink)
+        if listed.state == .failed { detail.textColor = Design.dangerNS }
+    }
+
+    /// A download's two buttons under the pointer (`DownloadAction.buttons`).
+    private func setActions(_ actions: [DownloadAction]) {
+        guard actions != shownActions else { for b in actionButtons { b.colors = colors }; return }
+        shownActions = actions
+        actionButtons.forEach { $0.removeFromSuperview() }
+        actionButtons = actions.map { action in
+            let b = SidebarGlyphButton(symbol: action.symbol, size: Design.Space.controlCompact, iconSize: Design.Icon.small, weight: .semibold,
+                                       help: action.title, colors: colors) { [weak self] in
+                guard let listed = self?.listed else { return }
+                DownloadHistory.shared.perform(action, on: listed)
+            }
+            b.isHidden = !hovering
+            card.addSubview(b)
+            return b
+        }
     }
 
     private func apply(ink: NSColor) {
@@ -1067,6 +1095,9 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
 
     private func refreshHover() {
         card.layer?.backgroundColor = (hovering ? colors.hoverFill : .clear).cgColor
+        if case .live(let l)? = listed {
+            detail.stringValue = DownloadRow.subtitle(l.row, now: Date(), detail: hovering ? .brief : .compact)
+        }
     }
 
     override func layout() {
@@ -1088,12 +1119,25 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         restoreButton.contentTintColor = ink.withAlphaComponent(Design.Emphasis.secondary.rawValue)
         restoreButton.frame = NSRect(x: card.bounds.width - 14 - 24, y: (h - 24) / 2, width: 24, height: 24)
         binButton.frame = restoreButton.frame.offsetBy(dx: -34, dy: 0)
+        // A download's buttons, at the card's right under the pointer.
+        let side = Design.Space.controlCompact
+        var bx = card.bounds.width - Design.Space.m
+        for b in actionButtons.reversed() {
+            b.isHidden = !hovering
+            bx -= side
+            b.frame = NSRect(x: bx, y: (h - side) / 2, width: side, height: side)
+            bx -= Design.Space.xxs
+        }
+        var right = showsButtons ? binButton.frame.minX - 8 : card.bounds.width - 18
+        if hovering, let first = actionButtons.first { right = first.frame.minX - Design.Space.s }
         // HStack(spacing: 10) ends in a Spacer, so the text stops 10 + 8 pt short of the edge.
-        let tx = x + t + 10, tw = max(0, (showsButtons ? binButton.frame.minX - 8 : card.bounds.width - 18) - tx)
-        // VStack(spacing: 1) of 17 + 15, centred.
-        let top = (h - 33) / 2
+        let tx = x + t + 10, tw = max(0, right - tx)
+        // VStack(spacing: 1) of 17 + 15, centred; a running download's bar sits under them.
+        let bar = !progress.isHidden
+        let top = (h - 33) / 2 - (bar ? DownloadsTrayMetrics.progressHeight : 0)
         title.frame = NSRect(x: tx - SidebarText.inset, y: top, width: tw + 2 * SidebarText.inset, height: 17)
         detail.frame = NSRect(x: tx - SidebarText.inset, y: top + 18, width: tw + 2 * SidebarText.inset, height: 15)
+        progress.frame = NSRect(x: tx, y: top + 18 + 15 + Design.Space.xs, width: tw, height: DownloadsTrayMetrics.progressHeight)
     }
 
     // MARK: Pointer

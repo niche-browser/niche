@@ -47,6 +47,8 @@ final class SidebarUIState {
     /// The Library page this window's sidebar shows, nil while it shows the tabs (Arc keeps the
     /// Library per window and reopens it on the page last shown).
     var libraryPage: LibraryPage?
+    /// The window's privacy panel is open (the toolbar's shield stays lit).
+    var privacyPanelOpen = false
     @ObservationIgnored var lastLibraryPage: LibraryPage = .downloads
     /// A two-finger swipe pulling the Library in from the left of the first space, or back out
     /// (Arc 1.171): how much of it shows, 0 the space, 1 the Library, past 1 while it

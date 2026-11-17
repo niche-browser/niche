@@ -88,6 +88,10 @@ STARTED="$OUT/started"
 touch "$STARTED"
 # The scenario's own data files, environment and home folder.
 app_env=(env)
+# Shields from fixture lists (Tests/Fixtures/Shields), never from the network: a small unsigned
+# pack built for this run. A scenario's own `env NICHE_SHIELDS_SOURCE=…` line comes later and wins.
+python3 -I "$ROOT/scripts/shields-fixture-pack.py" "$DATA/shields-source"
+app_env+=(NICHE_SHIELDS_SOURCE="file://$DATA/shields-source/" NICHE_SHIELDS_UNSIGNED=1)
 while read -r _ seed json; do echo "$json" > "$DATA/$seed"; done < <(grep '^seed ' "$FILE")
 while read -r _ kv; do app_env+=("$kv"); done < <(grep '^env ' "$FILE")
 if grep -q '^home$' "$FILE"; then

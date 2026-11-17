@@ -28,6 +28,7 @@ if [ "${1:-}" != core ]; then
   suite "Store and importers" scripts/test-store.sh
   suite "Policies" scripts/test-policies.sh
   suite "Engine policies" scripts/test-engine-policies.sh
+  suite "Shields engine" scripts/build-shields.sh --test
   suite "Command bar glyph" scripts/test-command-bar-glyph.sh
   suite "Folder glyph" scripts/test-folder-glyph.sh
   suite "Perf recorder" scripts/test-perf.sh
