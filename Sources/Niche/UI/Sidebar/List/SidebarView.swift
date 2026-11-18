@@ -404,7 +404,7 @@ final class SidebarTopBarView: NSView {
 
     private func apply() {
         let wasCompact = compact
-        compact = !store.settings.showToolbar
+        compact = !store.settings.toolbarShown
         colors = SidebarColors(store.focusedSpace(window: ui.windowID).theme.palette)
         let tab = store.selectedTab(window: ui.windowID)
         devNav = !compact && (tab?.tab.map { store.settings.isDeveloperMode(url: $0.url) } ?? false)

@@ -245,6 +245,9 @@ final class ArcTooltipAnchorView: NSView, ArcTooltipTarget {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    /// It covers a control, and in the window's title row AppKit moves the window from any view
+    /// that allows it: a tab in the strip under its tooltip's anchor dragged the window (17 Nov 2026).
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

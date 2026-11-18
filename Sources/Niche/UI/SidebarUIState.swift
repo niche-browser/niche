@@ -10,6 +10,10 @@ final class SidebarUIState {
     /// The browser window this sidebar belongs to (its space and open tab, see WindowSession).
     @ObservationIgnored var windowID = UUID()
     var renamingID: UUID?
+    /// The rename is edited in the tab strip or the bookmarks bar across the top, not in the
+    /// sidebar's list: the tabs are across the top and the sidebar is away. Both hold a view of the
+    /// same tab, and both taking the keyboard ended the rename before it began (17 Nov 2026).
+    var renamesInTopChrome = false
     /// The ⌘T bar is open for a new tab: the focused space's New Tab row is the active row,
     /// filled like the selected tab, which loses its fill (Arc: isCommandBarNewTabPlaceholderActive).
     var newTabPlaceholderActive = false
@@ -21,6 +25,8 @@ final class SidebarUIState {
     var capturingTabIDs: Set<UUID> = []
     /// Tabs playing sound (Arc's speaker button).
     var audibleTabIDs: Set<UUID> = []
+    /// Tabs whose page is loading, in any window: the tab strip turns a ring on them.
+    var loadingTabIDs: Set<UUID> = []
     /// The window's sidebar player (NowPlayingTrayView), fed by its BrowserManager.
     @ObservationIgnored let nowPlaying = NowPlaying()
     var canGoBack = false
@@ -78,6 +84,16 @@ final class SidebarUIState {
     func hoverDraggable(_ id: UUID, _ inside: Bool) {
         if inside { draggableUnderPointer = id } else if draggableUnderPointer == id { draggableUnderPointer = nil }
     }
+    /// The pointer is over something pressed and dragged in the window's title row: a tab in the
+    /// strip across the top, a bookmark under it. The title row moves the window from a press
+    /// whatever the view under it says, so the window controller makes the window unmovable
+    /// meanwhile (17 Nov 2026: a tab dragged along the strip took the window with it).
+    @ObservationIgnored var onPointerOverTitleRowItemChange: (Bool) -> Void = { _ in }
+    @ObservationIgnored private var titleRowHold = TitleRowHold() {
+        didSet { if oldValue.holdsWindow != titleRowHold.holdsWindow { onPointerOverTitleRowItemChange(titleRowHold.holdsWindow) } }
+    }
+
+    func hoverTitleRowItem(_ id: UUID, _ inside: Bool) { titleRowHold.set(id, inside: inside) }
     /// Per-tab navigation state for split panes (each pane has its own toolbar).
     var navStates: [UUID: TabNavState] = [:]
     /// Panes currently shown in the window (empty when a single page shows).

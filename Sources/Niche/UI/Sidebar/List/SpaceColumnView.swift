@@ -621,7 +621,7 @@ final class FavoritesGridView: NSView {
             guard let space = store.space(spaceID) else { return }
             palette = space.theme.palette
             // Arc (4 Nov): with the URL field in the sidebar, the pins leave it for this grid.
-            if !store.settings.showToolbar, !store.isIncognito(space: spaceID) {
+            if !store.settings.toolbarShown, !store.isIncognito(space: spaceID) {
                 let ext = ExtensionStore.shared
                 let profile = store.profileDirectoryName(space: spaceID)
                 let entries = ext.entries(inProfile: profile)

@@ -97,7 +97,7 @@ final class SidebarStore {
             blankSpaceIDs.remove(sid)
         }
         repair()
-        if prefs.windows.isEmpty { prefs.windows = [WindowSession()] }
+        if prefs.windows.isEmpty { prefs.windows = [WindowSession(sidebarVisible: !settings.tabsOnTop)] }
         for i in prefs.windows.indices where prefs.windows[i].focusedSpaceID.flatMap({ spaces[$0] }) == nil {
             prefs.windows[i].focusedSpaceID = spaceOrder.first
         }
@@ -276,7 +276,9 @@ final class SidebarStore {
 
     /// A new window on `spaceID` with nothing open yet (never on another window's own space).
     func addWindow(spaceID: UUID, frame: String?) -> WindowSession {
-        let w = WindowSession(focusedSpaceID: isStandalone(space: spaceID) ? spaceOrder.first : spaceID, frame: frame)
+        // With the tabs across the top a new window starts without the sidebar, which would list them twice.
+        let w = WindowSession(focusedSpaceID: isStandalone(space: spaceID) ? spaceOrder.first : spaceID, frame: frame,
+                              sidebarVisible: !settings.tabsOnTop)
         prefs.windows.append(w)
         return w
     }
@@ -313,7 +315,7 @@ final class SidebarStore {
     /// Arc's Blank Window (⌃⌘N, #220): a window in the normal profile with a sidebar of its
     /// own, "This Window", that none of the spaces' tabs show in. Saved and restored with it.
     func addBlankWindow(frame: String?) -> WindowSession {
-        var w = WindowSession(frame: frame)
+        var w = WindowSession(frame: frame, sidebarVisible: !settings.tabsOnTop)
         let (space, containers) = BlankWindow.space(window: w.id, at: clock.now)
         for c in containers { items[c.id] = c }
         spaces[space.id] = space
@@ -385,7 +387,7 @@ final class SidebarStore {
         spaces[id] = Space(id: id, title: "Incognito", emoji: "🕶️", theme: .incognito, favoritesContainerID: favorites.id,
                            pinnedContainerID: pinned.id, todayContainerID: today.id, createdAt: clock.now)
         incognitoSpaceIDs.insert(id)
-        let w = WindowSession(focusedSpaceID: id, frame: frame, isIncognito: true)
+        let w = WindowSession(focusedSpaceID: id, frame: frame, sidebarVisible: !settings.tabsOnTop, isIncognito: true)
         prefs.windows.append(w)
         return w
     }

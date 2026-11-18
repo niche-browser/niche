@@ -1117,6 +1117,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 return
             }
             if let label = dict["privacy"] { main.debugPrivacy(label: label); return }
+            // windowLayout=top|sidebar: where the tabs are, as Settings ▸ Appearance sets it.
+            // tabStrip=<label>, bookmarksBar=<label>: what the top chrome shows, on a log line.
+            if let v = dict["windowLayout"], let layout = WindowLayout(rawValue: v) { store.settings.windowLayout = layout; return }
+            if let label = dict["tabStrip"] { main.debugTopChrome(label: label, bookmarks: false); return }
+            // onboardingStep=cover|privacy|personalization|outro: the onboarding window at that step.
+            if let step = dict["onboardingStep"] { main.debugOnboarding(step: step); return }
+            // newSpace=<title>&preset=<n>: a space in one of the preset themes (SpaceTheme.presets), in
+            // front in this window, for checks that switch between spaces or need a light one.
+            if let title = dict["newSpace"] {
+                let theme = dict["preset"].flatMap { Int($0) }.flatMap { SpaceTheme.presets.indices.contains($0) ? SpaceTheme.presets[$0] : nil }
+                let space = store.createSpace(title: title, emoji: "", symbol: "circle.hexagongrid.fill", theme: theme, focus: false)
+                store.focusSpace(space.id, window: main.windowID)
+                return
+            }
+            if let label = dict["bookmarksBar"] { main.debugTopChrome(label: label, bookmarks: true); return }
             // shields=<label>: what the filter engine says about a request (url, page, type as
             // in NicheShields.h), or without a url how much is loaded.
             if let label = dict["shields"] {
@@ -1391,12 +1406,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         switch id {
         case "toggleSidebar": return main.sidebarVisible ? "Hide Sidebar" : "Show Sidebar"
         case "toggleToolbar": return store.settings.showToolbar ? "Hide Toolbar" : "Show Toolbar"
+        case "toggleTabsOnTop": return store.settings.tabsOnTop ? "Show Tabs in Sidebar" : "Show Tabs on Top"
+        case "toggleBookmarksBar": return store.settings.tabsOnTop && store.settings.showBookmarksBar ? "Hide Bookmarks Bar" : "Show Bookmarks Bar"
         case "togglePrivacyPanel": return main.privacyPanelOpen ? "Hide Privacy Panel" : "Show Privacy Panel"
         case "collapsePinned": return store.isPinnedCollapsed(main.focusedSpaceID) ? "Expand Pinned Tabs" : "Collapse Pinned Tabs"
         default: return nil
         }
     }
-    private static let flippingRows = ["toggleSidebar", "toggleToolbar", "collapsePinned"]
+    private static let flippingRows = ["toggleSidebar", "toggleToolbar", "toggleTabsOnTop", "toggleBookmarksBar", "collapsePinned"]
 
     /// System Settings ▸ Keyboard ▸ App Shortcuts names a menu row by its title, and AppKit looks a
     /// key up among the titles the menu bar has at that moment, before it validates the row. So a
@@ -1424,6 +1441,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if let id = item.representedObject as? String, let title = flippingTitle(id), item.title != title { item.title = title }
         switch item.representedObject as? String {
         case "collapsePinned": return !main.isStandalone
+        // With the tabs across the top the toolbar is part of the strip; the bookmarks bar exists only there.
+        case "toggleToolbar": return !store.settings.tabsOnTop
+        case "toggleBookmarksBar": return store.settings.tabsOnTop
         case "stayOnTop": item.state = main.staysOnTop ? .on : .off
         case "allowAppleEventsJavaScript": item.state = store.settings.allowAppleEventsJavaScript ? .on : .off
         case "appearanceAutomatic", "appearanceLight", "appearanceDark":
@@ -1660,6 +1680,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case "jumpToSelection": main.jumpToSelection()
         case "toggleSidebar": main.toggleSidebar()
         case "toggleToolbar": store.settings.showToolbar.toggle()
+        case "toggleTabsOnTop": store.settings.windowLayout = store.settings.tabsOnTop ? .sidebar : .top
+        case "toggleBookmarksBar":
+            // Asked for from anywhere (the command bar), it brings the tabs to the top with it.
+            if store.settings.tabsOnTop { store.settings.showBookmarksBar.toggle() } else {
+                store.settings.showBookmarksBar = true
+                store.settings.windowLayout = .top
+            }
         case "togglePrivacyPanel": main.togglePrivacyPanel()
         case "toggleDeveloperMode": if let url = store.selectedTab?.tab?.url { store.settings.toggleDeveloperMode(url: url) }
         case "reload": main.currentBrowser?.reload()
@@ -1912,7 +1939,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         view.addItem(submenu: appearance, title: "Appearance")
         view.addItem(.separator())
-        view.addItem(item("toggleSidebar")); view.addItem(item("toggleToolbar")); view.addItem(item("togglePrivacyPanel")); view.addItem(item("collapsePinned"))
+        view.addItem(item("toggleSidebar")); view.addItem(item("toggleToolbar")); view.addItem(item("toggleTabsOnTop"))
+        view.addItem(item("toggleBookmarksBar")); view.addItem(item("togglePrivacyPanel")); view.addItem(item("collapsePinned"))
         view.addItem(.separator())
         view.addItem(item("stop")); view.addItem(item("reload")); view.addItem(item("hardReload"))
         // Arc's View menu order: cookies, then cache.

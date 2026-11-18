@@ -72,6 +72,7 @@ enum StoreTests {
         allFoldersExpanded()
         revealInSidebar()
         oneWindowAtLaunch()
+        newWindowsFollowTheTabLayout()
         print("Store: \(checks) checks passed")
     }
 
@@ -538,6 +539,24 @@ enum StoreTests {
         var request = LivePullRequest(owner: "company/team", repo: "app", number: number, title: "Merge request \(number)", createdByMe: true)
         request.webURL = "\(server)/company/team/app/-/merge_requests/\(number)"
         return request
+    }
+
+    /// With the tabs across the top (WindowLayout.top) a new window starts without the sidebar,
+    /// which would list the same tabs a second time; in the sidebar layout it starts with it.
+    @MainActor
+    private static func newWindowsFollowTheTabLayout() {
+        let store = AppComposition(clock: ManualScheduler()).store
+        let space = store.focusedSpaceID
+        expect(store.addWindow(spaceID: space, frame: nil).sidebarVisible, "a new window shows the sidebar while the tabs are in it")
+        expect(store.addBlankWindow(frame: nil).sidebarVisible, "a Blank Window too")
+        expect(store.addIncognitoWindow(frame: nil).sidebarVisible, "and an incognito one")
+        store.settings.windowLayout = .top
+        expect(!store.addWindow(spaceID: space, frame: nil).sidebarVisible, "with the tabs across the top a new window starts without the sidebar")
+        expect(!store.addBlankWindow(frame: nil).sidebarVisible, "a Blank Window too")
+        let incognito = store.addIncognitoWindow(frame: nil)
+        expect(!incognito.sidebarVisible && incognito.isIncognito, "and an incognito one, still incognito")
+        expect(store.window(incognito.id).sidebarVisible == false, "the window is stored as it was made")
+        expect(store.integrityProblems().isEmpty, "the sidebar is sound after the windows were added")
     }
 
     @MainActor

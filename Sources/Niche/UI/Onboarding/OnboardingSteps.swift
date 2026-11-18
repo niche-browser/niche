@@ -437,8 +437,8 @@ private struct PinCard: View {
 
 /// Dia 1.54's PersonalizationView: the colour swatches in one row, then "Choose how you would like
 /// to view your tabs:" over two PersonalizationTabLayoutButtons (window illustrations, Dia's
-/// TabLayout/* artwork, with a ring around the picked one and its name underneath). Dia picks a
-/// tab layout; Niche's two layouts place the address bar (Arc's View ▸ Show Toolbar).
+/// TabLayout/* artwork, with a ring around the picked one and its name underneath). The two
+/// layouts are Niche's `WindowLayout`: the tabs down the sidebar, or across the top of the window.
 struct PersonalizationStep: View {
     @Bindable var model: ImportFlowModel
     let c: ImportColors
@@ -453,13 +453,13 @@ struct PersonalizationStep: View {
             }
             .frame(width: ImportMetrics.columnWidth, alignment: .leading)
             .offset(y: ImportMetrics.listTop)
-            Text("Choose where the address bar goes:")
+            Text("Choose where your tabs go:")
                 .font(Design.Font.body)
                 .foregroundStyle(c.body)
                 .offset(y: 228)
             HStack(spacing: Design.Space.l) {
-                LayoutTile(toolbar: false, title: "Sidebar", model: model, c: c)
-                LayoutTile(toolbar: true, title: "Toolbar", model: model, c: c)
+                LayoutTile(top: false, title: WindowLayout.sidebar.title, model: model, c: c)
+                LayoutTile(top: true, title: WindowLayout.top.title, model: model, c: c)
             }
             .offset(y: 252)
             PrimaryButton(title: "Continue", c: c, enabled: true) { model.continueFromPersonalization() }
@@ -471,7 +471,7 @@ struct PersonalizationStep: View {
 /// Dia's PersonalizationTabLayoutButton: the illustration at its 230×180 artwork size scaled to
 /// the column, a 3 pt ring when picked, the name in TabLayoutLabelText underneath.
 private struct LayoutTile: View {
-    let toolbar: Bool
+    let top: Bool
     let title: String
     @Bindable var model: ImportFlowModel
     let c: ImportColors
@@ -479,10 +479,10 @@ private struct LayoutTile: View {
     private static let width: CGFloat = (ImportMetrics.columnWidth - Design.Space.l) / 2
 
     var body: some View {
-        let selected = model.classicLayout == toolbar
+        let selected = model.tabsOnTop == top
         let k = Self.width / Metrics.layoutArt.width
         VStack(spacing: Design.Space.s) {
-            LayoutArt(toolbar: toolbar, selected: selected, dark: c.dark)
+            LayoutArt(top: top, selected: selected, dark: c.dark)
                 .frame(width: Metrics.layoutArt.width, height: Metrics.layoutArt.height)
                 .scaleEffect(k, anchor: .topLeading)
                 .frame(width: Metrics.layoutArt.width * k, height: Metrics.layoutArt.height * k, alignment: .topLeading)
@@ -492,22 +492,43 @@ private struct LayoutTile: View {
                 .foregroundStyle(c.body)
         }
         .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.easeOut(duration: Design.Motion.duration(Design.Motion.fast))) { model.classicLayout = toolbar } }
+        .onTapGesture { withAnimation(.easeOut(duration: Design.Motion.duration(Design.Motion.fast))) { model.tabsOnTop = top } }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(toolbar ? "Toolbar: the address bar above the page" : "Sidebar: the address bar at the top of the sidebar")
+        .accessibilityLabel(top ? "Tabs on top: a tab strip, the address and your bookmarks across the top of the window"
+                                : "Sidebar: tabs, favorites and spaces down the side of the window")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { model.classicLayout = toolbar }
+        .accessibilityAction { model.tabsOnTop = top }
     }
 }
 
 /// Drawn after Dia's TabLayout/SidebarSelected and friends (230×180 pt): a 3 pt ring, a 2 pt gap,
-/// the window inset 5 pt (radius 10), 5 pt traffic lights, 54×14 pt sidebar rows on a 19 pt pitch
-/// and the page pane from x 70. Niche's version marks where the address bar sits: the first sidebar
-/// row, or a strip across the top of the page.
+/// the window inset 5 pt (radius 10) and 5 pt traffic lights. The sidebar layout has 54×14 pt
+/// rows on a 19 pt pitch beside the page; tabs on top has three tabs after the traffic lights,
+/// the address under them and the page across the whole window.
 private struct LayoutArt: View {
-    let toolbar: Bool
+    let top: Bool
     let selected: Bool
     let dark: Bool
+
+    /// The drawing's own measures, at the artwork's 230×180 pt.
+    private enum Art {
+        static let window = CGSize(width: 220, height: 170)
+        static let inset: CGFloat = 5
+        static let ring: CGFloat = 3
+        static let light: CGFloat = 5
+        static let lightPitch: CGFloat = 8.5
+        static let lightOrigin = CGPoint(x: 13, y: 14)
+        static let row = CGSize(width: 54, height: 14)
+        static let rowPitch: CGFloat = 19
+        static let rowOrigin = CGPoint(x: 10, y: 27)
+        static let sidePane = CGRect(x: 70, y: 10, width: 150, height: 160)
+        static let tab = CGSize(width: 42, height: 13)
+        static let tabPitch: CGFloat = 45
+        static let tabOrigin = CGPoint(x: 44, y: 10)
+        static let address = CGRect(x: 12, y: 29, width: 206, height: 11)
+        static let topPane = CGRect(x: 10, y: 46, width: 210, height: 124)
+    }
+
     var body: some View {
         let c = ImportColors(dark: dark)
         let window = c.plate(dark ? .strong : .hover)
@@ -516,36 +537,39 @@ private struct LayoutArt: View {
         let accent: Color = dark ? Design.onDarkColor(.secondary) : Design.onLightColor(.tertiary)
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: Metrics.layoutRing, style: .continuous)
-                .strokeBorder(c.title, lineWidth: 3)
+                .strokeBorder(c.title, lineWidth: Art.ring)
                 .opacity(selected ? 1 : 0)
             RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous).fill(window)
-                .frame(width: 220, height: 170)
-                .offset(x: 5, y: 5)
+                .frame(width: Art.window.width, height: Art.window.height)
+                .offset(x: Art.inset, y: Art.inset)
             ForEach(Array(ImportColors.trafficLights.enumerated()), id: \.offset) { i, hex in
-                Circle().fill(Color(hex: hex)).frame(width: 5, height: 5)
-                    .offset(x: 13 + CGFloat(i) * 8.5, y: 14)
+                Circle().fill(Color(hex: hex)).frame(width: Art.light, height: Art.light)
+                    .offset(x: Art.lightOrigin.x + CGFloat(i) * Art.lightPitch, y: Art.lightOrigin.y)
             }
-            ForEach(0..<3) { i in
-                RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
-                    .fill(i == 0 && !toolbar ? accent : row)
-                    .frame(width: 54, height: 14)
-                    .offset(x: 10, y: 27 + CGFloat(i) * 19)
-            }
-            RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(pane)
-                .frame(width: 150, height: 160)
-                .overlay(alignment: .top) {
-                    if toolbar {
-                        VStack(spacing: 0) {
-                            RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous).fill(accent)
-                                .frame(width: 70, height: 7)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, Design.Space.m)
-                                .frame(height: 18)
-                            Rectangle().fill(c.hairline).frame(height: Design.Space.hair)
-                        }
-                    }
+            if top {
+                ForEach(0..<3) { i in
+                    RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                        .fill(i == 0 ? accent : row)
+                        .frame(width: Art.tab.width, height: Art.tab.height)
+                        .offset(x: Art.tabOrigin.x + CGFloat(i) * Art.tabPitch, y: Art.tabOrigin.y)
                 }
-                .offset(x: 70, y: 10)
+                Capsule().fill(row)
+                    .frame(width: Art.address.width, height: Art.address.height)
+                    .offset(x: Art.address.minX, y: Art.address.minY)
+                RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(pane)
+                    .frame(width: Art.topPane.width, height: Art.topPane.height)
+                    .offset(x: Art.topPane.minX, y: Art.topPane.minY)
+            } else {
+                ForEach(0..<3) { i in
+                    RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                        .fill(i == 0 ? accent : row)
+                        .frame(width: Art.row.width, height: Art.row.height)
+                        .offset(x: Art.rowOrigin.x, y: Art.rowOrigin.y + CGFloat(i) * Art.rowPitch)
+                }
+                RoundedRectangle(cornerRadius: Design.Radius.inset, style: .continuous).fill(pane)
+                    .frame(width: Art.sidePane.width, height: Art.sidePane.height)
+                    .offset(x: Art.sidePane.minX, y: Art.sidePane.minY)
+            }
         }
         .frame(width: Metrics.layoutArt.width, height: Metrics.layoutArt.height, alignment: .topLeading)
     }

@@ -122,6 +122,24 @@ built release app with a test profile. Note anything that fails in the release's
   "This site", not a tracker. Click a link from one site to another where you are signed in: you
   arrive signed in. In an incognito window block a company, close the window, and check
   privacy.json and privacy-stats.json did not change.
+- Tabs on top (Settings ▸ Appearance, or View ▸ Show Tabs on Top): the strip comes down as the
+  sidebar slides away, with the traffic lights on the tabs' centre line. Click a tab: the
+  selection's plate travels to it. Close three tabs in a row without moving the pointer: each
+  next close button is under it, and the tabs widen only when the pointer leaves the strip. Drag a
+  tab along the strip: it follows the hand, its neighbours step aside, and the window stays put;
+  drop it and drag the same tab again without moving off it: still the tab, not the window. Drag a
+  tab left of the rule: it becomes a favorite's tile and lands where the slot opened; drag a
+  favorite among the others (it changes places) and right of the rule (a tab again); in a space
+  with no favorite, drag a tab to the very start. Click Downloads at the end of the strip, and
+  click it again: the Library opens and closes.
+  Drag it down onto the bookmarks bar (it is pinned), onto a folder there (it goes in), a bookmark
+  up into the strip (unpinned), a tab out over the desktop (a window of its own). Open twenty
+  tabs in a narrow window: icons only, the run scrolls and fades at its edges, New Tab stays.
+  Double-click a tab and rename it. Two fingers up and down over the strip change space. Add a
+  split view: one bar, following the focused pane. ⌘S brings the sidebar out beside the page and
+  the strip moves over. Full screen: the strip starts at the window's edge. An incognito window:
+  its chip, no bookmarks bar. Light and dark spaces. Onboarding's "Make it yours": the two
+  layouts, and the preview follows the pick.
 - Shields: on a new profile the first launch gets the filter lists within seconds (Settings ▸
   Privacy says how many rules are loaded). A news site shows no ad slots and no cookie notice;
   womex.com opens without its notice (answered "essential only"). Switch Ads off in Settings: ads

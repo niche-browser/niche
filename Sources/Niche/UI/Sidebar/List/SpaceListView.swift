@@ -222,7 +222,8 @@ final class SpaceListView: NSView, NSDraggingSource {
         let window = ui.windowID
         let drop = ui.listDrop
         let picks = ui.multiSelection
-        let renaming = ui.renamingID
+        // Edited up in the tab strip while the sidebar is away (SidebarUIState.renamesInTopChrome).
+        let renaming = ui.renamesInTopChrome ? nil : ui.renamingID
         let focusID = ui.keyboardFocusID
         let capturing = ui.capturingTabIDs
         let audible = ui.audibleTabIDs

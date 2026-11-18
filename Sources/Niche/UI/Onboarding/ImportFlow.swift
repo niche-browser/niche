@@ -637,9 +637,11 @@ final class ImportFlowModel {
         store.updateSpace(space)
     }
 
-    var classicLayout: Bool {
-        get { store.settings.showToolbar }
-        set { store.settings.showToolbar = newValue }
+    /// Where the tabs go (`WindowLayout`): down the sidebar, or across the top with the address
+    /// and the bookmarks bar under them, as in Chrome and Safari.
+    var tabsOnTop: Bool {
+        get { store.settings.tabsOnTop }
+        set { store.settings.windowLayout = newValue ? .top : .sidebar }
     }
 
     func continueFromPersonalization() { go(.outro) }
@@ -650,6 +652,12 @@ final class ImportFlowModel {
 final class ImportWindowController: NSWindowController, NSWindowDelegate {
     static let size = NSSize(width: 928, height: 544)
     private let model: ImportFlowModel
+    /// `niche://debug?onboardingStep=<name>`: the window jumps to that step, for checks of one
+    /// step's look without walking the ones before it.
+    func debugShow(step name: String) {
+        let steps: [String: ImportStep] = ["cover": .cover, "privacy": .privacy, "personalization": .personalization, "outro": .outro]
+        if let step = steps[name] { model.go(step) }
+    }
     private let onClosed: () -> Void
 
     init(store: SidebarStore, favicons: FaviconCache, firstRun: Bool,

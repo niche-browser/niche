@@ -46,6 +46,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// The tab whose page (a video) is in element fullscreen.
     private var contentFullscreenTab: UUID?
     private var lastSidebarVisible = true
+    /// The tab strip, toolbar and bookmarks bar above the pages (`WindowLayout.top`), made the
+    /// first time the tabs go across the top of this window.
+    private(set) var topChrome: TopChromeView?
+    private var lastTabsOnTop = false
     /// The theme the background and placeholder root views were made with.
     private var shownTheme: SpaceTheme?
     /// The empty window's home (HomeView), made when it first shows and kept in step from `refresh`.
@@ -136,7 +140,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         shell.showToolbar = store.settings.showsBar(above: selectedTabID.flatMap { store.item($0)?.tab?.url })
         shell.edgeToEdge = store.settings.edgeToEdgeContent
         lastSidebarVisible = sidebarVisible
-        window.trafficLightsHidden = !sidebarVisible
+        if store.settings.tabsOnTop {
+            let chrome = makeTopChrome()
+            topChrome = chrome
+            shell.topChrome = chrome
+            shell.topChromeHeight = chrome.preferredHeight
+            lastTabsOnTop = true
+        }
+        // With the tabs across the top the lights stay, at the start of the strip.
+        window.trafficLightsHidden = !sidebarVisible && !lastTabsOnTop
+        syncTopChromeLights()
         lastSidebarWidth = CGFloat(store.prefs.sidebarWidth)
         window.contentView = shell
         window.backgroundColor = NSColor(palette.gradientColors.first ?? .gray)
@@ -161,6 +174,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         // sidebar's list that is SwiftUI's scroll container, which always says yes,
         // so the window's own flag is what keeps a row press for the row's drag.
         sidebarUI.onPointerOverDraggableChange = { [weak window] over in window?.isMovableByWindowBackground = !over }
+        // The tab strip stands in the title row, which moves the window whatever a view there says
+        // (the window server starts that drag itself): while the pointer is on a tab or a bookmark
+        // the window can't be moved, so a press carries the tab. The strip's empty parts move it.
+        sidebarUI.onPointerOverTitleRowItemChange = { [weak window] over in window?.isMovable = !over }
         browsers.paneHost = { [weak self] id in self?.shell.card(for: id)?.webArea }
         shell.makeToolbar = { [weak self] id in
             guard let self else { return NSView() }
@@ -222,7 +239,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
             store.prefs.sidebarWidth = Double(shell.sidebarWidth)
             lastSidebarWidth = shell.sidebarWidth
         }
-        shell.onEdgeHover = { [weak self] show in self?.setFloatingSidebar(show) }
+        // With the tabs across the top the window's edge is the page's: the sidebar comes with ⌘S.
+        shell.onEdgeHover = { [weak self] show in
+            guard let self, !(show && self.store.settings.tabsOnTop) else { return }
+            self.setFloatingSidebar(show)
+        }
 
         installSwipeMonitor()
         installChildClickMonitor()
@@ -372,7 +393,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
             let inBar = button.map { self.isInPaneBar($0) } ?? false
             self.runExtensionAction(id, buttonRightX: button?.maxX ?? NSEvent.mouseLocation.x + 17,
                                     buttonBottomY: inBar ? self.toolbarBottomOnScreen()?.y
-                                        : self.store.settings.showToolbar == false ? button?.minY : nil)
+                                        : self.store.settings.toolbarShown == false ? button?.minY : nil)
         }
         sidebarActions.showExtensionsMenu = { [weak self] in self?.showToolbarExtensionsMenu() }
         sidebarActions.paneRunExtension = { [weak self] pane, id in
@@ -528,6 +549,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         // them a switch between loaded tabs drew one frame with Back greyed out, on a white bar when
         // the tab had no saved colour (incognito, or any tab before 0.1.26) (#84).
         syncNavStates(panes)
+        // The window's own bar follows the focused pane of a split.
+        topChrome?.toolbar.paneTabID = panes.count > 1 ? selected : nil
         shell.setPanes(panes, factors: factors, orientation: split?.split?.orientation ?? .horizontal, focused: selected, empty: empty, animated: true)
         // A page is on screen in one window at a time. Arc keeps the tab selected in every window
         // that has it open: the window in use holds the page, the others show a blurred snapshot
@@ -550,9 +573,27 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         syncSidebarUI()
         window?.title = selectedTab?.displayTitle ?? space.title
 
-        if sidebarVisible != lastSidebarVisible {
+        // The tabs moved between the sidebar and the top (Settings, View ▸ Tabs on Top, onboarding):
+        // the strip comes down as the sidebar leaves, or goes back up as it returns.
+        let onTop = store.settings.tabsOnTop
+        let layoutChanged = onTop != lastTabsOnTop
+        if layoutChanged {
+            lastTabsOnTop = onTop
+            if onTop, topChrome == nil {
+                let chrome = makeTopChrome()
+                topChrome = chrome
+                shell.topChrome = chrome
+            }
+            shell.topChromeHeight = onTop ? topChrome?.preferredHeight ?? 0 : 0
+            if sidebarVisible == onTop {
+                if !onTop, sidebarUI.libraryPage != nil { closeLibrary() }
+                sidebarVisible = !onTop
+            }
+        }
+        if sidebarVisible != lastSidebarVisible || layoutChanged {
             lastSidebarVisible = sidebarVisible
-            (window as? NicheWindow)?.trafficLightsHidden = !lastSidebarVisible
+            (window as? NicheWindow)?.trafficLightsHidden = !lastSidebarVisible && !onTop
+            syncTopChromeLights()
             // Anchoring while the sidebar floats: bring it home first so it slides from there.
             if lastSidebarVisible { floatingSidebar?.prepareForAnchoring() }
             shell.animateSidebar(visible: lastSidebarVisible, floating: false, fullscreen: shell.contentFullscreen, width: shell.sidebarWidth)
@@ -603,6 +644,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         if capturing != sidebarUI.capturingTabIDs { sidebarUI.capturingTabIDs = capturing }
         let audible = Set(app.mainWindows.flatMap { $0.browsers.runtimes.filter { $0.value.browser.isAudible }.keys })
         if audible != sidebarUI.audibleTabIDs { sidebarUI.audibleTabIDs = audible }
+        let loading = Set(app.mainWindows.flatMap { $0.browsers.runtimes.filter { $0.value.browser.isLoading }.keys })
+        if loading != sidebarUI.loadingTabIDs { sidebarUI.loadingTabIDs = loading }
         let b = browsers.visibleRuntime?.browser
         if sidebarUI.canGoBack != (b?.canGoBack ?? false) { sidebarUI.canGoBack = b?.canGoBack ?? false }
         if sidebarUI.canGoForward != (b?.canGoForward ?? false) { sidebarUI.canGoForward = b?.canGoForward ?? false }
@@ -2175,6 +2218,49 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         return "Niche Capture \(f.string(from: Date())).png"
     }
 
+    // MARK: Tabs on top
+
+    private func makeTopChrome() -> TopChromeView {
+        let chrome = TopChromeView(store: store, ui: sidebarUI, actions: sidebarActions, favicons: app.favicons)
+        chrome.onHeightChange = { [weak self] in
+            guard let self, self.lastTabsOnTop, let chrome = self.topChrome else { return }
+            self.shell.topChromeHeight = chrome.preferredHeight
+            self.shell.layoutSubtreeIfNeeded()
+        }
+        return chrome
+    }
+
+    /// The strip leaves room for the traffic lights while the window shows them there: not when
+    /// the sidebar is out (it carries them) and not in full screen (the menu bar does).
+    private func syncTopChromeLights() {
+        topChrome?.lightsInStrip = !sidebarVisible && !sidebarUI.windowFullscreen
+        // A rename is edited in the sidebar's row while the sidebar is out, else up in the strip.
+        let renamesOnTop = lastTabsOnTop && !sidebarVisible
+        if sidebarUI.renamesInTopChrome != renamesOnTop { sidebarUI.renamesInTopChrome = renamesOnTop }
+    }
+
+    /// The toolbar above the focused page: its card's, or the window's with the tabs across the top.
+    var focusedToolbar: PaneToolbarView? {
+        if shell.topChromeHeight > 0, let bar = topChrome?.toolbar { return bar }
+        return shell.focusedCard?.toolbarHost as? PaneToolbarView
+    }
+
+    /// `niche://debug?tabStrip=<label>` and `bookmarksBar=<label>`: what the top chrome shows.
+    func debugTopChrome(label: String, bookmarks: Bool) {
+        guard let chrome = topChrome, lastTabsOnTop else {
+            NicheLog.note("\(bookmarks ? "bookmarks bar" : "tab strip")[\(label)] off")
+            return
+        }
+        chrome.layoutSubtreeIfNeeded()
+        if bookmarks {
+            NicheLog.note("bookmarks bar[\(label)] \(chrome.bookmarks.readout)")
+        } else {
+            let lights = (window as? NicheWindow)?.trafficLightsHidden == false
+            NicheLog.note("tab strip[\(label)] \(chrome.strip.readout) lights=\(lights ? 1 : 0) chrome=\(Int(shell.topChromeHeight))"
+                          + " sidebar=\(sidebarVisible ? 1 : 0) card-bars=\(shell.panesShowBars ? 1 : 0)")
+        }
+    }
+
     // MARK: Sidebar
 
     func toggleSidebar() {
@@ -2282,7 +2368,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         let f = FloatingSidebarController(shell: shell, window: window, palette: { [weak self] in
             self?.focusedSpace.theme.palette ?? SpaceTheme.presets[0].palette
         })
-        f.sidebarHidden = { [weak self] in self.map { !$0.sidebarVisible } ?? false }
+        // With the tabs across the top the window's edge is the page's: the sidebar comes with ⌘S, never by hovering.
+        f.sidebarHidden = { [weak self] in self.map { !$0.sidebarVisible && !$0.store.settings.tabsOnTop } ?? false }
         f.staysShown = { FolderPreviewController.shared.isOpen }
         f.didAttachPanel = { [weak self] in
             // Keep the find bar above the floating sidebar.
@@ -2331,7 +2418,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
                   !window.styleMask.contains(.fullScreen), let depth = self.depthIntoPage(event, in: target, of: window) else { return event }
             let modifiers = !event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty
             guard PageTopDrag.holds(enabled: self.store.settings.pageTopWindowDrag,
-                                    barAbovePage: self.store.settings.showToolbar || self.shell.panesShowBars,
+                                    barAbovePage: self.store.settings.toolbarShown || self.shell.barAbovePages,
                                     depthIntoPage: depth, clickCount: event.clickCount, modifiers: modifiers) else { return event }
             self.trackPageTopPress(event, page: target, owner: window)
             return nil
@@ -2771,6 +2858,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         let card = shell.focusedCard.map { shell.contentContainer.convert($0.frame, to: nil) }
             ?? shell.convert(shell.contentContainer.frame, to: nil)
         let onScreen = window.convertToScreen(card)
+        // With the tabs across the top the bar is the window's, above the card.
+        if shell.topChromeHeight > 0, !shell.contentFullscreen, let bar = topChrome?.toolbar {
+            return (window.convertToScreen(bar.convert(bar.bounds, to: nil)).minY, onScreen.maxX)
+        }
         let bar = shell.focusedCard?.toolbarHeight ?? NicheMetrics.toolbarHeight
         // Without bars, a little below the page's top edge, so a popup hangs inside the window.
         return (onScreen.maxY - (shell.panesShowBars ? bar : 8), onScreen.maxX)
@@ -2779,7 +2870,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// Where a popup from a URL-bar button hangs: under the toolbar, or, with the toolbar
     /// hidden, under the sidebar's URL pill (also while the sidebar floats in its panel).
     private func urlBarBottomOnScreen() -> CGFloat? {
-        guard !store.settings.showToolbar else { return toolbarBottomOnScreen()?.y }
+        guard !store.settings.toolbarShown else { return toolbarBottomOnScreen()?.y }
         let host = shell.sidebarHost
         guard let w = host.window else { return nil }
         let rect = w.convertToScreen(host.convert(host.bounds, to: nil))
@@ -2789,8 +2880,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
 
     /// Whether a button (screen rect) sits in a bar above a page rather than in the sidebar.
     private func isInPaneBar(_ button: NSRect) -> Bool {
-        guard shell.panesShowBars, let window else { return false }
+        guard shell.barAbovePages, let window else { return false }
         let mid = NSPoint(x: button.midX, y: button.midY)
+        if shell.topChromeHeight > 0, let bar = topChrome?.toolbar {
+            return window.convertToScreen(bar.convert(bar.bounds, to: nil)).contains(mid)
+        }
         return shell.paneCards.contains { card in
             window.convertToScreen(card.toolbarHost.convert(card.toolbarHost.bounds, to: nil)).contains(mid)
         }
@@ -2800,7 +2894,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// toolbar at the card's right end.
     fileprivate func extensionPopupAnchor(_ id: String) -> NSPoint? {
         guard let bar = toolbarBottomOnScreen() else { return nil }
-        if shell.panesShowBars, let button = (shell.focusedCard?.toolbarHost as? PaneToolbarView)?.extensionButtonFrameOnScreen(id) {
+        if shell.barAbovePages, let button = focusedToolbar?.extensionButtonFrameOnScreen(id) {
             return NSPoint(x: button.maxX, y: bar.y)
         }
         return NSPoint(x: bar.cardMaxX - 8, y: bar.y)
@@ -2908,7 +3002,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// (the protected media toast's Why?): under the toolbar's button, else under the sidebar's URL
     /// field at its right end, where that button sits. The arrow shows where to find it next time.
     func showSiteControlsFromTheirButton() {
-        if let button = (shell.focusedCard?.toolbarHost as? PaneToolbarView)?.siteControlsButtonFrameOnScreen() {
+        if let button = focusedToolbar?.siteControlsButtonFrameOnScreen() {
             return showToolbarExtensionsMenu(from: button, inToolbar: true)
         }
         guard let button = (shell.sidebarHost as? SidebarView)?.siteControlsButtonFrameOnScreen else { return showToolbarExtensionsMenu() }
@@ -2921,7 +3015,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         // A split pane's bar has the sliders even with the toolbar hidden: hang under that bar then.
         let pressed = anchor.map { inToolbar ? $0 : nil } ?? Self.buttonFrameUnderPointer { $0 is ToolbarGlyphButton }
         guard let window, let content = window.contentView,
-              let y = pressed != nil && shell.panesShowBars ? toolbarBottomOnScreen()?.y : urlBarBottomOnScreen() else { return }
+              let y = pressed != nil && shell.barAbovePages ? toolbarBottomOnScreen()?.y : urlBarBottomOnScreen() else { return }
         ExtensionStore.shared.reload()
         let midX = (anchor ?? pressed ?? Self.buttonFrameUnderPointer { $0 is SidebarGlyphButton })?.midX ?? NSEvent.mouseLocation.x
         // Arc's popover overlaps the bar by 4 pt (popover top 71 under a bar ending at 75).
@@ -3820,6 +3914,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
         controller.show(over: firstRun ? nil : window)
     }
 
+    /// `niche://debug?onboardingStep=<name>`: the onboarding, at that step.
+    func debugOnboarding(step: String) {
+        if importWindow == nil { showImport(firstRun: true) }
+        importWindow?.debugShow(step: step)
+    }
+
     /// Brings the import window forward if one is open (Dock clicks during onboarding).
     func raiseImport() -> Bool {
         guard let w = importWindow?.window else { return false }
@@ -3917,8 +4017,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     }
 
     // The sidebar header's toggle moves into the traffic lights' place while they are gone (Arc).
-    func windowWillEnterFullScreen(_ notification: Notification) { sidebarUI.windowFullscreen = true; shell.windowFullscreen = true }
-    func windowWillExitFullScreen(_ notification: Notification) { sidebarUI.windowFullscreen = false; shell.windowFullscreen = false }
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        sidebarUI.windowFullscreen = true
+        shell.windowFullscreen = true
+        syncTopChromeLights()
+    }
+    func windowWillExitFullScreen(_ notification: Notification) {
+        sidebarUI.windowFullscreen = false
+        shell.windowFullscreen = false
+        syncTopChromeLights()
+    }
     func windowDidEnterFullScreen(_ notification: Notification) { shell.needsLayout = true }
     func windowDidExitFullScreen(_ notification: Notification) {
         // Left with the green button or ⌃⌘F while a video was fullscreen: the page leaves too.
@@ -4121,7 +4229,8 @@ final class NicheWindow: NSWindow {
     private func isTitleStrip(_ view: NSView?) -> Bool {
         var v = view
         while let current = v {
-            if current is SidebarView { return false }
+            // The sidebar's header and the tab strip handle their own presses.
+            if current is SidebarView || current is TopChromeView { return false }
             if let shell = current as? ShellView, shell.contentFullscreen { return false }
             v = current.superview
         }

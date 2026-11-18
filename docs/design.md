@@ -129,6 +129,66 @@ the canvas, never white over a dark page, and `BarLoadingSheen` crosses it: a so
 bar's ink with a thin accent beam along its lower edge, which fade when the page has loaded.
 Still under Reduce motion.
 
+## Tabs on top
+
+A window keeps its tabs in one of two places (`WindowLayout`, Settings ▸ Appearance, View ▸ Show
+Tabs on Top, onboarding's "Make it yours"): down the sidebar, which is the default, or across the
+top for people who come from Chrome or Safari. The top chrome (`TopChromeView`) is three rows on
+the window's own ground, the space's colour, with the page as a card under them:
+
+- **The tab strip** (`TabStripView`) in the title row, 40 pt, the traffic lights on its centre
+  line: the space's chip (its icon; a click lists the spaces, two fingers up or down over the
+  strip change space), the favorites as 28 pt icons, a rule, then the tabs, oldest first and a
+  new one at the end as in Chrome and Safari (the sidebar lists them newest first), with a tab
+  group's name before its tabs and a split view as one wider tab, New Tab after the last, and
+  Downloads at the far end once there are any (it opens the Library on Downloads, holds its plate
+  while that is open, and a second click puts it away). `TabStripLayout` (NicheCore) places them: a tab is 200 pt
+  whatever its title, so the next close button is under the pointer after a close; short of room
+  the tabs share it evenly, lose their titles under 76 pt, and at 40 pt the run scrolls inside its
+  own edges, fading where more lies past, while New Tab stays put.
+- **The toolbar** (`PaneToolbarView` with `onChrome`), the window's own: it takes its ink from the
+  space, not its fill from the page, draws the address in a field (the whole field takes a click),
+  and in a split follows the focused pane. A page's card carries no bar in this layout.
+- **The bookmarks bar** (`BookmarksBarView`, ⇧⌘B), 28 pt: the space's pinned tabs and folders,
+  which are what Niche keeps where other browsers keep bookmarks. A pinned tab opens in place (it
+  is a tab; the bar's item takes the selection and the strip shows none); a folder opens as a menu
+  of what is in it; what doesn't fit goes behind a chevron. Hidden while a space has nothing pinned.
+
+How it moves, all still under Reduce motion:
+
+- The selection is one plate that travels from tab to tab on a spring (`selectionBounce`); a
+  favorite or a bookmark carries its own. Hover shows at once and fades out, as everywhere.
+- A new tab grows into its place from 90 %, a closed one shrinks away, and the rest close the gap
+  on the standard curve. While the pointer stays in the strip after a close the tabs keep their
+  width, so several close in a row without the mouse moving; they widen when it leaves.
+- A pressed tab is carried along the strip under the hand, its neighbours stepping aside as it
+  passes their middles (a haptic tick each time, with "Haptic feedback when reordering"), on a
+  solid card so what it passes doesn't show through, and held at an end of a run that scrolls it
+  brings the tabs past that end in. Carried left of the rule it becomes a favorite: it takes a
+  tile's shape under the hand, the favorites open a slot, and letting go adds it there, as a drop
+  on the sidebar's favorites does. With no favorite yet, the very start of the tabs is the way in.
+  A favorite is carried the same way: among the others to change places, right of the rule to be
+  a tab again. A drag from elsewhere (a bookmark, another window) lands on either side of the rule
+  too, at the accent line. The window stays put while the pointer is on a tab or a bookmark
+  (`TitleRowHold`): the strip and the bar follow the pointer themselves, since an item's own
+  tracking lags after it has moved. Carried
+  28 pt off the strip it becomes a drag: onto the bookmarks bar pins it, onto a folder there puts
+  it in, a bookmark dragged up into the strip unpins it, and let go over the desktop a tab opens in
+  a window of its own.
+- A loading tab turns a ring where its icon is, drawn by Core Animation.
+- Switching layout, the strip comes down from above the window as the sidebar slides away, and
+  goes back up as it returns, on the sidebar's own curve; the page is sized once for where it
+  ends up. Another space's tabs come in over 14 pt from the side that space is on.
+
+The sidebar is not gone: ⌘S (and the toggle at the start of the toolbar) brings it out beside
+the page, with the Library, the spaces and the folders in it, and the strip moves over. It no
+longer comes out when the pointer reaches the window's edge, and a new window starts without it.
+An incognito window keeps its chip, which is what says it is incognito with the sidebar away.
+
+The strip stands in the title row, where the window server moves the window from a press
+whatever the view under it says: while the pointer is on a tab or a bookmark the window is
+unmovable (`SidebarUIState.hoverTitleRowItem`), and the strip's empty parts move it themselves.
+
 ## Downloads
 
 A download shows in the sidebar while it runs (`DownloadProgressRing`): the file's thumbnail over

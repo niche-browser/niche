@@ -49,6 +49,11 @@ private enum Palette {
 private enum Metrics {
     /// The panel: the window's right side.
     static let panel = CGSize(width: 477, height: 544)
+    /// The personalization preview swapping one layout for the other: how far the leaving window
+    /// shrinks, and the spring the swap rides.
+    static let layoutSwap: CGFloat = 0.96
+    static let layoutSpring: Double = 0.35
+    static let layoutDamping: Double = 0.85
     /// Dia's artwork is 448 pt wide; its positions scale to the panel.
     static let diaScale: CGFloat = 477 / 448
     /// The two rings around the centre of the badge and key scenes, and the mark or disc inside them.
@@ -119,24 +124,26 @@ struct ImportArtPanel: View {
             case .privacy:
                 PrivacyArt(level: model.privacyLevel, colors: colors)
             case .personalization:
-                // A live preview of a Niche window in the picked theme colour and layout.
-                WindowMock(theme: theme, colors: colors, origin: CGPoint(x: 90, y: 80), sidebarWidth: 210,
-                           headerControls: !model.classicLayout) {
-                    VStack(alignment: .leading, spacing: Design.Space.m) {
-                        if !model.classicLayout {
-                            AddressPreview(theme: theme, inSidebar: true)
-                                .transition(.opacity.combined(with: .move(edge: .top)))
+                // A live preview of a Niche window in the picked theme colour and layout: the tabs
+                // down the sidebar, or across the top with the address and bookmarks under them.
+                ZStack(alignment: .topLeading) {
+                    if model.tabsOnTop {
+                        TopWindowMock(theme: theme, colors: colors, origin: CGPoint(x: 90, y: 80))
+                            .transition(.opacity.combined(with: .scale(scale: Metrics.layoutSwap)))
+                    } else {
+                        WindowMock(theme: theme, colors: colors, origin: CGPoint(x: 90, y: 80), sidebarWidth: 210, headerControls: true) {
+                            VStack(alignment: .leading, spacing: Design.Space.m) {
+                                AddressPreview(theme: theme, inSidebar: true)
+                                PlaceholderSidebar(theme: theme)
+                            }
+                        } pane: {
+                            EmptyView()
                         }
-                        PlaceholderSidebar(theme: theme)
-                    }
-                } pane: {
-                    if model.classicLayout {
-                        AddressPreview(theme: theme, inSidebar: false)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(.opacity.combined(with: .scale(scale: Metrics.layoutSwap)))
                     }
                 }
                 .animation(.easeInOut(duration: Design.Motion.slow), value: theme)
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.classicLayout)
+                .animation(.spring(response: Metrics.layoutSpring, dampingFraction: Metrics.layoutDamping), value: model.tabsOnTop)
             case .unlock, .safariExport, .passwordsFile, .credentialsResult:
                 KeyArt(colors: colors, accent: accent(model.previewTheme))
             case .pinnedTabs:
@@ -606,6 +613,101 @@ private struct WindowMock<Sidebar: View, Pane: View>: View {
         .shadow(color: colors.dark ? Palette.float : Palette.lift, radius: Design.Shadow.panelRadius, y: Design.Shadow.panelOffset)
         .offset(x: origin.x, y: origin.y)
         .environment(\.colorScheme, palette.isDark ? .dark : .light)
+    }
+}
+
+/// The personalization step's window with the tabs across the top: the strip in the title row
+/// (the space's icon, three tabs with the first one open, New Tab), the address in its field
+/// with the navigation buttons before it, a row of bookmarks, and the page as a card below.
+private struct TopWindowMock: View {
+    let theme: SpaceTheme
+    let colors: ImportColors
+    var origin = CGPoint(x: 132, y: 80)
+
+    /// The mock's own measures, in the 520 pt window it draws.
+    private enum Mock {
+        static let size: CGFloat = 520
+        static let lights = CGPoint(x: 19, y: 20)
+        static let strip = CGPoint(x: 76, y: 11)
+        static let tab = CGSize(width: 104, height: 28)
+        static let toolbarTop: CGFloat = 46
+        static let toolbarHeight: CGFloat = 28
+        static let bookmarksTop: CGFloat = 80
+        static let bookmark: CGFloat = 20
+        static let pageTop: CGFloat = 108
+        static let inset: CGFloat = 10
+        static let titles: [CGFloat] = [52, 40, 46]
+        static let bookmarks: [CGFloat] = [44, 58, 36, 50]
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Design.Radius.panel, style: .continuous)
+        let p = theme.palette
+        let ink = ImportColors(dark: p.isDark)
+        ZStack(alignment: .topLeading) {
+            SpaceBackground(palette: p)
+                .background(p.isDark ? Design.graphite : Palette.discLight)
+            HStack(spacing: Design.Space.m) {
+                ForEach(ImportColors.trafficLights, id: \.self) { Circle().fill(Color(hex: $0)).frame(width: Metrics.trafficLight, height: Metrics.trafficLight) }
+            }
+            .offset(x: Mock.lights.x, y: Mock.lights.y)
+            // The strip: three tabs, the first one open, then New Tab.
+            HStack(spacing: Design.Space.xxs) {
+                ForEach(Array(Mock.titles.enumerated()), id: \.offset) { i, width in
+                    HStack(spacing: Design.Space.s) {
+                        RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                            .fill(p.textTertiary.opacity(Design.Opacity.dimmed))
+                            .frame(width: Design.Icon.regular, height: Design.Icon.regular)
+                        Capsule().fill(i == 0 ? p.textSecondary : p.textTertiary.opacity(Design.Opacity.dimmed))
+                            .frame(width: width, height: Design.Space.s)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, Design.Space.m)
+                    .frame(width: Mock.tab.width, height: Mock.tab.height)
+                    .background(RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(i == 0 ? p.selectedFill : .clear))
+                }
+                Image(systemName: "plus").font(.system(size: Design.Icon.small, weight: .medium)).foregroundStyle(ink.body)
+                    .frame(width: Mock.tab.height, height: Mock.tab.height)
+            }
+            .offset(x: Mock.strip.x, y: Mock.strip.y)
+            // The toolbar: back, forward, reload, and the address in its field.
+            HStack(spacing: Design.Space.m) {
+                ForEach(["chevron.left", "chevron.right", "arrow.clockwise"], id: \.self) {
+                    Image(systemName: $0).font(.system(size: Design.Icon.small, weight: .medium)).foregroundStyle(ink.text(.tertiary))
+                        .frame(width: Design.Space.xl)
+                }
+                RoundedRectangle(cornerRadius: Design.Radius.row, style: .continuous).fill(p.pillFill)
+                    .overlay(Text("nichebrowser.app").font(Design.Font.detail).foregroundStyle(p.textPrimary))
+            }
+            .padding(.horizontal, Design.Space.l)
+            .frame(width: Mock.size, height: Mock.toolbarHeight)
+            .offset(y: Mock.toolbarTop)
+            // The bookmarks bar.
+            HStack(spacing: Design.Space.l) {
+                ForEach(Array(Mock.bookmarks.enumerated()), id: \.offset) { _, width in
+                    HStack(spacing: Design.Space.xs) {
+                        RoundedRectangle(cornerRadius: Design.Radius.small, style: .continuous)
+                            .fill(p.textTertiary.opacity(Design.Opacity.dimmed))
+                            .frame(width: Design.Icon.small, height: Design.Icon.small)
+                        Capsule().fill(p.textTertiary.opacity(Design.Opacity.disabled)).frame(width: width, height: Design.Space.s)
+                    }
+                }
+            }
+            .padding(.horizontal, Design.Space.xl)
+            .frame(height: Mock.bookmark)
+            .offset(y: Mock.bookmarksTop)
+            RoundedRectangle(cornerRadius: Design.Radius.control, style: .continuous)
+                .fill(p.isDark ? Design.panelDarkColor : .white)
+                .shadow(color: Palette.lift, radius: Design.Shadow.cardRadius, y: Design.Shadow.cardOffset)
+                .frame(width: Mock.size - 2 * Mock.inset, height: Mock.size - Mock.pageTop)
+                .offset(x: Mock.inset, y: Mock.pageTop)
+        }
+        .frame(width: Mock.size, height: Mock.size, alignment: .topLeading)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(colors.dark ? colors.hairline : Palette.rimLight, lineWidth: 0.5))
+        .shadow(color: colors.dark ? Palette.float : Palette.lift, radius: Design.Shadow.panelRadius, y: Design.Shadow.panelOffset)
+        .offset(x: origin.x, y: origin.y)
+        .environment(\.colorScheme, p.isDark ? .dark : .light)
     }
 }
 
