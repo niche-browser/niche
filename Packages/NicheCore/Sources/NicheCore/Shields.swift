@@ -67,7 +67,7 @@ public enum ShieldsGroup: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// A Shields pack: what Niche downloads once a day (scripts/shields-pack.mjs builds and signs
+/// A Shields pack: what Niche downloads (scripts/shields-pack.mjs builds and signs
 /// it): filter lists with what each is for, and the scriptlets and stand-in resources the
 /// engine needs beside them. The file is raw-deflated JSON with a detached Ed25519 signature.
 public struct ShieldsPack: Equatable, Sendable {
@@ -189,17 +189,73 @@ public struct ShieldsRegionalIndex: Codable, Equatable, Sendable {
     }
 }
 
+/// The optional lists there are (shields-lists.json beside the packs): the ones Settings ▸
+/// Privacy "More lists" offers, each a small pack of its own that a Mac fetches when its switch
+/// goes on. They are uBlock Origin Lite's optional rulesets, read from its own catalogue when
+/// the packs are built, so a list it adds or drops is added or dropped here, and the lists Niche
+/// offers on top (AdGuard's ad list).
+public struct ShieldsCatalog: Codable, Equatable, Sendable {
+    public struct Entry: Codable, Equatable, Identifiable, Sendable {
+        public var id: String
+        public var title: String
+        /// What the list is for: the name of a `ShieldsGroup` ("ads", "trackers", "annoyances").
+        public var group: String
+        public var homepage: String
+        /// One plain sentence, when the catalogue has one.
+        public var detail: String
+
+        public init(id: String, title: String, group: String = "ads", homepage: String = "", detail: String = "") {
+            self.id = id
+            self.title = title
+            self.group = group
+            self.homepage = homepage
+            self.detail = detail
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
+            group = try c.decodeIfPresent(String.self, forKey: .group) ?? "ads"
+            homepage = try c.decodeIfPresent(String.self, forKey: .homepage) ?? ""
+            detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
+        }
+
+        public var shieldsGroup: ShieldsGroup { ShieldsGroup(rawValue: group) ?? .ads }
+    }
+
+    public var lists: [Entry] = []
+
+    public init(lists: [Entry] = []) { self.lists = lists }
+
+    /// The entries switched on, in the catalogue's order. A switch for a list the catalogue no
+    /// longer has asks for nothing.
+    public func wanted(_ ids: Set<String>) -> [Entry] { lists.filter { ids.contains($0.id) } }
+
+    /// The catalogue as Settings shows it: by what the lists are for, in `ShieldsGroup`'s order.
+    public var sections: [(group: ShieldsGroup, entries: [Entry])] {
+        ShieldsGroup.allCases.compactMap { group in
+            let entries = lists.filter { $0.shieldsGroup == group }
+            return entries.isEmpty ? nil : (group, entries)
+        }
+    }
+}
+
 /// When Niche looks for newer packs, and the names it asks for.
 public enum ShieldsUpdate {
     /// Where the packs are published: assets of the repository's "shields" release.
     public static let source = "https://github.com/niche-browser/niche/releases/download/shields/"
     public static let mainPack = "shields.pack"
     public static let regionalIndex = "shields-regional.json"
-    /// Once a day, and a failed look is tried again after an hour.
-    public static let interval: TimeInterval = 24 * 3600
+    public static let catalog = "shields-lists.json"
+    /// Every six hours, as often as the packs are built (uBlock Origin's quick fixes for sites
+    /// that fight ad blockers expire after eight), and a failed look is tried again after an hour.
+    public static let interval: TimeInterval = 6 * 3600
     public static let retry: TimeInterval = 3600
 
     public static func regionalPack(_ id: String) -> String { "shields-\(id).pack" }
+    /// An optional list's pack. Its name can't be a regional one's: their ids have no "x-".
+    public static func extraPack(_ id: String) -> String { "shields-x-\(id).pack" }
 
     /// Whether to look now, having last looked (or tried) at these times.
     public static func isDue(lastSuccess: Date?, lastAttempt: Date?, now: Date) -> Bool {

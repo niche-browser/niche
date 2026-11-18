@@ -129,6 +129,15 @@ the canvas, never white over a dark page, and `BarLoadingSheen` crosses it: a so
 bar's ink with a thin accent beam along its lower edge, which fade when the page has loaded.
 Still under Reduce motion.
 
+## Where the space is named
+
+Once, and where Dia names it. With the toolbar shown, the sidebar's title row names the window's
+space beside the traffic lights (`SidebarSpaceSwitcher`: its name and a chevron, a menu of the
+spaces, New Space…, Edit Space…, Edit Theme Color…, Manage Spaces…), and the list's own space
+header steps aside (`ToolbarComposition.titleRowNamesSpace`, `listShowsSpaceHeader`). With the
+toolbar hidden that row holds the toggle and ← → ↻, so the list's header names the space; with the
+tabs on top the strip's chip does. An incognito or Blank Window has no other space to name.
+
 ## Tabs on top
 
 A window keeps its tabs in one of two places (`WindowLayout`, Settings ▸ Appearance, View ▸ Show
@@ -225,7 +234,7 @@ green protected, red when a tracker sees the visit, grey with protection off) ho
 the site, the standing in `.headline` semibold with one line under it, and the three counts
 divided by hairlines; then cards of rows (`privacyCard()`: `Fill.subtle` and a hairline), each
 under a caption-size header: "On this page" (a tinted glyph plate, a title, the result at the
-right in its tone), the site's switch, "Who is here" (one bar split by kind, a colour per kind
+right in its tone), the site's filtering slider, "Who is here" (one bar split by kind, a colour per kind
 that tracks, grey for what makes the page work), the companies, "Happening now" with how long
 ago, and the totals with a seven-day bar chart.
 
@@ -242,6 +251,16 @@ The shield (`ToolbarPrivacyChip`): a half-filled shield, with the page's blocked
 is one, at the end of the sidebar's address field and before the toolbar's right-hand buttons.
 It is there on every website, so the way into the panel is always in the same place; its plate
 is lit while the panel is open.
+
+## Filtering slider
+
+`FilteringSlider`: uBlock Origin Lite's modes on one track, a stop per mode with its name under
+it; three stops in Settings ▸ Privacy (Basic, Optimal, Complete), four in the privacy panel (Off
+first). The track fills in the accent up to the thumb, so more filtering reads as more; the
+thumb is white, follows the hand and settles on the nearest stop on a spring; a click on the
+track or a name goes there. The mode in force is named in semibold, and one sentence under the
+slider says what it does. A site with a mode of its own shows "Use My Setting" beside the
+card's title. VoiceOver reads it as an adjustable value. Nothing springs under Reduce motion.
 
 ## Privacy level
 

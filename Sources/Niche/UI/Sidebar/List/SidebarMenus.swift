@@ -433,7 +433,7 @@ enum SidebarMenus {
             add(menu, action: "editSpace") { actions.editSpace(s) }
         }
         // With the header hidden (one space), its menu items live here.
-        if store.hidesSpaceHeader(space) {
+        if store.hidesSingleSpaceHeader(space) {
             add(menu, "Show Space Header") { store.settings.showSpaceHeaderOnSingleSpace = true }
         }
         return menu

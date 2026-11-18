@@ -10,8 +10,10 @@ public struct PrivacyRules: Codable, Equatable, Sendable {
     /// By the site of the page: the parties blocked or allowed there.
     public var blockedOn: [String: Set<String>] = [:]
     public var allowedOn: [String: Set<String>] = [:]
-    /// Sites where protection is off: nothing is blocked there.
+    /// Sites where protection is off: nothing is blocked there (`FilteringMode.none`).
     public var offSites: Set<String> = []
+    /// Sites with a filtering mode of their own that isn't off (`FilteringMode`'s raw value).
+    public var siteModes: [String: Int] = [:]
 
     public init() {}
 
@@ -22,6 +24,7 @@ public struct PrivacyRules: Codable, Equatable, Sendable {
         blockedOn = try c.decodeIfPresent([String: Set<String>].self, forKey: .blockedOn) ?? [:]
         allowedOn = try c.decodeIfPresent([String: Set<String>].self, forKey: .allowedOn) ?? [:]
         offSites = try c.decodeIfPresent(Set<String>.self, forKey: .offSites) ?? []
+        siteModes = try c.decodeIfPresent([String: Int].self, forKey: .siteModes) ?? [:]
     }
 
     /// What the user decided about a party, as the panel's menu shows it.
@@ -96,10 +99,27 @@ public struct PrivacyRules: Codable, Equatable, Sendable {
     public func isOff(on site: String) -> Bool { offSites.contains(site) }
 
     public mutating func setOff(_ off: Bool, on site: String) {
-        if off { offSites.insert(site) } else { offSites.remove(site) }
+        if off { offSites.insert(site); siteModes[site] = nil } else { offSites.remove(site) }
     }
 
-    public var isEmpty: Bool { blocked.isEmpty && allowed.isEmpty && blockedOn.isEmpty && allowedOn.isEmpty && offSites.isEmpty }
+    /// The site's own filtering mode, or nil when it follows the one for every site.
+    public func ownMode(on site: String) -> FilteringMode? {
+        if offSites.contains(site) { return FilteringMode.none }
+        return siteModes[site].flatMap(FilteringMode.init(rawValue:))
+    }
+
+    /// The mode in force on `site`: its own, else `standard`, the one for every site.
+    public func mode(on site: String, standard: FilteringMode) -> FilteringMode { ownMode(on: site) ?? standard }
+
+    /// Gives `site` a mode of its own. The mode every site has is no mode of its own: the site
+    /// follows the setting again, also when the setting changes later.
+    public mutating func setMode(_ mode: FilteringMode, on site: String, standard: FilteringMode) {
+        offSites.remove(site)
+        siteModes[site] = nil
+        if mode == .none { offSites.insert(site) } else if mode != standard { siteModes[site] = mode.rawValue }
+    }
+
+    public var isEmpty: Bool { blocked.isEmpty && allowed.isEmpty && blockedOn.isEmpty && allowedOn.isEmpty && offSites.isEmpty && siteModes.isEmpty }
 
     /// The rules as the engine takes them: domains instead of parties, each list sorted.
     public struct Compiled: Equatable, Sendable {
@@ -108,14 +128,17 @@ public struct PrivacyRules: Codable, Equatable, Sendable {
         public var blockedOn: [String: [String]] = [:]
         public var allowedOn: [String: [String]] = [:]
         public var offSites: [String] = []
+        /// Every site with a mode of its own, the off ones too (0).
+        public var siteModes: [String: Int] = [:]
 
         public init(blocked: [String] = [], allowed: [String] = [], blockedOn: [String: [String]] = [:],
-                    allowedOn: [String: [String]] = [:], offSites: [String] = []) {
+                    allowedOn: [String: [String]] = [:], offSites: [String] = [], siteModes: [String: Int] = [:]) {
             self.blocked = blocked
             self.allowed = allowed
             self.blockedOn = blockedOn
             self.allowedOn = allowedOn
             self.offSites = offSites
+            self.siteModes = siteModes
         }
     }
 
@@ -129,6 +152,7 @@ public struct PrivacyRules: Codable, Equatable, Sendable {
         }
         return Compiled(blocked: domains(blocked), allowed: domains(allowed),
                         blockedOn: blockedOn.mapValues(domains), allowedOn: allowedOn.mapValues(domains),
-                        offSites: offSites.sorted())
+                        offSites: offSites.sorted(),
+                        siteModes: siteModes.merging(offSites.map { ($0, FilteringMode.none.rawValue) }) { _, off in off })
     }
 }

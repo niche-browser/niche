@@ -363,12 +363,18 @@ typedef NS_ENUM(NSInteger, NichePrivacyEventKind) {
 /// fragment, the same for the run of the app.
 + (uint64_t)privacyPageKeyForURL:(NSString *)url;
 /// The user's own rules on top of the list (niche_blocker::Rules): domains blocked or allowed on
-/// every site, the same per site of the top-level page, and sites where nothing is blocked.
+/// every site, the same per site of the top-level page, sites where nothing is blocked, and
+/// sites with a filtering mode of their own.
 /// Domains cover their subdomains. Takes effect for the next request.
 + (void)setPrivacyRulesBlocked:(NSArray<NSString *> *)blocked allowed:(NSArray<NSString *> *)allowed
                      blockedOn:(NSDictionary<NSString *, NSArray<NSString *> *> *)blockedOn
                      allowedOn:(NSDictionary<NSString *, NSArray<NSString *> *> *)allowedOn
-                      offSites:(NSArray<NSString *> *)offSites;
+                      offSites:(NSArray<NSString *> *)offSites
+                     siteModes:(NSDictionary<NSString *, NSNumber *> *)siteModes;
+/// Settings ▸ Privacy "Filtering": how much Shields does on every site without a mode of its
+/// own (`siteModes` above): 1 requests blocked, 2 also what the lists say about the page's own
+/// site (hiding and scripts), 3 also the generic hiding rules. NicheCore's FilteringMode.
++ (void)setShieldsFilteringMode:(NSInteger)mode;
 /// Global Privacy Control: every request says "Sec-GPC: 1" (do not sell or share my data).
 + (void)setGlobalPrivacyControl:(BOOL)enabled;
 /// Chrome's HTTPS-Only Mode ("Always use secure connections") in every profile:

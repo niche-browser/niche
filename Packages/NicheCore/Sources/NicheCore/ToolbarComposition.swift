@@ -86,12 +86,28 @@ public struct ToolbarComposition: Equatable, Sendable {
         !toolbarShown || !barCarriesToggle(kind: kind, inSplit: inSplit, sidebarVisible: true)
     }
 
-    /// Whether the sidebar's header names the window's space beside the traffic lights. Only where
-    /// nothing else does: the list's own space header shows the same name right under it, and a
-    /// space named twice reads as a mistake (13 Nov 2026). So the header names it when the bar
-    /// carries the toggle, the window has spaces to switch between, and the space header is hidden.
-    public static func sidebarHeaderNamesSpace(headerHasToggle: Bool, standaloneWindow: Bool, spaceHeaderHidden: Bool) -> Bool {
-        !headerHasToggle && !standaloneWindow && spaceHeaderHidden
+    /// The space is named once in the sidebar, and where Dia names it: beside the traffic lights,
+    /// as a menu of the spaces, while the toolbar is shown and that row has the room (18 Nov 2026).
+    /// The list's own space header then steps aside (`listShowsSpaceHeader`). With the toolbar
+    /// hidden that row holds the toggle and ← → ↻, and the list's header names the space; with the
+    /// tabs on top the strip's chip does; an incognito or Blank Window has no other space to name.
+    public static func titleRowNamesSpace(toolbarShown: Bool, tabsOnTop: Bool, standaloneWindow: Bool) -> Bool {
+        toolbarShown && !tabsOnTop && !standaloneWindow
+    }
+
+    /// Whether the sidebar's header shows the space's name and menu beside the traffic lights:
+    /// where the title row names it (`titleRowNamesSpace`), and also where nothing else would,
+    /// a single space whose list header is hidden, while the bar carries the toggle.
+    public static func sidebarHeaderNamesSpace(titleRowNamesSpace: Bool, headerHasToggle: Bool, standaloneWindow: Bool,
+                                               singleSpaceHeaderHidden: Bool) -> Bool {
+        titleRowNamesSpace || (!headerHasToggle && !standaloneWindow && singleSpaceHeaderHidden)
+    }
+
+    /// Whether the list shows its space header (the space's icon and name above its pinned tabs):
+    /// not while the title row names the space, a space named twice reads as a mistake
+    /// (13 Nov 2026), and not in single-space mode with the header turned off.
+    public static func listShowsSpaceHeader(titleRowNamesSpace: Bool, singleSpaceHeaderHidden: Bool) -> Bool {
+        !titleRowNamesSpace && !singleSpaceHeaderHidden
     }
 
     /// The sidebar's URL field while the toolbar is hidden, shown on hover over the header: the

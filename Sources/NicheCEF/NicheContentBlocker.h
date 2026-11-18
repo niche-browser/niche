@@ -102,7 +102,16 @@ struct Rules {
     std::unordered_map<std::string, DomainSet> blockedOn;   // by the page's site
     std::unordered_map<std::string, DomainSet> allowedOn;
     std::unordered_set<std::string> offSites;   // protection is off on these sites
+    std::unordered_map<std::string, int> siteModes;   // a site's own filtering mode (kMode…), the off ones too
 };
+
+// How much Shields does on a page (NicheCore's FilteringMode, uBlock Origin Lite's modes):
+// nothing; requests blocked; also what the lists say about the page's own site (its selectors
+// hidden, its scripts run); also the generic hiding rules.
+enum : int { kModeNone = 0, kModeBasic = 1, kModeOptimal = 2, kModeComplete = 3 };
+
+// The mode for every site without one of its own (Settings ▸ Privacy "Filtering").
+inline std::atomic<int>& StandardMode() { static std::atomic<int> v{kModeOptimal}; return v; }
 
 inline std::atomic<const Rules*>& UserRules() { static std::atomic<const Rules*> v{nullptr}; return v; }
 inline void PublishRules(const Rules* rules) { UserRules().store(rules, std::memory_order_release); }
@@ -161,6 +170,17 @@ inline Verdict Combine(const UserSay& say, bool listed) {
 inline bool ProtectionOff(const std::string& pageHost) {
     const Rules* r = UserRules().load(std::memory_order_acquire);
     return r && r->offSites.count(std::string(SiteOrHost(pageHost))) > 0;
+}
+
+// The filtering mode in force on a page of this host: its site's own, else the one for every site.
+inline int ModeFor(const std::string& pageHost) {
+    const Rules* r = UserRules().load(std::memory_order_acquire);
+    if (r) {
+        const std::string site(SiteOrHost(pageHost));
+        if (r->offSites.count(site)) return kModeNone;
+        if (auto it = r->siteModes.find(site); it != r->siteModes.end()) return it->second;
+    }
+    return StandardMode().load(std::memory_order_relaxed);
 }
 
 // Host of an http(s)/ws(s) URL, normalized; empty for other schemes. Parses just

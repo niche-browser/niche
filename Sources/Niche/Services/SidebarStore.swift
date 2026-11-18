@@ -459,8 +459,17 @@ final class SidebarStore {
         return ":root { " + ArcThemeData.declarations(palette: ArcThemeData.palette(theme: theme, dark: dark), gradient: theme.colors) + " }"
     }
 
-    func hidesSpaceHeader(_ id: UUID) -> Bool {
+    /// Single-space mode with the header turned off: the lone space shows no header and no dock icon.
+    func hidesSingleSpaceHeader(_ id: UUID) -> Bool {
         !settings.showSpaceHeaderOnSingleSpace && spaceOrder.count == 1 && !isStandalone(space: id)
+    }
+    /// The sidebar's title row names the space, beside the traffic lights (ToolbarComposition.titleRowNamesSpace).
+    func namesSpaceInTitleRow(_ id: UUID) -> Bool {
+        ToolbarComposition.titleRowNamesSpace(toolbarShown: settings.showToolbar, tabsOnTop: settings.tabsOnTop, standaloneWindow: isStandalone(space: id))
+    }
+    /// The list shows no space header for this space: the title row names it, or single-space mode hides it.
+    func hidesSpaceHeader(_ id: UUID) -> Bool {
+        !ToolbarComposition.listShowsSpaceHeader(titleRowNamesSpace: namesSpaceInTitleRow(id), singleSpaceHeaderHidden: hidesSingleSpaceHeader(id))
     }
     func focusedSpaceID(window id: UUID?) -> UUID {
         window(id).focusedSpaceID.flatMap { spaces[$0] != nil ? $0 : nil } ?? spaceOrder.first!

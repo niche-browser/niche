@@ -3,8 +3,8 @@ import NicheCEF
 import Observation
 
 /// Shields in the app: keeps the filter packs (Application Support/…/Shields), builds the engine
-/// from the lists the switches in Settings ▸ Privacy ask for, and looks for newer packs once a
-/// day. A pack is trusted only with the signature of the repository's Shields workflow
+/// from the lists the switches in Settings ▸ Privacy ask for (the groups, and the optional
+/// lists of "More lists"), and looks for newer packs every six hours. A pack is trusted only with the signature of the repository's Shields workflow
 /// (`ShieldsPack.isSigned`), on download and again every time it is read from disk. The only
 /// thing sent anywhere is the request for the packs themselves, to GitHub.
 ///
@@ -39,8 +39,13 @@ final class ShieldsService {
     private(set) var built: Date?
     private(set) var lastChecked: Date?
     private(set) var checking = false
+    /// The optional lists there are (Settings ▸ Privacy "More lists"); empty until the first look.
+    private(set) var catalog = ShieldsCatalog()
+    /// Optional lists switched on whose pack hasn't arrived yet.
+    private(set) var extrasPending: Set<String> = []
 
     @ObservationIgnored private var groups: Set<ShieldsGroup> = []
+    @ObservationIgnored private var extras: Set<String> = []
     @ObservationIgnored private var started = false
     @ObservationIgnored private var clock: Scheduler?
     @ObservationIgnored private var looking: ScheduledWork?
@@ -73,15 +78,20 @@ final class ShieldsService {
         _ = Self.folder
         state = stateFile.load(or: { State() })
         lastChecked = state.lastSuccess
+        if let data = try? Data(contentsOf: Self.file(ShieldsUpdate.catalog)), let read = try? JSONDecoder().decode(ShieldsCatalog.self, from: data) {
+            catalog = read
+        }
     }
 
     // MARK: The switches
 
-    /// Starts Shields with the groups the settings ask for; after that, `use` follows the switches.
-    func start(groups: Set<ShieldsGroup>, clock: Scheduler) {
-        guard !started else { return use(groups) }
+    /// Starts Shields with the groups and optional lists the settings ask for; after that, `use`
+    /// follows the switches.
+    func start(groups: Set<ShieldsGroup>, extras: Set<String> = [], clock: Scheduler) {
+        guard !started else { return use(groups, extras: extras) }
         started = true
         self.groups = groups
+        self.extras = extras
         self.clock = clock
         NicheCEFRuntime.setShieldsPageScript(ShieldsPageScript.content)
         rebuild()
@@ -96,12 +106,15 @@ final class ShieldsService {
         looking = clock.every(ShieldsUpdate.retry) { [weak self] in self?.lookIfDue() }
     }
 
-    func use(_ groups: Set<ShieldsGroup>) {
-        guard started, groups != self.groups else { return }
+    func use(_ groups: Set<ShieldsGroup>, extras: Set<String>) {
+        guard started, groups != self.groups || extras != self.extras else { return }
         let regionalAdded = groups.contains(.regional) && !self.groups.contains(.regional)
+        // A list just switched on has no pack on this Mac yet: it is fetched now.
+        let extrasAdded = !extras.subtracting(self.extras).isEmpty
         self.groups = groups
+        self.extras = extras
         rebuild()
-        if regionalAdded { look() }
+        if regionalAdded || extrasAdded { look() }
     }
 
     // MARK: Building
@@ -124,7 +137,7 @@ final class ShieldsService {
 
     private func rebuild() {
         generation += 1
-        let generation = generation, groups = groups
+        let generation = generation, groups = groups, extras = extras
         guard !groups.isEmpty else {
             NicheCEFRuntime.removeShields()
             status = .off
@@ -150,6 +163,12 @@ final class ShieldsService {
                     if let pack = Self.pack(ShieldsUpdate.regionalPack(entry.id)) { lists += pack.lists.filter { $0.group == .regional } }
                 }
             }
+            // The optional lists switched on, each from its own pack. One whose pack isn't here
+            // yet is left out until it arrives.
+            var pending: Set<String> = []
+            for id in extras.sorted() {
+                if let pack = Self.pack(ShieldsUpdate.extraPack(id)) { lists += pack.lists } else { pending.insert(id) }
+            }
             let build = NicheShieldsBuild()
             for list in lists { build.addList(list.text, group: list.group.number, trusted: list.trusted) }
             build.addResources(main.scriptlets, forPages: true)
@@ -164,6 +183,7 @@ final class ShieldsService {
                 me.status = .ready(rules: rules)
                 me.credits = credits
                 me.built = main.built
+                me.extrasPending = pending
                 NicheLog.note("Shields ready: \(lists.count) lists, \(rules) rules, groups \(groups.map(\.rawValue).sorted().joined(separator: "+")), built in \(Int(took * 1000)) ms")
             }
         }
@@ -173,7 +193,9 @@ final class ShieldsService {
 
     private func lookIfDue() {
         guard ShieldsUpdate.isDue(lastSuccess: state.lastSuccess, lastAttempt: state.lastAttempt, now: clock?.now ?? Date())
-                || !FileManager.default.fileExists(atPath: Self.file(ShieldsUpdate.mainPack).path) else { return }
+                || !FileManager.default.fileExists(atPath: Self.file(ShieldsUpdate.mainPack).path)
+                // A copy of Niche from before "More lists" has no catalogue yet: it asks once.
+                || (Self.source != nil && !FileManager.default.fileExists(atPath: Self.file(ShieldsUpdate.catalog).path) && state.lastAttempt.map { (clock?.now ?? Date()).timeIntervalSince($0) >= ShieldsUpdate.retry } != false) else { return }
         look()
     }
 
@@ -183,7 +205,7 @@ final class ShieldsService {
         checking = true
         state.lastAttempt = Date()
         stateFile.save(state)
-        let wantsRegional = groups.contains(.regional), languages = Locale.preferredLanguages
+        let wantsRegional = groups.contains(.regional), languages = Locale.preferredLanguages, extras = extras
         Task.detached(priority: .utility) {
             var changed = false, reached = false
             do {
@@ -196,6 +218,19 @@ final class ShieldsService {
                         if (try? await Self.fetch(ShieldsUpdate.regionalPack(entry.id), from: source)) == true { changed = true }
                     }
                 }
+                // What "More lists" offers, and the packs of the ones switched on. A list the
+                // catalogue no longer has keeps the pack this Mac has.
+                var offered: ShieldsCatalog?
+                if let data = try? await Self.get(source.appendingPathComponent(ShieldsUpdate.catalog)),
+                   let read = try? JSONDecoder().decode(ShieldsCatalog.self, from: data) {
+                    try? data.write(to: Self.folder.appendingPathComponent(ShieldsUpdate.catalog), options: .atomic)
+                    offered = read
+                    for entry in read.wanted(extras) {
+                        if (try? await Self.fetch(ShieldsUpdate.extraPack(entry.id), from: source)) == true { changed = true }
+                    }
+                }
+                let found = offered
+                await MainActor.run { if let found { ShieldsService.shared.catalog = found } }
             } catch {
                 NicheLog.note("Shields: couldn't get the lists (\(error.localizedDescription))")
             }
@@ -208,7 +243,7 @@ final class ShieldsService {
                     me.lastChecked = me.state.lastSuccess
                     me.stateFile.save(me.state)
                 }
-                if didChange || !NicheCEFRuntime.shieldsInstalled() { me.rebuild() }
+                if didChange || !NicheCEFRuntime.shieldsInstalled() || !me.extrasPending.isEmpty { me.rebuild() }
                 NicheLog.note("Shields: looked for newer lists, \(didChange ? "got some" : didReach ? "none" : "unreachable")")
             }
         }

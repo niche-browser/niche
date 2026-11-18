@@ -3,6 +3,14 @@
 // resources/shields/lists.json with uBlock Origin's scriptlets and stand-in resources, as
 //   shields.pack                 the lists every copy of Niche uses
 //   shields-<id>.pack            one per regional list, fetched by the Macs that speak its language
+//   shields-x-<id>.pack          one per optional list (Settings ▸ Privacy "More lists"), fetched
+//                                when its switch goes on; shields-lists.json names them
+//
+// The default set is uBlock Origin Lite's: its own catalogue (platform/mv3/rulesets.json in the
+// uBlock checkout) is read on every run. A list its default rulesets gained is added, one they
+// lost is dropped, and its optional rulesets become the optional packs, so what uBO Lite
+// changes is changed here by the next run with nobody touching lists.json. Lists there without
+// "ubol" are Niche's own choice on top.
 // each with a detached Ed25519 signature (<name>.sig, base64) that Niche checks before it trusts
 // a download. A pack is raw-deflated JSON: {format, built, lists: [{id, group, title, licence,
 // homepage, trusted, languages?, text}], resources: {scriptlets: [...], redirects: [...]}}.
@@ -40,12 +48,26 @@ async function download(list) {
       if (!answer.ok) throw new Error(`HTTP ${answer.status}`);
       const text = await answer.text();
       if (text.length < minimumBytes || /^\s*<(!doctype|html)/i.test(text)) throw new Error('not a filter list');
-      return text;
+      return hostsAsRules(text);
     } catch (error) {
       if (attempt >= 3) throw new Error(`${list.id}: ${error.message} (${list.url})`);
       await new Promise(done => setTimeout(done, 2000 * attempt));
     }
   }
+}
+
+// A hosts file (`127.0.0.1 ads.example`: Peter Lowe's list, URLhaus) as the rules it stands for
+// (`||ads.example^`), which is how uBlock Origin reads one. Niche's engine does the same from
+// 0.1.10; the copies before it read such lines as rules that match nothing, so they get rules.
+function hostsAsRules(text) {
+  const hosts = /^(?:127\.0\.0\.1|0\.0\.0\.0|::1?)\s+([a-z0-9._-]+)\s*(?:#.*)?$/i;
+  if (!text.split('\n', 400).some(line => hosts.test(line.trim()))) return text;
+  return text.split('\n').map(line => {
+    const found = hosts.exec(line.trim());
+    if (!found) return line;
+    const host = found[1].toLowerCase();
+    return host.includes('.') && host !== 'localhost.localdomain' && !/^[0-9.]+$/.test(host) ? `||${host}^` : '';
+  }).join('\n');
 }
 
 // uBlock Origin's scriptlets (src/js/resources) and the resources it answers blocked requests
@@ -100,7 +122,34 @@ function write(name, lists, extra) {
 const entry = async list => ({ id: list.id, group: list.group, title: list.title, licence: list.licence, homepage: list.homepage,
                                trusted: list.trusted, ...(list.languages ? { languages: list.languages } : {}), text: await download(list) });
 
-const main = await Promise.all(manifest.lists.map(entry));
+// uBlock Origin Lite's catalogue: which rulesets it starts with, and which it offers.
+const ubol = manifest.ubol;
+const rulesets = JSON.parse(readFileSync(join(ublock, ubol.rulesets), 'utf8'));
+if (!Array.isArray(rulesets) || rulesets.filter(r => r.enabled).length < 3) throw new Error('uBO Lite\'s rulesets.json looks wrong');
+const trusted = url => url.startsWith(ubol.trustedPrefix);
+const slug = url => new URL(url).pathname.split('/').pop().replace(/\.(min\.)?txt$/, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'list';
+const fromRuleset = (ruleset, url, group) => ({ id: `${ruleset.id}-${slug(url)}`, group, title: ruleset.name, licence: 'see its homepage',
+                                                homepage: ruleset.homeURL || '', trusted: trusted(url), url });
+
+// The default set: Niche's own lists, and of the ones marked ubol those uBO Lite still starts
+// with, plus whatever its default rulesets name that lists.json doesn't know yet.
+const defaults = rulesets.filter(r => r.enabled);
+const defaultURLs = new Set(defaults.flatMap(r => r.urls));
+const mainLists = manifest.lists.filter(list => {
+  if (!list.ubol || defaultURLs.has(list.url)) return true;
+  console.log(`dropped ${list.id}: no longer in uBO Lite's default rulesets`);
+  return false;
+});
+const known = new Set(manifest.lists.map(list => list.url));
+for (const ruleset of defaults) {
+  for (const url of ruleset.urls) {
+    if (known.has(url)) continue;
+    console.log(`added ${url}: new in uBO Lite's default ruleset ${ruleset.id}`);
+    mainLists.push(fromRuleset(ruleset, url, ruleset.group === 'malware' ? 'malware' : 'ads'));
+  }
+}
+
+const main = await Promise.all(mainLists.map(entry));
 const extra = await resources(ublock);
 const size = write('shields.pack', main, extra);
 console.log(`shields.pack: ${main.length} lists, ${extra.scriptlets.length} scriptlets, ${extra.redirects.length} stand-ins, ${(size / 1e6).toFixed(1)} MB${key ? ', signed' : ', UNSIGNED'}`);
@@ -118,4 +167,27 @@ if (!args.includes('--only-main')) {
   }
   writeFileSync(join(out, 'shields-regional.json'), JSON.stringify({ built, lists: index }));
   console.log(`${index.length} of ${manifest.regional.length} regional packs`);
+
+  // The optional lists: Niche's own (lists.json "extras"), then uBO Lite's optional rulesets
+  // that aren't regional (those have a language) and aren't already in the default set.
+  const inMain = new Set(mainLists.map(list => list.url));
+  const offered = manifest.extras.map(e => ({ ...e }));
+  for (const ruleset of rulesets) {
+    if (ruleset.enabled || ruleset.lang || ubol.skip.includes(ruleset.id) || !ubol.groups[ruleset.group]) continue;
+    if (ruleset.group === 'regions' || offered.some(e => e.id === ruleset.id)) continue;
+    const group = ubol.groups[ruleset.group];
+    const lists = ruleset.urls.filter(url => !inMain.has(url)).map(url => fromRuleset(ruleset, url, group));
+    if (lists.length) offered.push({ id: ruleset.id, group, title: ruleset.name, homepage: ruleset.homeURL || '', lists });
+  }
+  const catalog = [];
+  for (const item of offered) {
+    try {
+      const bytes = write(`shields-x-${item.id}.pack`, await Promise.all(item.lists.map(entry)), { scriptlets: [], redirects: [] });
+      catalog.push({ id: item.id, title: item.title, group: item.group, homepage: item.homepage, detail: manifest.details?.[item.id] || '', bytes });
+    } catch (error) {
+      console.error(`skipped ${error.message}`);
+    }
+  }
+  writeFileSync(join(out, 'shields-lists.json'), JSON.stringify({ built, lists: catalog }));
+  console.log(`${catalog.length} optional packs: ${catalog.map(c => c.id).join(', ')}`);
 }

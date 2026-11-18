@@ -69,7 +69,7 @@ void niche_shields_verdict_free(NicheShieldsVerdict* verdict);
 
 // What to hide on a page, as JSON: {"hide": [selectors], "procedural": [filters as JSON text],
 // "exceptions": [selectors], "generichide": bool}. Null when no engine is installed.
-char* niche_shields_cosmetic(const char* url);
+char* niche_shields_cosmetic(const char* url, bool generic);
 // The generic selectors that apply to a page showing these classes and ids (newline-separated),
 // less the page's `exceptions` (newline-separated): a JSON array.
 char* niche_shields_generic(const char* classes, const char* ids, const char* exceptions);

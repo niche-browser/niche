@@ -233,7 +233,7 @@ final class TabStripView: NSView, TabMenuHost, NSDraggingSource {
         // A window of one space of its own (incognito, Blank) has nowhere to switch to; an incognito
         // one keeps its chip, which is what says the window is incognito once the sidebar is away.
         m.incognito = store.isIncognito(space: space.id)
-        m.showsSpace = m.incognito || (!store.isStandalone(space: space.id) && !store.hidesSpaceHeader(space.id))
+        m.showsSpace = m.incognito || (!store.isStandalone(space: space.id) && !store.hidesSingleSpaceHeader(space.id))
         m.colors = SidebarColors(palette)
         let dark = palette.isDark
         var out: [StripEntry] = []

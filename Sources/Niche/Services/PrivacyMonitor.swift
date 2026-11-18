@@ -179,6 +179,15 @@ final class PrivacyMonitor {
         rulesChanged()
     }
 
+    /// The privacy panel's filtering slider for one site (`FilteringMode`). `standard` is the
+    /// mode for every site: picking it gives the site back to the setting.
+    func setMode(_ mode: FilteringMode, on site: String, standard: FilteringMode, remembered: Bool = true) {
+        rules.setMode(mode, on: site, standard: standard)
+        if remembered { saved.setMode(mode, on: site, standard: standard) }
+        NicheLog.note("Privacy filtering \(mode.title.lowercased()) for a site")
+        rulesChanged()
+    }
+
     /// Settings ▸ Privacy "Reset…": every block, exception and site switch goes.
     func resetRules() {
         rules = PrivacyRules()
@@ -194,6 +203,7 @@ final class PrivacyMonitor {
 
     private func pushRules() {
         let c = rules.compiled()
-        NicheCEFRuntime.setPrivacyRulesBlocked(c.blocked, allowed: c.allowed, blockedOn: c.blockedOn, allowedOn: c.allowedOn, offSites: c.offSites)
+        NicheCEFRuntime.setPrivacyRulesBlocked(c.blocked, allowed: c.allowed, blockedOn: c.blockedOn, allowedOn: c.allowedOn, offSites: c.offSites,
+                                               siteModes: c.siteModes.mapValues { NSNumber(value: $0) })
     }
 }

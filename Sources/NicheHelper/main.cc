@@ -3,6 +3,7 @@
 // enclosing Niche.app bundle and hands control to CEF.
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "include/cef_app.h"
@@ -43,8 +44,8 @@ class RenderHandler : public CefRenderProcessHandler {
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                 CefProcessId source_process, CefRefPtr<CefProcessMessage> message) override {
     if (source_process != PID_BROWSER) return false;
-    if (message->GetName() == "Niche.shieldsOff") {
-        SetOffSites(message->GetArgumentList()->GetString(0).ToString());
+    if (message->GetName() == "Niche.shieldsModes") {
+        SetModes(message->GetArgumentList()->GetString(0).ToString());
         return true;
     }
     if (message->GetName() != "Niche.run") return false;
@@ -95,7 +96,7 @@ class RenderHandler : public CefRenderProcessHandler {
           shields_size_ = size;
         }
       }
-      SetOffSites(extra_info->GetString("niche.shields.off").ToString());
+      SetModes(extra_info->GetString("niche.shields.modes").ToString());
     }
   }
 
@@ -111,7 +112,7 @@ class RenderHandler : public CefRenderProcessHandler {
     if (!shields_) return;
     const std::string url = frame->GetURL().ToString();
     if (url.compare(0, 7, "http://") != 0 && url.compare(0, 8, "https://") != 0) return;
-    if (ProtectionOff(browser, frame, url)) return;
+    if (!RunsListScripts(browser, frame, url)) return;
     if (char* script = niche_shields_page_script(shields_, url.c_str())) {
       context->Eval(script, CefString(), 0, result, error);
       niche_shields_string_free(script);
@@ -131,17 +132,28 @@ class RenderHandler : public CefRenderProcessHandler {
     std::string name;
     CefRefPtr<CefV8Value> again;
   };
-  // Sites where the user switched protection off, as the browser process names them (the last
-  // labels of a host: NicheContentBlocker.h's SiteOrHost). A document of such a site, or inside
-  // a page of one, runs no list scripts.
-  void SetOffSites(const std::string& sites) {
-    off_sites_.clear();
+  // The filtering modes, as the browser process sends them (NicheCEF's NichePublishShieldsModes):
+  // the mode for every site on the first line, then "site<TAB>mode" per site with one of its
+  // own, sites named as the last labels of a host (NicheContentBlocker.h's SiteOrHost). The
+  // lists' scripts run in a document whose page is in optimal mode (2) or more.
+  void SetModes(const std::string& text) {
+    site_modes_.clear();
+    standard_mode_ = 2;
     size_t start = 0;
-    while (start < sites.size()) {
-      size_t end = sites.find('\n', start);
-      if (end == std::string::npos) end = sites.size();
-      if (end > start) off_sites_.push_back(sites.substr(start, end - start));
+    bool first = true;
+    while (start < text.size()) {
+      size_t end = text.find('\n', start);
+      if (end == std::string::npos) end = text.size();
+      const std::string line = text.substr(start, end - start);
       start = end + 1;
+      if (line.empty()) continue;
+      const size_t tab = line.find('\t');
+      if (first && tab == std::string::npos) {
+        if (line[0] >= '0' && line[0] <= '3') standard_mode_ = line[0] - '0';
+      } else if (tab != std::string::npos && tab + 1 < line.size() && line[tab + 1] >= '0' && line[tab + 1] <= '3') {
+        site_modes_.emplace_back(line.substr(0, tab), line[tab + 1] - '0');
+      }
+      first = false;
     }
   }
 
@@ -156,27 +168,33 @@ class RenderHandler : public CefRenderProcessHandler {
     return rest;
   }
 
-  bool HostIsOff(const std::string& host) const {
-    for (const std::string& site : off_sites_) {
-      if (host == site) return true;
+  int ModeOf(const std::string& host) const {
+    for (const auto& [site, mode] : site_modes_) {
+      if (host == site) return mode;
       if (host.size() > site.size() && host.compare(host.size() - site.size(), site.size(), site) == 0 &&
-          host[host.size() - site.size() - 1] == '.') return true;
+          host[host.size() - site.size() - 1] == '.') return mode;
     }
-    return false;
+    return standard_mode_;
   }
 
-  bool ProtectionOff(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const std::string& url) const {
-    if (off_sites_.empty()) return false;
-    if (HostIsOff(Host(url))) return true;
-    CefRefPtr<CefFrame> top = browser->GetMainFrame();
-    return top && !frame->IsMain() && HostIsOff(Host(top->GetURL().ToString()));
+  // A frame follows the page it is in: the mode is the top document's site's.
+  bool RunsListScripts(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const std::string& url) const {
+    std::string page = Host(url);
+    if (!frame->IsMain()) {
+      if (CefRefPtr<CefFrame> top = browser->GetMainFrame()) {
+        const std::string host = Host(top->GetURL().ToString());
+        if (!host.empty()) page = host;
+      }
+    }
+    return ModeOf(page) >= 2;
   }
 
   std::vector<Installed> installed_;
   std::map<int, CefString> start_;
   NicheShieldsPage* shields_ = nullptr;
   size_t shields_size_ = 0;
-  std::vector<std::string> off_sites_;
+  std::vector<std::pair<std::string, int>> site_modes_;
+  int standard_mode_ = 2;
   IMPLEMENT_REFCOUNTING(RenderHandler);
 };
 

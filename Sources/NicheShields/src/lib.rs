@@ -4,7 +4,7 @@
 
 use adblock::lists::{FilterSet, ParseOptions, RuleTypes};
 use adblock::request::Request;
-use adblock::resources::{PermissionMask, Resource};
+use adblock::resources::{MimeType, PermissionMask, Resource, ResourceType};
 use adblock::Engine;
 use serde::Serialize;
 use std::ffi::{c_char, CStr, CString};
@@ -38,6 +38,9 @@ pub struct ShieldsEngine {
     groups: Vec<u8>,
     rule_count: u32,
     page_blob: Vec<u8>,
+    /// The generic hiding selectors that are not a plain class or id: what every page is told
+    /// to hide whatever its site. Worked out on first use.
+    generic_selectors: std::sync::OnceLock<std::collections::HashSet<String>>,
 }
 
 pub struct Page {
@@ -73,6 +76,41 @@ fn is_rule(line: &str) -> bool {
     !(line.is_empty() || line.starts_with('!') || line.starts_with('[') || (line.starts_with('#') && !line.starts_with("##") && !line.starts_with("#@#") && !line.starts_with("#?#")))
 }
 
+/// A line of a hosts file (`127.0.0.1 ads.example`, as Peter Lowe's list is published) as the
+/// rule it stands for (`||ads.example^`), or the line as it is. uBlock Origin reads hosts files
+/// this way; read as a filter rule such a line matches nothing. The machine's own names stay out.
+fn hosts_line_as_rule(line: &str) -> Option<String> {
+    let mut words = line.split('#').next()?.split_whitespace();
+    let address = words.next()?;
+    if !matches!(address, "127.0.0.1" | "0.0.0.0" | "::1" | "::") {
+        return None;
+    }
+    let host = words.next()?;
+    if words.next().is_some() || !host.contains('.') || matches!(host, "localhost.localdomain" | "0.0.0.0" | "127.0.0.1") {
+        return Some(String::new());
+    }
+    if !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_') {
+        return Some(String::new());
+    }
+    Some(format!("||{host}^"))
+}
+
+/// A list with its hosts-file lines, if it has any, turned into rules.
+fn with_hosts_as_rules(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.lines().any(|line| hosts_line_as_rule(line).is_some()) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        match hosts_line_as_rule(line) {
+            Some(rule) => out.push_str(&rule),
+            None => out.push_str(line),
+        }
+        out.push('\n');
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// A line that injects a script (`example.com##+js(...)`) or excepts one.
 fn injects_script(line: &str) -> bool {
     line.contains("##+js(") || line.contains("#@#+js(")
@@ -86,6 +124,8 @@ impl Builder {
 
     pub fn add_list(&mut self, text: &str, group: u8, trusted: bool) {
         let permissions = if trusted { TRUSTED } else { PermissionMask::default() };
+        let text = with_hosts_as_rules(text);
+        let text = text.as_ref();
         self.rule_count += text.lines().filter(|line| is_rule(line)).count() as u32;
         let scripts: String = text.lines().filter(|line| injects_script(line)).collect::<Vec<_>>().join("\n");
         if !scripts.is_empty() {
@@ -115,18 +155,30 @@ impl Builder {
     pub fn build(self) -> ShieldsEngine {
         let mut engine = Engine::new_with_filter_set(self.rules);
         let rule_count = self.rule_count;
+        // uBlock Origin keeps a few scripts among its stand-in files (noeval.js, nofab.js) and
+        // its lists inject them like any scriptlet: page processes get those too. A scriptlet
+        // of the same name stays the scriptlet.
+        let mut page_resources = self.page_resources;
+        let named: std::collections::HashSet<String> =
+            page_resources.iter().flat_map(|r| std::iter::once(r.name.clone()).chain(r.aliases.iter().cloned())).collect();
+        for resource in &self.resources {
+            let script = matches!(resource.kind, ResourceType::Mime(MimeType::ApplicationJavascript) | ResourceType::Template);
+            if script && !named.contains(&resource.name) && !resource.aliases.iter().any(|alias| named.contains(alias)) {
+                page_resources.push(resource.clone());
+            }
+        }
         engine.use_resources(self.resources);
 
         let page_engine = Engine::new_with_filter_set(self.page_rules);
         let rules = page_engine.serialize();
-        let resources = serde_json::to_vec(&self.page_resources).unwrap_or_default();
+        let resources = serde_json::to_vec(&page_resources).unwrap_or_default();
         let mut plain = Vec::with_capacity(8 + rules.len() + resources.len());
         plain.extend_from_slice(&(rules.len() as u64).to_le_bytes());
         plain.extend_from_slice(&rules);
         plain.extend_from_slice(&resources);
         let mut page_blob = PAGE_MAGIC.to_vec();
         page_blob.extend_from_slice(&miniz_oxide::deflate::compress_to_vec(&plain, 8));
-        ShieldsEngine { engine, groups: self.groups, rule_count, page_blob }
+        ShieldsEngine { engine, groups: self.groups, rule_count, page_blob, generic_selectors: std::sync::OnceLock::new() }
     }
 }
 
@@ -156,7 +208,10 @@ impl ShieldsEngine {
         }
     }
 
-    pub fn cosmetic(&self, url: &str) -> String {
+    /// What a page at `url` is told to hide. `generic` false leaves the generic rules out, the
+    /// ones that name no site (uBlock Origin Lite's "optimal" mode): only what the lists say
+    /// about this page's own site is hidden, and the page is told not to ask for the rest.
+    pub fn cosmetic(&self, url: &str, generic: bool) -> String {
         let found = self.engine.url_cosmetic_resources(url);
         let mut out = Cosmetic {
             hide: found.hide_selectors.into_iter().collect(),
@@ -164,6 +219,16 @@ impl ShieldsEngine {
             exceptions: found.exceptions.into_iter().collect(),
             generichide: found.generichide,
         };
+        if !generic {
+            // A page of a site no list names is told exactly the generic ones.
+            let everywhere = self.generic_selectors.get_or_init(|| {
+                self.engine.url_cosmetic_resources("https://no-site-of-its-own.invalid/").hide_selectors.into_iter().collect()
+            });
+            if !found.generichide {
+                out.hide.retain(|selector| !everywhere.contains(selector));
+            }
+            out.generichide = true;
+        }
         out.hide.sort();
         out.procedural.sort();
         out.exceptions.sort();
@@ -378,10 +443,10 @@ pub unsafe extern "C" fn niche_shields_verdict_free(verdict: *mut CVerdict) {
 /// # Safety
 /// `url` is null-terminated.
 #[no_mangle]
-pub unsafe extern "C" fn niche_shields_cosmetic(url: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn niche_shields_cosmetic(url: *const c_char, generic: bool) -> *mut c_char {
     let Some(engine) = installed() else { return std::ptr::null_mut() };
     let url = text(url);
-    guarded(None, || Some(engine.cosmetic(url))).map(c_string).unwrap_or(std::ptr::null_mut())
+    guarded(None, || Some(engine.cosmetic(url, generic))).map(c_string).unwrap_or(std::ptr::null_mut())
 }
 
 /// # Safety

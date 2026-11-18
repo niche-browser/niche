@@ -9,6 +9,7 @@ forgotten when its tab closes (a tab keeps its last few pages, so Back shows the
 | Switch | What it does | Where |
 |---|---|---|
 | Protection level | Relaxed, Balanced (the default) or Strict: a preset over the switches below, chosen in onboarding and at the top of Settings ▸ Privacy. | `PrivacyLevel` |
+| Filtering | How much Shields does on a page, as in uBlock Origin Lite: Basic (requests blocked), Optimal (also the site's own hiding rules and scripts; the default) or Complete (also the generic hiding rules). A site can have its own in the privacy panel, Off included. | `FilteringMode`, [shields.md](shields.md) |
 | Shields: Ads, Trackers, Cookie notices, Pop-ups and nags, Dangerous sites, Lists for your languages | The filter engine and the community's lists ([shields.md](shields.md)): requests are blocked, blocked scripts pages need get a stand-in, leftovers and cookie notices are hidden, and notices the lists know are answered with "essential only". Pop-ups and nags is off unless the level is Strict. | `Sources/NicheShields`, `ShieldsService` |
 | Block third-party cookies | A site embedded in another site's page neither gets its cookies back nor leaves new ones: on the network (`NichePrivacyCookieFilter`) and from a script (Chromium's `profile.cookie_controls_mode`). | `NicheCEF.mm` |
 | Remove tracking codes from links | Click and mailing identifiers (fbclid, gclid, … and whatever else the lists' `removeparam` rules name) are taken off a page's address before it is asked for. | `NicheContentBlockingHandler` |
@@ -33,7 +34,8 @@ at the right of the page (`PrivacyPanelView`):
 - three counts: Blocked, Sees you, Other;
 - "On this page": what each protection did here (`PrivacyReport`): trackers stopped, cookies kept
   back, tracking codes removed, the "don't sell" signal, fingerprinting noticed, the connection;
-- "Protect me on this site": off lets trackers and their cookies through there;
+- "Filtering on this site": the slider (Off, Basic, Optimal, Complete). Off lets trackers and
+  their cookies through there; "Use My Setting" gives the site back to the mode for every site;
 - "Who is here": one bar split by kind of company;
 - every company, worst first, with what it is, what it learned in plain words (which page, your
   address, a cookie that went back to it, what the page sent it, what it read to fingerprint the

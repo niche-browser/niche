@@ -519,6 +519,11 @@ public struct AppSettings: Codable, Equatable {
     public var blockMaliciousSites: Bool = true
     /// Settings ▸ Privacy "Lists for your languages" (`ShieldsGroup.regional`), on by default.
     public var useRegionalLists: Bool = true
+    /// Settings ▸ Privacy "Filtering": how much Shields does on every site (`FilteringMode`,
+    /// uBlock Origin Lite's modes); a site can have its own in the privacy panel. Never `none`.
+    public var filteringMode: FilteringMode = .standard
+    /// Settings ▸ Privacy "More lists": the optional lists switched on, by id (`ShieldsCatalog`).
+    public var extraShieldsLists: Set<String> = []
     /// Dia's Tabs ▸ "Haptic feedback when reordering tabs" (tabReorderingHapticsEnabled).
     public var hapticFeedbackOnReorder: Bool = true
     /// Dia's Advanced ▸ "Warn before quitting" (shouldWarnBeforeQuitting, off by default).
@@ -830,6 +835,14 @@ extension AppSettings {
         restoreWindows = try c.decodeIfPresent(Bool.self, forKey: .restoreWindows) ?? true
         shareThemeWithWebsites = try c.decodeIfPresent(Bool.self, forKey: .shareThemeWithWebsites) ?? true
         blockThirdPartyCookies = try c.decodeIfPresent(Bool.self, forKey: .blockThirdPartyCookies) ?? true
+        extraShieldsLists = try c.decodeIfPresent(Set<String>.self, forKey: .extraShieldsLists) ?? []
+        if let mode = try c.decodeIfPresent(Int.self, forKey: .filteringMode).flatMap(FilteringMode.init(rawValue:)), mode != .none {
+            filteringMode = mode
+        } else {
+            // A settings file from before the modes (18 Nov 2026) keeps the level it had: the
+            // level's own mode, so Strict is still Strict and not "Custom".
+            filteringMode = PrivacyLevel.allCases.first { $0.sets(self, ignoringMode: true) }?.filteringMode ?? .standard
+        }
         removeTrackingParameters = try c.decodeIfPresent(Bool.self, forKey: .removeTrackingParameters) ?? true
         sendGlobalPrivacyControl = try c.decodeIfPresent(Bool.self, forKey: .sendGlobalPrivacyControl) ?? true
         noticeFingerprinting = try c.decodeIfPresent(Bool.self, forKey: .noticeFingerprinting) ?? true

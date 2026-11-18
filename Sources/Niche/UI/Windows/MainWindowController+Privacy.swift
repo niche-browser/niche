@@ -97,6 +97,7 @@ extension MainWindowController {
         if model.favicon !== icon { model.favicon = icon }
         let protections = PrivacyProtections(store.settings)
         if model.protections != protections { model.protections = protections }
+        if model.standardMode != store.settings.filteringMode { model.standardMode = store.settings.filteringMode }
     }
 
     /// Asks the page on screen what its scripts were seen reading since the last time; `then` runs
@@ -139,7 +140,8 @@ extension MainWindowController {
                 + (p.cookiesWithheld.isEmpty ? "" : " cookies-kept-back=\(p.cookiesWithheld.count)")
                 + (p.probes.isEmpty ? "" : " probes=" + p.probes.map(\.rawValue).sorted().joined(separator: "+"))
         }
+        let mode = PrivacyMonitor.shared.rules.mode(on: ledger.pageSite, standard: store.settings.filteringMode)
         NicheLog.note("privacy[\(label)] open=\(privacyPanelOpen) site=\(ledger.pageSite) companies=\(s.parties) blocked=\(s.blocked) see-you=\(s.sawYou) "
-                      + "other=\(s.others) requests-blocked=\(s.blockedRequests) cleaned=\(s.cleanedAddress) | " + parties.joined(separator: " "))
+                      + "other=\(s.others) requests-blocked=\(s.blockedRequests) cleaned=\(s.cleanedAddress) mode=\(mode.title.lowercased()) | " + parties.joined(separator: " "))
     }
 }

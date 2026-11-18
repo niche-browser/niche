@@ -27,14 +27,15 @@ wait 1
 niche://debug?cdp=Runtime.evaluate&params={"expression":"'answered-' + window.__shields_answered"}
 expect-log Niche cdp Runtime.evaluate .*"value":"answered-start"
 
-# A cookie notice the page adds later is hidden by a generic rule and by the site's own rule;
-# a pop-up is found by its text; what no rule names stays. (No "#" in these lines: in a
-# niche:// address it would cut the rest off.)
+# Niche starts in uBlock Origin Lite's "optimal" filtering mode: what the lists say about this
+# site is hidden (its consent wall, a pop-up found by its text), a notice only a generic rule
+# names is not, and what no rule names stays. (No "#" in these lines: in a niche:// address it
+# would cut the rest off.)
 niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const add=(tag,id,cls,text)=>{const e=document.createElement(tag);if(id)e.id=id;if(cls)e.className=cls;e.textContent=text;document.body.append(e);};add('div','','shields-cookie-banner','We use cookies');add('div','shields-consent-wall','','Accept all');add('div','','shields-promo','Subscribe to our newsletter');add('div','','shields-promo','Read more');add('div','kept','','Kept');return 'added'})()"}
 expect-log Niche cdp Runtime.evaluate .*"value":"added"
 wait 2
 niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const d=s=>getComputedStyle(document.querySelector(s)).display;const promos=[...document.querySelectorAll('.shields-promo')].map(e=>getComputedStyle(e).display).join('/');return [d('.shields-cookie-banner'),d('[id=shields-consent-wall]'),promos,d('[id=kept]')].join('-')})()"}
-expect-log Niche cdp Runtime.evaluate .*"value":"none-none-none/block-block"
+expect-log Niche cdp Runtime.evaluate .*"value":"block-none-none/block-block"
 
 # A blocked script the lists name a stand-in for is answered with it: the page asks another
 # host (this run's server under another name) for analytics.js and gets the stand-in's mark,
@@ -48,4 +49,53 @@ expect-log Niche cdp Runtime.evaluate .*"value":"1-loaded-failed"
 # Nothing of it is a global of the page.
 niche://debug?cdp=Runtime.evaluate&params={"expression":"'leaked-' + (typeof setFlag) + '-' + (typeof scriptletGlobals)"}
 expect-log Niche cdp Runtime.evaluate .*"value":"leaked-undefined-undefined"
+
+# The filtering modes (18 Nov 2026). Complete, here as this site's own in the privacy panel:
+# the generic rule hides its notice too.
+niche://debug?privacyMode=complete
+niche://open?url=${PAGE}?n=shields-complete
+expect-log loaded 127\.0\.0\.1 \(HTTP 200\)
+wait 1
+niche://debug?privacy=complete
+expect-log privacy\[complete\] .* mode=complete
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const add=(tag,id,cls,text)=>{const e=document.createElement(tag);if(id)e.id=id;if(cls)e.className=cls;e.textContent=text;document.body.append(e);};add('div','','shields-cookie-banner','We use cookies');add('div','shields-consent-wall','','Accept all');add('div','','shields-promo','Subscribe to our newsletter');add('div','','shields-promo','Read more');add('div','kept','','Kept');return 'added'})()"}
+wait 2
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const d=s=>getComputedStyle(document.querySelector(s)).display;const promos=[...document.querySelectorAll('.shields-promo')].map(e=>getComputedStyle(e).display).join('/');return [d('.shields-cookie-banner'),d('[id=shields-consent-wall]'),promos,d('[id=kept]')].join('-')})()"}
+expect-log Niche cdp Runtime.evaluate .*"value":"none-none-none/block-block"
+
+# Basic, as the mode for every site in Settings (the site goes back to following it): requests
+# are still blocked, and the page is left alone: no list script ran, nothing is hidden.
+niche://debug?privacyMode=optimal
+niche://debug?filteringMode=basic
+niche://open?url=${PAGE}?n=shields-basic
+expect-log loaded 127\.0\.0\.1 \(HTTP 200\)
+wait 1
+niche://debug?privacy=basic
+expect-log privacy\[basic\] .* mode=basic
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'basic-' + window.__shields_answered"}
+expect-log Niche cdp Runtime.evaluate .*"value":"basic-undefined"
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const add=(tag,id,cls,text)=>{const e=document.createElement(tag);if(id)e.id=id;if(cls)e.className=cls;e.textContent=text;document.body.append(e);};add('div','','shields-cookie-banner','We use cookies');add('div','shields-consent-wall','','Accept all');add('div','','shields-promo','Subscribe to our newsletter');add('div','','shields-promo','Read more');add('div','kept','','Kept');return 'added'})()"}
+wait 2
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const d=s=>getComputedStyle(document.querySelector(s)).display;const promos=[...document.querySelectorAll('.shields-promo')].map(e=>getComputedStyle(e).display).join('/');return [d('.shields-cookie-banner'),d('[id=shields-consent-wall]'),promos,d('[id=kept]')].join('-')})()"}
+expect-log Niche cdp Runtime.evaluate .*"value":"block-block-block/block-block"
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const s=document.createElement('script');s.src='http://shields-stand-in.test:8132/analytics.js';document.head.append(s);return 'asked-basic'})()"}
+expect-log Niche cdp Runtime.evaluate .*"value":"asked-basic"
+wait 2
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'basic-stand-in-' + window.__shields_stand_in"}
+expect-log Niche cdp Runtime.evaluate .*"value":"basic-stand-in-1"
+
+# Off for this site: nothing is blocked there, so no stand-in answers for the script.
+niche://debug?privacyMode=off
+niche://open?url=${PAGE}?n=shields-off
+expect-log loaded 127\.0\.0\.1 \(HTTP 200\)
+wait 1
+niche://debug?privacy=off
+expect-log privacy\[off\] .* mode=off
+niche://debug?cdp=Runtime.evaluate&params={"expression":"(()=>{const s=document.createElement('script');s.src='http://shields-stand-in.test:8132/analytics.js';document.head.append(s);return 'asked-off'})()"}
+expect-log Niche cdp Runtime.evaluate .*"value":"asked-off"
+wait 2
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'off-stand-in-' + window.__shields_stand_in"}
+expect-log Niche cdp Runtime.evaluate .*"value":"off-stand-in-undefined"
+niche://debug?privacyMode=optimal
+niche://debug?filteringMode=optimal
 niche://debug?checkStore=1

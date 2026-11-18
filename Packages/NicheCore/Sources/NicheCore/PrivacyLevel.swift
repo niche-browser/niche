@@ -31,7 +31,7 @@ public enum PrivacyLevel: String, CaseIterable, Sendable {
         switch self {
         case .relaxed: ["Trackers blocked", "Dangerous sites blocked", "Ads and cookie notices stay"]
         case .balanced: ["Ads and trackers blocked", "Cookie notices answered for you", "Cross-site cookies blocked"]
-        case .strict: ["Everything in Balanced", "Pop-ups and nags hidden", "Secure connections only"]
+        case .strict: ["Everything in Balanced", "Pop-ups and anything ad-like hidden", "Secure connections only"]
         }
     }
 
@@ -43,9 +43,28 @@ public enum PrivacyLevel: String, CaseIterable, Sendable {
         }
     }
 
+    /// How much Shields does on a page at this level (`FilteringMode`).
+    public var filteringMode: FilteringMode {
+        switch self {
+        case .relaxed: .basic
+        case .balanced: .optimal
+        case .strict: .complete
+        }
+    }
+
+    /// Whether `settings` are this level's; `ignoringMode` for a settings file from before the
+    /// filtering modes, which has none to compare.
+    public func sets(_ settings: AppSettings, ignoringMode: Bool = false) -> Bool {
+        var preset = settings
+        apply(to: &preset)
+        if ignoringMode { preset.filteringMode = settings.filteringMode }
+        return preset == settings
+    }
+
     /// Sets the switches the level owns; the others (the don't-sell signal, tracking codes,
     /// noticing fingerprinting) are on at every level and stay as they are.
     public func apply(to settings: inout AppSettings) {
+        settings.filteringMode = filteringMode
         settings.blockTrackers = true
         settings.blockMaliciousSites = true
         settings.blockAds = self != .relaxed
@@ -57,11 +76,7 @@ public enum PrivacyLevel: String, CaseIterable, Sendable {
 
     /// The level these settings are, or nil when a switch was changed by hand.
     public static func level(of settings: AppSettings) -> PrivacyLevel? {
-        allCases.first { level in
-            var preset = settings
-            level.apply(to: &preset)
-            return preset == settings
-        }
+        allCases.first { $0.sets(settings) }
     }
 }
 
