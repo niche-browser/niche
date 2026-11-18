@@ -185,8 +185,10 @@ runs a row's action, `downloadsClear=1` is the tray's Clear and `downloadsList=<
 rows by state. `privacyPanel=1|0` opens or closes the privacy panel (`light`/`dark` draw it in that
 appearance), `privacy=<label>` logs what Niche has recorded for the page on screen (panel open
 or not: every page is recorded), and
-`privacyRule=<choice>&party=<id>` and `privacyProtection=off|on` do what its buttons and switch do
-([privacy.md](privacy.md)). `shields=<label>&url=…&page=…&type=script` logs what the filter engine
+`privacyRule=<choice>&party=<id>`, `privacyProtection=off|on` and
+`privacyMode=off|basic|optimal|complete` do what its buttons and its filtering slider do
+([privacy.md](privacy.md)); `filteringMode=basic|optimal|complete` is Settings ▸ Privacy's slider
+for every site and `shieldsExtra=<id>&on=1|0` a switch of its "More lists". `shields=<label>&url=…&page=…&type=script` logs what the filter engine
 says about a request, and without `url` how much is loaded ([shields.md](shields.md)). A test
 instance takes its filter lists from `NICHE_SHIELDS_SOURCE` (a `file://` folder, or `off`), never
 the network. A test site with third parties is the run's own server under other

@@ -41,10 +41,19 @@ final class LiveScheduler: Scheduler {
 
     private func timer(_ interval: TimeInterval, repeats: Bool, _ work: @escaping @MainActor () -> Void) -> ScheduledWork {
         var timer: Timer?
-        let handle = ScheduledWork { timer?.invalidate() }
-        // A fire already queued on the main actor when the work is cancelled does not run.
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: repeats) { [weak handle] _ in
-            Task { @MainActor in if let handle, !handle.isCancelled { work() } }
+        let handle = ScheduledWork {
+            timer?.invalidate()
+            timer = nil
+        }
+        // The timer keeps the handle, so work whose handle the caller let go still runs (it
+        // didn't until 18 Nov 2026: the handle was held weakly here and gone before the timer
+        // fired). A fire already queued on the main actor when the work is cancelled does not run.
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: repeats) { _ in
+            Task { @MainActor in
+                if !handle.isCancelled { work() }
+                // Work that runs once is over: the timer lets go of the handle, and the handle of it.
+                if !repeats { timer = nil }
+            }
         }
         return handle
     }

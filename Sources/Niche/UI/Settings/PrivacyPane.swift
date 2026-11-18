@@ -19,6 +19,14 @@ struct PrivacyPane: View {
             }
             .padding(.bottom, Design.Space.section)
             SettingsSection(title: "Shields", footnote: shieldsLine) {
+                SettingsCardRow {
+                    SettingsIconLabel(title: "Filtering", detail: store.settings.filteringMode.detail + " A site can have its own in the privacy panel.",
+                                      symbol: "slider.horizontal.below.rectangle", color: .gray)
+                } trailing: {
+                    FilteringSlider(modes: FilteringMode.forEverySite, mode: store.settings.filteringMode) { store.settings.filteringMode = $0 }
+                        .frame(width: Self.sliderWidth)
+                }
+                SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 shieldsRow(.ads, color: .red, isOn: $store.settings.blockAds)
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 shieldsRow(.trackers, color: .orange, isOn: $store.settings.blockTrackers)
@@ -33,7 +41,7 @@ struct PrivacyPane: View {
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
                     SettingsIconLabel(title: "Filter lists",
-                                      detail: "Niche looks for newer lists once a day. They are the community’s: EasyList, uBlock Origin’s, AdGuard’s and others.",
+                                      detail: "The lists uBlock Origin Lite starts with, written by the community. Niche looks for newer ones every six hours.",
                                       symbol: "arrow.triangle.2.circlepath", color: .gray)
                 } trailing: {
                     HStack(spacing: Design.Space.m) {
@@ -45,6 +53,7 @@ struct PrivacyPane: View {
                 }
             }
             .sheet(isPresented: $showingCredits) { ShieldsCredits(credits: ShieldsService.shared.credits) { showingCredits = false } }
+            moreLists
             SettingsSection(title: "Tracking") {
                 SettingsCardRow {
                     SettingsIconLabel(title: "Block third-party cookies",
@@ -130,6 +139,36 @@ struct PrivacyPane: View {
                 }
             }
         }
+    }
+
+    /// The filtering slider in its row: room for three names.
+    private static let sliderWidth: CGFloat = 200
+
+    /// The optional lists (`ShieldsCatalog`), by what they are for. Nothing until the catalogue
+    /// has arrived, and nothing while Shields are off.
+    @ViewBuilder private var moreLists: some View {
+        let sections = ShieldsService.shared.catalog.sections
+        if !sections.isEmpty, !store.settings.shieldsGroups.isEmpty {
+            SettingsSection(title: "More lists",
+                            footnote: "Optional lists, off to start with as in uBlock Origin Lite. More lists block more, and each one is one more thing that can break a page.") {
+                let entries = sections.flatMap { section in section.entries.map { (section.group, $0) } }
+                ForEach(Array(entries.enumerated()), id: \.element.1.id) { i, pair in
+                    if i > 0 { SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset) }
+                    SettingsCardRow {
+                        SettingsIconLabel(title: pair.1.title, detail: extraDetail(pair.1, group: pair.0), symbol: pair.0.symbol, color: .gray)
+                    } trailing: {
+                        SettingsSwitch(title: pair.1.title, isOn: Binding(
+                            get: { store.settings.extraShieldsLists.contains(pair.1.id) },
+                            set: { on in if on { store.settings.extraShieldsLists.insert(pair.1.id) } else { store.settings.extraShieldsLists.remove(pair.1.id) } }))
+                    }
+                }
+            }
+        }
+    }
+
+    private func extraDetail(_ entry: ShieldsCatalog.Entry, group: ShieldsGroup) -> String {
+        if ShieldsService.shared.extrasPending.contains(entry.id), store.settings.extraShieldsLists.contains(entry.id) { return "Getting the list…" }
+        return entry.detail.isEmpty ? group.title : entry.detail
     }
 
     @State private var dnsError: String?

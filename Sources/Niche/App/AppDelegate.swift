@@ -315,9 +315,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var globalHotkey: GlobalHotkey?
 
     private func observeContentBlocking() {
-        observeChanges(of: { [store] in store.settings.shieldsGroups }) { [composition] in ShieldsService.shared.start(groups: $0, clock: composition.clock) }
+        observeChanges(of: { [store] in ShieldsLists(groups: store.settings.shieldsGroups, extras: store.settings.extraShieldsLists) }) { [composition] in
+            ShieldsService.shared.start(groups: $0.groups, extras: $0.extras, clock: composition.clock)
+        }
         observeChanges(of: { [store] in store.settings.blockThirdPartyCookies }, apply: NicheCEFRuntime.setThirdPartyCookiesBlocked)
         observeChanges(of: { [store] in store.settings.removeTrackingParameters }, apply: NicheCEFRuntime.setTrackingCodeRemoval)
+        observeChanges(of: { [store] in store.settings.filteringMode }) { NicheCEFRuntime.setShieldsFilteringMode($0.rawValue) }
         // The header on every request from now on; the page's navigator.globalPrivacyControl in
         // tabs opened from now on (a page's start script is fixed when its browser is made).
         observeChanges(of: { [store] in store.settings.sendGlobalPrivacyControl }) { [weak self] on in
@@ -1150,6 +1153,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
             if let v = dict["privacyProtection"], let site = store.selectedTab?.tab.flatMap({ PrivacySite.site(ofURL: $0.url) }) {
                 PrivacyMonitor.shared.setProtection(off: v == "off", on: site)
+                return
+            }
+            // privacyMode=off|basic|optimal|complete: the panel's filtering slider for the site on
+            // screen; filteringMode=basic|optimal|complete: Settings ▸ Privacy's, for every site.
+            // shieldsExtra=<id>&on=1|0: a switch of Settings ▸ Privacy "More lists".
+            if let v = dict["privacyMode"], let mode = FilteringMode(word: v), let site = store.selectedTab?.tab.flatMap({ PrivacySite.site(ofURL: $0.url) }) {
+                PrivacyMonitor.shared.setMode(mode, on: site, standard: store.settings.filteringMode)
+                return
+            }
+            if let v = dict["filteringMode"], let mode = FilteringMode(word: v), mode != .none { store.settings.filteringMode = mode; return }
+            if let id = dict["shieldsExtra"] {
+                if dict["on"] == "0" { store.settings.extraShieldsLists.remove(id) } else { store.settings.extraShieldsLists.insert(id) }
                 return
             }
             // downloadsClear=1: the tray's Clear.
@@ -2060,4 +2075,10 @@ private extension NSMenu {
         item.submenu = submenu
         addItem(item)
     }
+}
+
+/// What Shields is built from, as the settings ask: the groups and the optional lists switched on.
+private struct ShieldsLists: Equatable {
+    var groups: Set<ShieldsGroup>
+    var extras: Set<String>
 }

@@ -71,6 +71,7 @@ enum StoreTests {
         archiveTabsBelow()
         allFoldersExpanded()
         revealInSidebar()
+        scheduledWorkRunsWithItsHandleLetGo()
         oneWindowAtLaunch()
         newWindowsFollowTheTabLayout()
         print("Store: \(checks) checks passed")
@@ -1970,6 +1971,28 @@ enum StoreTests {
         store.togglePinnedCollapsed(sid)
         store.revealInSidebar(today.id)
         expect(store.isPinnedCollapsed(sid), "a Today tab leaves the pinned section as it is")
+    }
+
+    /// "Letting it go does not cancel": work scheduled without keeping its handle still runs.
+    /// It never did (18 Nov 2026): the look for newer filter lists a few seconds after launch
+    /// was scheduled this way and was never made, so a Mac got new lists only on the hourly tick.
+    @MainActor
+    private static func scheduledWorkRunsWithItsHandleLetGo() {
+        let clock = LiveScheduler()
+        var ran = 0, cancelledRan = 0, repeated = 0
+        clock.after(0.01) { ran += 1 }
+        let cancelled = clock.after(0.01) { cancelledRan += 1 }
+        cancelled.cancel()
+        let ticking = clock.every(0.01) { repeated += 1 }
+        let until = Date().addingTimeInterval(2)
+        while (ran == 0 || repeated < 2) && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        ticking.cancel()
+        expect(ran == 1, "work whose handle was let go runs once")
+        expect(cancelledRan == 0, "cancelled work does not run")
+        expect(repeated >= 2, "repeating work repeats until it is cancelled")
+        let seen = repeated
+        RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+        expect(repeated == seen, "and not after")
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {

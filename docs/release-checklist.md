@@ -144,11 +144,20 @@ built release app with a test profile. Note anything that fails in the release's
   Privacy says how many rules are loaded). A news site shows no ad slots and no cookie notice;
   womex.com opens without its notice (answered "essential only"). Switch Ads off in Settings: ads
   come back on the next load, and the level reads Custom. Pick Strict, then Balanced: the
-  switches follow. "Update Now" reports nothing new on a second press. Onboarding's privacy
-  step: the three cards, the shield filling with the level, and the chips struck out to match.
+  switches follow, and so does the Filtering slider (Basic, Optimal, Complete). "Update Now"
+  reports nothing new on a second press. Onboarding's privacy step: the three cards, the shield
+  filling with the level, and the chips struck out to match.
+- YouTube, signed in, on the default settings: play five videos in a row. No ad, and no "ad
+  blockers are not allowed" or "video player will be blocked" notice. (The notice shows for a
+  signed-in account after a few videos; a fresh profile never gets it, so this needs an account.)
+- Settings ▸ Privacy "More lists": the optional lists are all off. Switch AdGuard – Ads on: its
+  row says "Getting the list…", then the rule count under Shields goes up; off, and it goes back.
+- The privacy panel's "Filtering on this site": drag the thumb to Off (the hero goes grey, a
+  reload brings the ads back), to Complete, and press "Use My Setting": the thumb returns to the
+  mode in Settings and the link goes.
 - The panel lists the companies, the blocked ones in green outside the ring. Open one that "Sees you", press Block on
-  This Site, Reload: it moves to Blocked and the page still reads. Undo, and turn "Protect me on
-  this site" off and on. Check it in light and dark, and with the toolbar shown (View ▸ Show
+  This Site, Reload: it moves to Blocked and the page still reads. Undo, and move "Filtering on
+  this site" to Off and back. Check it in light and dark, and with the toolbar shown (View ▸ Show
   Toolbar): the shield sits before the sliders. Sign in to a site with an embedded login or
   comments (third-party cookies are blocked by default): what breaks is worth an issue.
 - **#178:** in a split, the focused pane's ring shows (also over docked DevTools), and so does

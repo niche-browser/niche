@@ -75,10 +75,10 @@ fn an_address_that_is_none_is_let_through() {
 #[test]
 fn a_page_is_told_what_to_hide() {
     let e = engine();
-    let news: serde_json::Value = serde_json::from_str(&e.cosmetic("https://news.example/")).unwrap();
+    let news: serde_json::Value = serde_json::from_str(&e.cosmetic("https://news.example/", true)).unwrap();
     assert_eq!(news["hide"], serde_json::json!(["#consent-wall"]));
     assert_eq!(news["exceptions"], serde_json::json!([".cookie-banner"]));
-    let shop: serde_json::Value = serde_json::from_str(&e.cosmetic("https://shop.example/")).unwrap();
+    let shop: serde_json::Value = serde_json::from_str(&e.cosmetic("https://shop.example/", true)).unwrap();
     assert_eq!(shop["procedural"].as_array().unwrap().len(), 1);
     assert!(shop["procedural"][0].as_str().unwrap().contains("has-text"));
 }
@@ -112,4 +112,60 @@ fn page_processes_get_the_scripts_and_nothing_else() {
 fn an_engine_counts_its_rules() {
     assert!(engine().rule_count() > 0);
     assert_eq!(Builder::new().build().rule_count(), 0);
+}
+
+/// Peter Lowe's list (one of uBlock Origin's defaults) is a hosts file: `127.0.0.1 ads.example`.
+/// Read as filter rules those lines matched nothing, and the list blocked nothing (18 Nov 2026).
+#[test]
+fn a_hosts_file_blocks_its_hosts() {
+    let mut builder = Builder::new();
+    builder.add_list("# a comment\n127.0.0.1 localhost\n127.0.0.1 ads.hosts-list.example\n0.0.0.0 tracker.hosts-list.example # why\n::1 six.hosts-list.example\n", 2, false);
+    let engine = builder.build();
+    for host in ["ads.hosts-list.example", "tracker.hosts-list.example", "six.hosts-list.example", "sub.ads.hosts-list.example"] {
+        assert!(engine.check(&format!("https://{host}/a.js"), "https://site.example/", "script").blocked, "{host}");
+    }
+    assert!(!engine.check("https://localhost/a.js", "https://site.example/", "script").blocked);
+    assert!(!engine.check("https://hosts-list.example/a.js", "https://site.example/", "script").blocked);
+}
+
+/// uBlock Origin Lite's "optimal" mode: what the lists say about the page's own site is hidden,
+/// the rules that name no site are not, and the page is told not to ask for the generic ones.
+#[test]
+fn without_the_generic_rules_a_page_hides_only_what_its_site_is_told() {
+    let mut b = Builder::new();
+    b.add_list("##.ad-box\n##div[data-ad-slot]\nnews.example###consent-wall\nnews.example##div[data-sponsored]", ADS, false);
+    let e = b.build();
+    let all: serde_json::Value = serde_json::from_str(&e.cosmetic("https://news.example/", true)).unwrap();
+    let hide = |v: &serde_json::Value| v["hide"].as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    assert!(hide(&all).contains(&"div[data-ad-slot]".to_owned()));
+    assert_eq!(all["generichide"], false);
+    let own: serde_json::Value = serde_json::from_str(&e.cosmetic("https://news.example/", false)).unwrap();
+    assert_eq!(hide(&own), vec!["#consent-wall".to_owned(), "div[data-sponsored]".to_owned()]);
+    assert_eq!(own["generichide"], true);
+    let other: serde_json::Value = serde_json::from_str(&e.cosmetic("https://other.example/", false)).unwrap();
+    assert!(hide(&other).is_empty());
+}
+
+/// uBlock Origin keeps a few scripts among its stand-in files (noeval.js, nofab.js, popads-dummy.js)
+/// and its lists inject them with `+js()` like any scriptlet. Page processes were given the
+/// scriptlets alone, so those rules (72 of 18,780 in the default lists, 18 Nov 2026) did nothing.
+#[test]
+fn a_stand_in_script_can_be_injected_like_a_scriptlet() {
+    let mut b = Builder::new();
+    b.add_list("video.example##+js(noeval)\nvideo.example##+js(set-flag, answered)", ADS, false);
+    // "window.__noeval = 1;" as a stand-in; a scriptlet of the same name must stay the scriptlet.
+    assert!(b.add_resources(
+        r#"[{"name":"noeval.js","aliases":["silent-noeval.js"],"kind":{"mime":"application/javascript"},"content":"d2luZG93Ll9fbm9ldmFsID0gMTs="},
+            {"name":"1x1.gif","aliases":[],"kind":{"mime":"image/gif"},"content":"R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"},
+            {"name":"set-flag.js","aliases":[],"kind":{"mime":"application/javascript"},"content":"d2luZG93Ll9fd3JvbmcgPSAxOw=="}]"#,
+        false
+    ));
+    assert!(b.add_resources(
+        r#"[{"name":"set-flag.js","aliases":[],"kind":{"mime":"application/javascript"},"content":"d2luZG93Ll9fZmxhZyA9ICd7ezF9fSc7"}]"#,
+        true
+    ));
+    let e = b.build();
+    let script = Page::load(e.page_blob()).unwrap().script("https://video.example/watch").unwrap();
+    assert!(script.contains("window.__noeval = 1;"), "{script}");
+    assert!(script.contains("window.__flag = 'answered';") && !script.contains("__wrong"), "{script}");
 }

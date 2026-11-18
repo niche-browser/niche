@@ -70,6 +70,8 @@ final class PrivacyPanelModel {
     var favicon: NSImage?
     /// Which protections Settings ▸ Privacy has on.
     var protections = PrivacyProtections()
+    /// Settings ▸ Privacy "Filtering": the mode every site has unless it has its own.
+    var standardMode = FilteringMode.standard
     /// False in an incognito window: what is chosen here is not written down.
     var remembersChoices = true
     /// When the user last changed a rule or the site's switch while a tab was showing.
@@ -225,7 +227,7 @@ struct PrivacyPanelView: View {
                     PrivacySection("On this page") {
                         PrivacyReportCard(rows: PrivacyReport.rows(summary, protections: model.protections, siteOff: off, secure: model.secure))
                     }
-                    protection(site: site, off: off)
+                    filtering(site: site)
                     if summary.parties > 1 {
                         PrivacySection("Who is here") { PrivacyKinds(kinds: summary.kinds, total: summary.parties) }
                     }
@@ -239,19 +241,33 @@ struct PrivacyPanelView: View {
         }
     }
 
-    private func protection(site: String, off: Bool) -> some View {
-        HStack(spacing: Design.Space.l) {
-            VStack(alignment: .leading, spacing: Design.Space.xxs) {
-                Text("Protect me on this site").font(Design.Font.control)
-                Text(off ? "Off: trackers and their cookies get through on \(site)." : "Turn off if \(site) stops working.")
-                    .font(Design.Font.detail).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+    /// The site's filtering slider (uBlock Origin Lite's modes): Off lets everything through
+    /// there, the others say how much Shields does. A site left at the mode for every site
+    /// follows Settings; one moved keeps its own, and says so.
+    private func filtering(site: String) -> some View {
+        let own = monitor.rules.ownMode(on: site)
+        let mode = own ?? model.standardMode
+        return VStack(alignment: .leading, spacing: Design.Space.m) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Filtering on this site").font(Design.Font.control)
+                Spacer(minLength: Design.Space.m)
+                if own != nil {
+                    Button("Use My Setting") {
+                        monitor.setMode(model.standardMode, on: site, standard: model.standardMode, remembered: model.remembersChoices)
+                        model.ruleChanged()
+                    }
+                    .buttonStyle(.link)
+                    .font(Design.Font.detail)
+                    .help("Go back to \(model.standardMode.title), the mode for every site in Settings ▸ Privacy")
+                }
             }
-            Spacer(minLength: Design.Space.m)
-            SettingsSwitch(title: "Protect me on this site", isOn: Binding(get: { !off }, set: { on in
-                monitor.setProtection(off: !on, on: site, remembered: model.remembersChoices)
+            FilteringSlider(modes: FilteringMode.allCases, mode: mode) { picked in
+                monitor.setMode(picked, on: site, standard: model.standardMode, remembered: model.remembersChoices)
                 model.ruleChanged()
-            }))
+            }
+            Text(mode == .none ? "Off: ads, trackers and their cookies get through on \(site)." : mode.detail)
+                .font(Design.Font.detail).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Design.Space.l)
         .privacyCard()

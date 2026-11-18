@@ -420,10 +420,12 @@ final class SidebarTopBarView: NSView {
         if headerHasToggle {
             shown.append(button("toggle", symbol: "sidebar.left", help: help, size: 32, height: 32, iconSize: Design.Icon.bar, active: active) { [weak self] in self?.actions.toggleSidebar() })
         }
-        // The space is named once: here only while the list's own space header is hidden.
+        // The space is named once: here while the toolbar is shown, as in Dia, and the list's own
+        // space header steps aside; else in the list.
         let space = store.focusedSpace(window: ui.windowID)
-        if ToolbarComposition.sidebarHeaderNamesSpace(headerHasToggle: headerHasToggle, standaloneWindow: store.isStandalone(window: ui.windowID),
-                                                      spaceHeaderHidden: store.hidesSpaceHeader(space.id)) {
+        if ToolbarComposition.sidebarHeaderNamesSpace(titleRowNamesSpace: store.namesSpaceInTitleRow(space.id), headerHasToggle: headerHasToggle,
+                                                      standaloneWindow: store.isStandalone(window: ui.windowID),
+                                                      singleSpaceHeaderHidden: store.hidesSingleSpaceHeader(space.id)) {
             let sw = switcher ?? {
                 let v = SidebarSpaceSwitcher(store: store, ui: ui, actions: actions)
                 addSubview(v)
@@ -487,11 +489,18 @@ final class SidebarTopBarView: NSView {
         // Row 1: 71 pt for the traffic lights, then the toggle. In fullscreen the lights are gone and
         // Arc draws it from 20 pt in (glyph 20–38.5 pt); the floating panel draws stand-in lights.
         let lights = !fullscreen || window?.parent != nil
-        if let t = rowButtons.first { t.frame = NSRect(x: lights ? 6 + 71 + 2 : 13, y: NicheMetrics.titleRowCenter - 17, width: 32, height: 32) }
-        if let sw = switcher {
-            let x: CGFloat = lights ? 6 + 71 + 2 : 13
-            sw.frame = NSRect(x: x, y: NicheMetrics.titleRowCenter - SidebarSpaceSwitcher.height / 2,
-                              width: min(sw.idealWidth, max(0, w - x - 8)), height: SidebarSpaceSwitcher.height)
+        let start: CGFloat = lights ? 6 + 71 + 2 : 13
+        let toggle = buttons["toggle"]
+        if let t = rowButtons.first { t.frame = NSRect(x: start, y: NicheMetrics.titleRowCenter - 17, width: 32, height: 32) }
+        // The space's name comes after the toggle when the header has both, and ends before
+        // whatever stands at the row's far end (developer mode's buttons).
+        var switcherEnd = w - 8
+        defer {
+            if let sw = switcher {
+                let x = toggle == nil ? start : start + 32 + 2
+                sw.frame = NSRect(x: x, y: NicheMetrics.titleRowCenter - SidebarSpaceSwitcher.height / 2,
+                                  width: min(sw.idealWidth, max(0, switcherEnd - x)), height: SidebarSpaceSwitcher.height)
+            }
         }
         if compact {
             // ← → ↻ 2 pt apart, 6 pt from the edge.
@@ -514,6 +523,7 @@ final class SidebarTopBarView: NSView {
                 x -= b.size.width
                 b.frame = NSRect(x: x, y: y + (28 - b.size.height) / 2, width: b.size.width, height: b.size.height)
             }
+            switcherEnd = x - 4
         }
     }
 
@@ -646,6 +656,12 @@ final class SidebarSpaceSwitcher: NSView {
         }
         menu.addItem(.separator())
         MenuItems.add(menu, "New Space…") { [actions] in actions.editSpace(nil) }
+        // What the list's space header offers while it steps aside for this name.
+        if let space = store.space(focused) {
+            MenuItems.add(menu, "Edit Space…") { [actions] in actions.editSpace(space) }
+            MenuItems.add(menu, "Edit Theme Color…") { [actions] in actions.editSpaceTheme(space) }
+        }
+        MenuItems.add(menu, "Manage Spaces…") { [actions] in actions.manageSpaces() }
         menuOpen = true
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 4), in: self)
         menuOpen = false
@@ -911,7 +927,7 @@ final class SpaceDockView: NSView {
             focused = f
             // Arc's single-space mode drops the lone space icon along with the header; incognito and
             // Blank Windows show no space icons (Arc 1.172 keeps the + in a Blank Window).
-            spaces = store.isStandalone(window: ui.windowID) || store.hidesSpaceHeader(f) ? [] : store.orderedSpaces
+            spaces = store.isStandalone(window: ui.windowID) || store.hidesSingleSpaceHeader(f) ? [] : store.orderedSpaces
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self, !self.syncQueued else { return }

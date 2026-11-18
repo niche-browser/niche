@@ -129,8 +129,10 @@ static std::string g_pageStartScript;
 /// thread. Replaced when the lists or the groups in use change; a tab keeps the one it was
 /// made with.
 static CefRefPtr<CefBinaryValue> g_shieldsPageBlob;
-/// The sites where the user switched protection off, newline-separated: no scripts there.
-static std::string g_shieldsOffSites;
+/// The filtering modes as page processes take them (NicheHelper's SetModes): the mode for
+/// every site on the first line, then "site<TAB>mode" for each site with one of its own. The
+/// lists' scripts run where the mode is optimal or more.
+static std::string g_shieldsModes = "2\n";
 /// What NicheCore's ShieldsPageScript gives pages to hide what the lists say to hide.
 static std::string g_shieldsContentScript;
 static CefRefPtr<CefDictionaryValue> NichePageStartInfo() {
@@ -140,7 +142,7 @@ static CefRefPtr<CefDictionaryValue> NichePageStartInfo() {
     if (g_shieldsPageBlob) {
         // A copy: a value belongs to the one dictionary it is put in.
         info->SetBinary("niche.shields", g_shieldsPageBlob->Copy());
-        info->SetString("niche.shields.off", g_shieldsOffSites);
+        info->SetString("niche.shields.modes", g_shieldsModes);
     }
     return info;
 }
@@ -1816,13 +1818,16 @@ public:
 
     // Gives the page's top document the selectors Shields hides there (ShieldsPageScript); the
     // script reports the page's class and id names back for the generic rules ("sh:" below).
-    // Not where the user switched protection off.
+    // By the page's filtering mode: nothing below optimal, the page's own site's rules at
+    // optimal, the generic rules too at complete.
     void HideWhatTheListsSay(CefRefPtr<CefFrame> frame) {
         if (g_shieldsContentScript.empty() || !niche_shields_installed()) return;
         const std::string url = frame->GetURL().ToString();
         const std::string host = niche_blocker::WebHost(url);
-        if (host.empty() || niche_blocker::ProtectionOff(host)) return;
-        char* found = niche_shields_cosmetic(url.c_str());
+        if (host.empty()) return;
+        const int mode = niche_blocker::ModeFor(host);
+        if (mode < niche_blocker::kModeOptimal) return;
+        char* found = niche_shields_cosmetic(url.c_str(), mode >= niche_blocker::kModeComplete);
         if (!found) return;
         RunPageScript(frame, "shields", g_shieldsContentScript, found);
         niche_shields_string_free(found);
@@ -1833,6 +1838,8 @@ public:
     void AnswerGenericSelectors(CefRefPtr<CefBrowser> browser, const std::string& report) {
         CefRefPtr<CefFrame> frame = browser->GetMainFrame();
         if (!frame || g_shieldsContentScript.empty()) return;
+        // Only a page in complete mode is told to ask; one that asks anyway gets no answer.
+        if (niche_blocker::ModeFor(niche_blocker::WebHost(frame->GetURL().ToString())) < niche_blocker::kModeComplete) return;
         const size_t first = report.find('\x1f');
         const size_t second = first == std::string::npos ? std::string::npos : report.find('\x1f', first + 1);
         if (second == std::string::npos) return;
@@ -3274,35 +3281,60 @@ static niche_blocker::DomainSet NicheDomainSet(NSArray<NSString*>* domains) {
     return set;
 }
 
+/// Tells page processes the filtering modes when they changed: tabs made from now on as they
+/// are made, the ones that exist now by message. Main thread.
+static void NichePublishShieldsModes() {
+    const niche_blocker::Rules* rules = niche_blocker::UserRules().load(std::memory_order_acquire);
+    std::string modes = std::to_string(niche_blocker::StandardMode().load()) + "\n";
+    if (rules) {
+        std::vector<std::string> lines;
+        for (const std::string& site : rules->offSites) lines.push_back(site + "\t0\n");
+        for (const auto& [site, mode] : rules->siteModes) {
+            if (!rules->offSites.count(site)) lines.push_back(site + "\t" + std::to_string(mode) + "\n");
+        }
+        std::sort(lines.begin(), lines.end());
+        for (const std::string& line : lines) modes += line;
+    }
+    if (modes == g_shieldsModes) return;
+    g_shieldsModes = modes;
+    for (NicheBrowser* b in [g_allBrowsers allObjects]) {
+        CefRefPtr<CefBrowser> cef = [b cefBrowser];
+        CefRefPtr<CefFrame> frame = cef ? cef->GetMainFrame() : nullptr;
+        if (!frame || !frame->IsValid()) continue;
+        CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create("Niche.shieldsModes");
+        message->GetArgumentList()->SetString(0, modes);
+        frame->SendProcessMessage(PID_RENDERER, message);
+    }
+}
+
 + (void)setPrivacyRulesBlocked:(NSArray<NSString*>*)blocked allowed:(NSArray<NSString*>*)allowed
                      blockedOn:(NSDictionary<NSString*, NSArray<NSString*>*>*)blockedOn
                      allowedOn:(NSDictionary<NSString*, NSArray<NSString*>*>*)allowedOn
-                      offSites:(NSArray<NSString*>*)offSites {
+                      offSites:(NSArray<NSString*>*)offSites
+                     siteModes:(NSDictionary<NSString*, NSNumber*>*)siteModes {
     auto* rules = new niche_blocker::Rules();
     rules->blocked = NicheDomainSet(blocked);
     rules->allowed = NicheDomainSet(allowed);
     for (NSString* site in blockedOn) rules->blockedOn[niche_blocker::NormalizeHost(site.UTF8String ?: "")] = NicheDomainSet(blockedOn[site]);
     for (NSString* site in allowedOn) rules->allowedOn[niche_blocker::NormalizeHost(site.UTF8String ?: "")] = NicheDomainSet(allowedOn[site]);
-    std::string off;
     for (NSString* site in offSites) {
         std::string host = niche_blocker::NormalizeHost(site.UTF8String ?: "");
-        if (host.empty()) continue;
-        rules->offSites.insert(host);
-        off += host + "\n";
+        if (!host.empty()) rules->offSites.insert(host);
+    }
+    for (NSString* site in siteModes) {
+        std::string host = niche_blocker::NormalizeHost(site.UTF8String ?: "");
+        const int mode = siteModes[site].intValue;
+        if (host.empty() || mode < niche_blocker::kModeNone || mode > niche_blocker::kModeComplete) continue;
+        if (mode == niche_blocker::kModeNone) rules->offSites.insert(host); else rules->siteModes[host] = mode;
     }
     niche_blocker::PublishRules(rules);
-    // Page processes run no list scripts on a site where protection is off: tabs made from
-    // now on are told as they are made, the ones that exist now.
-    if (off == g_shieldsOffSites) return;
-    g_shieldsOffSites = off;
-    for (NicheBrowser* b in [g_allBrowsers allObjects]) {
-        CefRefPtr<CefBrowser> cef = [b cefBrowser];
-        CefRefPtr<CefFrame> frame = cef ? cef->GetMainFrame() : nullptr;
-        if (!frame || !frame->IsValid()) continue;
-        CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create("Niche.shieldsOff");
-        message->GetArgumentList()->SetString(0, off);
-        frame->SendProcessMessage(PID_RENDERER, message);
-    }
+    NichePublishShieldsModes();
+}
+
++ (void)setShieldsFilteringMode:(NSInteger)mode {
+    const int clamped = (int)std::min<NSInteger>(std::max<NSInteger>(mode, niche_blocker::kModeBasic), niche_blocker::kModeComplete);
+    niche_blocker::StandardMode().store(clamped);
+    NichePublishShieldsModes();
 }
 
 + (void)setTrackingCodeRemoval:(BOOL)enabled { g_cleanAddresses.store(enabled); }
