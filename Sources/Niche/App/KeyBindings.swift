@@ -167,6 +167,11 @@ final class KeyBindingRegistry {
             // View
             KeyAction(id: "toggleSidebar", name: "Hide Sidebar", section: .view, shortcuts: [Shortcut("s", cmd)], triggers: ["sidebar", "hide sidebar", "show sidebar"]),
             KeyAction(id: "toggleToolbar", name: "Hide Toolbar", section: .view, shortcuts: [Shortcut("d", cmdShift)], triggers: ["toolbar"]),
+            // Where the tabs are (WindowLayout): down the sidebar, or across the top with the bookmarks bar.
+            KeyAction(id: "toggleTabsOnTop", name: "Show Tabs on Top", section: .view, shortcuts: [],
+                      triggers: ["tabs on top", "tab strip", "horizontal tabs", "tabs in sidebar", "vertical tabs", "layout"], symbol: "rectangle.topthird.inset.filled"),
+            KeyAction(id: "toggleBookmarksBar", name: "Show Bookmarks Bar", section: .view, shortcuts: [Shortcut("b", cmdShift)],
+                      triggers: ["bookmarks", "bookmarks bar", "favorites bar"], symbol: "bookmark"),
             // Who the page talks to, and the way to block them (PrivacyPanelView).
             KeyAction(id: "togglePrivacyPanel", name: "Show Privacy Panel", section: .view, shortcuts: [],
                       triggers: ["privacy", "trackers", "tracking", "shield", "who is tracking me"], symbol: "shield.lefthalf.filled"),

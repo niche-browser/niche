@@ -460,6 +460,11 @@ public struct AppSettings: Codable, Equatable {
     /// Arc's "Show Full URL" on the toolbar address's menu (toolbarShowFullURLsEnabledPreference):
     /// the normal bar shows the host and the dimmer path. Off like Arc, which shows the host only.
     public var toolbarShowsFullURL: Bool = false
+    /// Where a window keeps its tabs: down the sidebar (Arc's way, the default) or in a strip across
+    /// the top with the toolbar and the bookmarks bar under it (`WindowLayout`, docs/design.md).
+    public var windowLayout: WindowLayout = .sidebar
+    /// With the tabs across the top: the space's pinned tabs and folders in a bar under the toolbar.
+    public var showBookmarksBar: Bool = true
     public var hasSeenImportPrompt: Bool = false
     /// Arc's per-site Developer Mode (⌃D): the toolbar shows the full URL in
     /// monospace with the developer icons, and the nav buttons move to the sidebar.
@@ -643,8 +648,13 @@ public struct AppSettings: Codable, Equatable {
     /// Arc's developer bar on a Developer Mode site even with the toolbar hidden (#185). A
     /// split's panes always carry bars (#178); the shell adds that rule.
     public func showsBar(above url: String?) -> Bool {
-        showToolbar || url.map(isDeveloperMode) == true
+        !tabsOnTop && (showToolbar || url.map(isDeveloperMode) == true)
     }
+    /// The tabs are in a strip across the top of the window.
+    public var tabsOnTop: Bool { windowLayout == .top }
+    /// A bar with the address is on screen above the page: the toolbar, or the one that comes
+    /// with the tabs across the top. The sidebar's header then leaves the address to it.
+    public var toolbarShown: Bool { tabsOnTop || showToolbar }
     public mutating func toggleDeveloperMode(url: String) {
         guard let k = AppSettings.siteKey(for: url) else { return }
         let on = isDeveloperMode(url: url)
@@ -835,6 +845,8 @@ extension AppSettings {
         showSpaceHeaderOnSingleSpace = try c.decodeIfPresent(Bool.self, forKey: .showSpaceHeaderOnSingleSpace) ?? true
         sharedFavorites = try c.decodeIfPresent(Bool.self, forKey: .sharedFavorites) ?? false
         edgeToEdgeContent = try c.decodeIfPresent(Bool.self, forKey: .edgeToEdgeContent) ?? false
+        windowLayout = (try? c.decodeIfPresent(WindowLayout.self, forKey: .windowLayout)) ?? .sidebar
+        showBookmarksBar = try c.decodeIfPresent(Bool.self, forKey: .showBookmarksBar) ?? true
         perfRecording = try c.decodeIfPresent(Bool.self, forKey: .perfRecording) ?? Self.perfRecordingDefault
         perfHidesSiteNames = try c.decodeIfPresent(Bool.self, forKey: .perfHidesSiteNames) ?? false
         tidyTabs = try c.decodeIfPresent(Bool.self, forKey: .tidyTabs) ?? true
@@ -918,6 +930,28 @@ extension TabData {
         liveGoneAt = try c.decodeIfPresent(Date.self, forKey: .liveGoneAt)
         themeColor = try c.decodeIfPresent(String.self, forKey: .themeColor)
         homeTitle = try c.decodeIfPresent(String.self, forKey: .homeTitle)
+    }
+}
+
+/// Where a window keeps its tabs.
+public enum WindowLayout: String, Codable, CaseIterable, Sendable {
+    /// Down the sidebar, with the spaces, favorites and pinned tabs: Arc's way.
+    case sidebar
+    /// In a strip across the top, over the toolbar and the bookmarks bar: Chrome's and Safari's way.
+    case top
+
+    public var title: String {
+        switch self {
+        case .sidebar: "Sidebar"
+        case .top: "Tabs on top"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .sidebar: "Tabs, favorites and spaces down the side."
+        case .top: "A tab strip, the address and your bookmarks across the top."
+        }
     }
 }
 

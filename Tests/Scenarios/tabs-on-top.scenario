@@ -1,0 +1,92 @@
+# Tabs across the top (17 Nov 2026): the window's second layout, for people coming from Chrome
+# and Safari. A tab strip in the title row, the toolbar with the address under it, and the
+# space's pinned tabs and folders as a bookmarks bar under that; the sidebar comes with ⌘S.
+# Everything here is read from what the strip and the bar say they show, never from pixels.
+budget rss=800 stalls50=14
+
+niche://open?url=${PAGE}?n=1
+niche://open?url=${PAGE}?n=2
+niche://open?url=${PAGE}?n=3
+wait 2
+
+# With the tabs in the sidebar there is no strip.
+niche://debug?tabStrip=sidebar
+expect-log tab strip\[sidebar\] off
+
+# Across the top: the three tabs at their full width, the newest last (beside New Tab) and
+# open, the traffic lights at the start of the strip, the sidebar away, and no bar on the page's
+# own card (the bar is the window's now).
+niche://debug?windowLayout=top
+wait 1
+niche://debug?tabStrip=top
+expect-log tab strip\[top\] favorites=0 items=3 selected=2 tab-width=200 titled=1 scrolls=0 .* lead=80 lights=1 chrome=82 sidebar=0 card-bars=0
+niche://debug?bookmarksBar=top
+expect-log bookmarks bar\[top\] items=0 folders=0 shown=0 selected=- hidden=1
+
+# Pinning the open tab takes it out of the strip and into the bookmarks bar, which comes out
+# under the toolbar; the tab stays open, so the bar's item is the selected one.
+niche://action/pinTab
+wait 1
+niche://debug?tabStrip=pinned
+expect-log tab strip\[pinned\] favorites=0 items=2 selected=- .* chrome=112
+niche://debug?bookmarksBar=pinned
+expect-log bookmarks bar\[pinned\] items=1 folders=0 shown=1 selected=0 hidden=0
+
+# A folder is a bookmark too.
+niche://action/newFolder
+wait 1
+niche://debug?bookmarksBar=folder
+expect-log bookmarks bar\[folder\] items=2 folders=1 shown=2
+
+# View ▸ Hide Bookmarks Bar gives the page the room back, and Show brings it out again.
+niche://action/toggleBookmarksBar
+wait 1
+niche://debug?tabStrip=nobar
+expect-log tab strip\[nobar\] .* chrome=82
+niche://action/toggleBookmarksBar
+wait 1
+niche://debug?tabStrip=bar
+expect-log tab strip\[bar\] .* chrome=112
+
+# ⌘S brings the sidebar out beside the page: the strip moves over, and the traffic lights are
+# the sidebar's, so the strip no longer keeps room for them.
+niche://action/toggleSidebar
+wait 1
+niche://debug?tabStrip=sidebarOut
+expect-log tab strip\[sidebarOut\] .* lead=8 lights=1 chrome=112 sidebar=1 card-bars=0
+niche://action/toggleSidebar
+wait 1
+niche://debug?tabStrip=sidebarAway
+expect-log tab strip\[sidebarAway\] .* lead=80 lights=1 chrome=112 sidebar=0
+
+# Another space has its own tabs and its own bookmarks; coming back shows the first one's.
+niche://debug?newSpace=Second&preset=9
+wait 1
+niche://debug?tabStrip=second
+expect-log tab strip\[second\] favorites=0 items=0 selected=- .* chrome=82
+niche://action/previousSpace
+wait 1
+niche://debug?tabStrip=first
+expect-log tab strip\[first\] favorites=0 items=2 .* chrome=112
+
+# A new window starts without the sidebar, which would list the same tabs twice.
+niche://action/newWindow
+wait 2
+niche://debug?tabStrip=newWindow
+expect-log tab strip\[newWindow\] .* lights=1 .* sidebar=0 card-bars=0
+niche://action/closeWindow
+wait 1
+
+# The layout is a setting: it is there after a relaunch.
+relaunch
+wait 3
+niche://debug?tabStrip=relaunched
+expect-log tab strip\[relaunched\] favorites=0 items=2 .* lights=1 chrome=112 sidebar=0 card-bars=0
+
+# Back to the sidebar: the strip goes and the sidebar returns.
+niche://debug?windowLayout=sidebar
+wait 1
+niche://debug?tabStrip=back
+expect-log tab strip\[back\] off
+niche://debug?sidebarShown=back
+expect-log sidebar shown back: visible=1

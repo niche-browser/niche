@@ -15,6 +15,13 @@ final class PaneToolbarView: NSView {
     static let rightGap: CGFloat = 4
     /// Split view: the pane's tab (nil = the window's selected tab).
     var paneTabID: UUID? { didSet { if paneTabID != oldValue { sync() } } }
+    /// The window's own bar under the tab strip (`WindowLayout.top`), not a page card's: it sits on
+    /// the space's colour with the address in a field, and follows the focused pane in a split.
+    var onChrome = false { didSet { if onChrome != oldValue { sync() } } }
+    /// The bar became, or stopped being, the taller developer bar.
+    var onHeightChange: (() -> Void)?
+    /// 32 pt, or Arc's 40 pt developer bar.
+    var barHeight: CGFloat { model.kind == .developer ? NicheMetrics.developerToolbarHeight : NicheMetrics.toolbarHeight }
     private let store: SidebarStore
     private let ui: SidebarUIState
     private let actions: SidebarActions
@@ -43,6 +50,8 @@ final class PaneToolbarView: NSView {
         var placeholder = NSColor.tertiaryLabelColor
         var closeTint = NSColor.secondaryLabelColor
         var hairline: NSColor?
+        /// The plate behind the address on the window's own bar (`onChrome`).
+        var field: NSColor?
         var dividerColor = NSColor.clear
         /// The plate under a hovered button: dark on a light bar, light on a dark one, so it shows
         /// on any page (a white plate vanished on a white bar).
@@ -68,6 +77,8 @@ final class PaneToolbarView: NSView {
     /// The shield with the page's blocked count, before the right-hand buttons (ToolbarPrivacyChip).
     private let privacyChip = ToolbarPrivacyChip()
     private let placeholderLabel = NSTextField.sidebarLabel(size: Design.TextSize.body.rawValue)
+    /// The address field's plate on the window's own bar; presses go through it to the bar.
+    private let fieldPlate = ToolbarFieldPlate()
     private let hairline = NSView()
     private let devDivider = NSView()
     /// Arc's rule between the developer buttons and the extensions.
@@ -97,6 +108,11 @@ final class PaneToolbarView: NSView {
         stripes.isHidden = true
         addSubview(stripes)
         addSubview(sheen)
+        fieldPlate.wantsLayer = true
+        fieldPlate.layer?.cornerRadius = Design.Radius.row
+        fieldPlate.layer?.cornerCurve = .continuous
+        fieldPlate.isHidden = true
+        addSubview(fieldPlate)
         placeholderLabel.stringValue = "Search or Enter URL…"
         urlButton.action = { [weak self] in self?.editURL() }
         urlButton.onCopy = { [weak self] in self?.copyURL() }
@@ -201,12 +217,12 @@ final class PaneToolbarView: NSView {
         // Arc's toolbar colour (ToolbarColor): the page's report, else the tab's last colour, else
         // white (MainWindowController.toolbarColors uses the same rule for the card behind the bar).
         // The tab's own colour counts until its page is live: retarget builds this before it is.
-        let onCard = m.kind == .normal || m.kind == .developer
+        let onCard = !onChrome && (m.kind == .normal || m.kind == .developer)
         let cardHex = ToolbarColor.hex(reported: nav.themeColor, remembered: item?.tab?.themeColor, ground: nav.pageColor)
         // A page that has drawn nothing yet starts on the canvas, and so does its bar.
         let canvas = NicheBrowser.pageCanvasColor
         let canvasIsLight = (canvas.usingColorSpace(.sRGB)?.brightnessComponent ?? 1) > 0.6
-        let light = cardHex.flatMap(HexColor.luminance).map { $0 > 0.6 } ?? canvasIsLight
+        let light = onChrome ? !palette.isDark : cardHex.flatMap(HexColor.luminance).map { $0 > 0.6 } ?? canvasIsLight
         if onCard {
             m.fill = cardHex.map { NSColor(hex: $0) } ?? canvas
             m.fg = Design.barInk(onLight: light)
@@ -214,12 +230,13 @@ final class PaneToolbarView: NSView {
             m.hover = Design.barFill(.hover, onLight: light)
         } else {
             let onLight = !palette.isDark
-            m.fill = m.kind == .emptyPane ? .clear : Design.barFill(.subtle, onLight: onLight).withAlphaComponent(Design.Fill.subtle.rawValue - 0.01)
-            m.fg = NSColor(palette.textSecondary)
-            m.fgDim = NSColor(palette.textTertiary)
+            m.fill = m.kind == .emptyPane || onChrome ? .clear : Design.barFill(.subtle, onLight: onLight).withAlphaComponent(Design.Fill.subtle.rawValue - 0.01)
+            m.fg = NSColor(onChrome ? palette.textPrimary : palette.textSecondary)
+            m.fgDim = NSColor(onChrome ? palette.textSecondary : palette.textTertiary)
             m.hover = Design.barFill(.hover, onLight: onLight)
             // No hairline under the bar on the card: the bar and the page read as one surface.
-            if m.kind != .emptyPane { m.hairline = Design.barFill(.hover, onLight: onLight) }
+            if m.kind != .emptyPane, !onChrome { m.hairline = Design.barFill(.hover, onLight: onLight) }
+            if onChrome { m.field = Design.barFill(.hover, onLight: onLight) }
         }
         m.placeholder = NSColor(palette.textTertiary)
         m.closeTint = m.kind == .emptyPane ? NSColor(palette.textSecondary) : m.fgDim
@@ -294,6 +311,8 @@ final class PaneToolbarView: NSView {
             layer?.removeAnimation(forKey: "barFade")
         }
         layer?.backgroundColor = m.fill.cgColor
+        fieldPlate.layer?.backgroundColor = m.field?.cgColor
+        if old.kind != m.kind, (old.kind == .developer) != (m.kind == .developer) { onHeightChange?() }
         stripes.isHidden = !m.stripes
         sheen.ink = m.fg
         sheen.setRunning(m.kind == .normal && m.isLoading)
@@ -515,6 +534,8 @@ final class PaneToolbarView: NSView {
         let rightStart = rx
         // The middle, between the groups with the HStack's 6 pt spacing around it.
         let a = leftEnd + (left.isEmpty ? 0 : 6), b = rightStart - (right.isEmpty ? 0 : 6)
+        fieldPlate.isHidden = m.field == nil || m.kind == .developer
+        fieldPlate.frame = NSRect(x: a, y: (h - bh) / 2, width: max(0, b - a), height: bh)
         switch m.kind {
         case .normal:
             // Spacer(min 8) either side, the URL centred between them.
@@ -583,7 +604,10 @@ final class PaneToolbarView: NSView {
                 self?.store.settings.toolbarShowsFullURL.toggle()
             }))
         }
-        menu.addItem(ToolbarMenuAction.item("Hide Toolbar", shortcut: "toggleToolbar", { [weak self] in self?.store.settings.showToolbar = false }))
+        // The window's own bar stays with the tab strip.
+        if !onChrome {
+            menu.addItem(ToolbarMenuAction.item("Hide Toolbar", shortcut: "toggleToolbar", { [weak self] in self?.store.settings.showToolbar = false }))
+        }
         return menu
     }
 
@@ -616,12 +640,21 @@ final class PaneToolbarView: NSView {
     override func mouseDragged(with event: NSEvent) { press.drag(event) }
     override func mouseUp(with event: NSEvent) {
         guard press.finish() else { return }
-        if !placeholderLabel.isHidden, placeholderLabel.frame.contains(convert(event.locationInWindow, from: nil)) {
+        let p = convert(event.locationInWindow, from: nil)
+        if !placeholderLabel.isHidden, placeholderLabel.frame.contains(p) {
+            editURL()
+        } else if !fieldPlate.isHidden, fieldPlate.frame.contains(p) {
+            // The whole field takes a click, as an address field does.
             editURL()
         } else if let id = paneTabID {
             actions.focusPane(id)
         }
     }
+}
+
+/// The address field's plate: drawn, never pressed (the bar under it takes the press).
+private final class ToolbarFieldPlate: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 private final class ToolbarMenuAction: NSObject {

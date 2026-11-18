@@ -192,6 +192,13 @@ instance takes its filter lists from `NICHE_SHIELDS_SOURCE` (a `file://` folder,
 the network. A test site with third parties is the run's own server under other
 names: `--host-resolver-rules="MAP *.test 127.0.0.1"` on Niche's command line.
 
+Tabs on top: `niche://debug?windowLayout=top|sidebar` sets where the tabs are, as Settings ▸
+Appearance does; `tabStrip=<label>` and `bookmarksBar=<label>` log what the strip and the bar
+show (counts, the selected index, a tab's width, whether titles show and the run scrolls, the
+chrome's height, whether the traffic lights and the sidebar show). `newSpace=<title>&preset=<n>`
+adds a space in one of the preset themes and puts it in front, and `onboardingStep=cover|privacy|
+personalization|outro` opens the onboarding at that step.
+
 `niche://debug?dragEnd=<text>` ends a drag of the window's tab whose URL holds the text, let go
 with nothing taking it, the way a drag out of the sidebar ends: outside every Niche window it opens
 in a new Blank Window (`&at=x,y` picks the point, from the screen's top left).

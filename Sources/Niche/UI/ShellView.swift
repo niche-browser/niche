@@ -142,7 +142,21 @@ final class ShellView: NSView {
     /// Whether the cards carry their bars. Arc keeps every pane's bar in a split even with the
     /// toolbar hidden (View ▸ Show Toolbar is disabled while a split is open, GitHub #178).
     var panesShowBars: Bool { barsShown(panes: paneCards.count, fullscreen: contentFullscreen) }
-    private func barsShown(panes: Int, fullscreen: Bool) -> Bool { !fullscreen && (showToolbar || panes > 1) }
+    /// With the tabs across the top the bar is the window's (`topChrome`), over every pane.
+    private func barsShown(panes: Int, fullscreen: Bool) -> Bool { !fullscreen && topChromeHeight == 0 && (showToolbar || panes > 1) }
+    /// The tab strip, toolbar and bookmarks bar above the pages (TopChromeView) while the tabs are
+    /// across the top; the window controller makes it and says how tall it is.
+    var topChrome: NSView? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            if let topChrome { addSubview(topChrome, positioned: .below, relativeTo: sidebarHost) }
+            needsLayout = true
+        }
+    }
+    /// What the top chrome takes above the pages; 0 with the tabs in the sidebar.
+    var topChromeHeight: CGFloat = 0 { didSet { if topChromeHeight != oldValue { needsLayout = true } } }
+    /// A bar with the address stands above the pages: a card's own, or the window's.
+    var barAbovePages: Bool { panesShowBars || (topChromeHeight > 0 && !contentFullscreen) }
     var hasTab = false {
         didSet {
             needsLayout = true
@@ -672,13 +686,25 @@ final class ShellView: NSView {
         var content: NSRect
         var cornerRadius: CGFloat
         var sidebarCorner: CGFloat
+        /// The top chrome's place: above the window while a page fills it, empty with none.
+        var chrome: NSRect = .zero
     }
 
     func frames(sidebarVisible: Bool, floating: Bool, fullscreen: Bool, width: CGFloat) -> Frames {
         let b = bounds
+        let chromeH = topChromeHeight
         if fullscreen {
             return Frames(sidebar: NSRect(x: -width, y: 0, width: width, height: b.height),
-                          handle: .zero, content: b, cornerRadius: .zero, sidebarCorner: .zero)
+                          handle: .zero, content: b, cornerRadius: .zero, sidebarCorner: .zero,
+                          chrome: NSRect(x: 0, y: b.height, width: b.width, height: chromeH))
+        }
+        // The top chrome stands over the pages' column, beside the sidebar when that is out; the
+        // card under it starts where the chrome ends (its own bottom padding is the gap).
+        func under(_ content: NSRect, from x: CGFloat) -> (content: NSRect, chrome: NSRect) {
+            guard chromeH > 0 else { return (content, .zero) }
+            var c = content
+            c.size.height = max(0, b.height - chromeH - c.minY)
+            return (c, NSRect(x: x, y: b.height - chromeH, width: max(0, b.width - x), height: chromeH))
         }
         // Edge to edge the card fills what the sidebar leaves, square; the window's own
         // corners round it where they meet.
@@ -686,20 +712,22 @@ final class ShellView: NSView {
         let radius = edgeToEdge ? 0 : NicheMetrics.contentCornerRadius
         if sidebarVisible {
             let content = NSRect(x: width, y: inset, width: max(0, b.width - width - inset), height: max(0, b.height - 2 * inset))
+            let top = under(content, from: width)
             return Frames(sidebar: NSRect(x: 0, y: 0, width: width, height: b.height),
                           handle: NSRect(x: width - 4, y: 0, width: 8, height: b.height),
-                          content: content, cornerRadius: radius, sidebarCorner: 0)
+                          content: top.content, cornerRadius: radius, sidebarCorner: 0, chrome: top.chrome)
         }
+        let top = under(b.insetBy(dx: inset, dy: inset), from: 0)
         if floating {
             // The floating sidebar hovers over the page; the card does not move (Arc).
             let m = FloatingSidebarGeometry.margin
             return Frames(sidebar: NSRect(x: m, y: m, width: width, height: b.height - 2 * m),
-                          handle: .zero, content: b.insetBy(dx: inset, dy: inset), cornerRadius: radius, sidebarCorner: 12)
+                          handle: .zero, content: top.content, cornerRadius: radius, sidebarCorner: 12, chrome: top.chrome)
         }
         // Sidebar hidden: Arc keeps the rounded card floating in its inset (measured 25 Oct:
         // card edge 10 pt from the window edge after ⌘S), with a sidebar toggle in the bar.
         return Frames(sidebar: NSRect(x: -width - 20, y: 0, width: width, height: b.height),
-                      handle: .zero, content: b.insetBy(dx: inset, dy: inset), cornerRadius: radius, sidebarCorner: 0)
+                      handle: .zero, content: top.content, cornerRadius: radius, sidebarCorner: 0, chrome: top.chrome)
     }
 
     private var cardCornerRadius: CGFloat = NicheMetrics.contentCornerRadius
@@ -726,6 +754,11 @@ final class ShellView: NSView {
         resizeHandle.frame = f.handle
         resizeHandle.isHidden = f.handle.isEmpty || !sidebarResizable
         contentContainer.frame = f.content
+        if let topChrome {
+            topChrome.isHidden = f.chrome.isEmpty || contentFullscreen
+            if !f.chrome.isEmpty, topChrome.frame != f.chrome { topChrome.frame = f.chrome }
+            topChrome.alphaValue = 1
+        }
         placeLoadingIndicator(over: f.content)
         cardCornerRadius = f.cornerRadius
         sidebarHost.layer?.cornerRadius = f.sidebarCorner
@@ -744,7 +777,8 @@ final class ShellView: NSView {
     /// edge, fullscreen).
     private func placeLoadingIndicator(over content: NSRect) {
         let margin = bounds.maxY - content.maxY
-        loadingIndicator.isHidden = margin < CGFloat(LoadingIndicator.height) + 2
+        // With the tabs across the top the margin is the chrome, whose tabs and toolbar say a page loads.
+        loadingIndicator.isHidden = margin < CGFloat(LoadingIndicator.height) + 2 || topChromeHeight > 0
         loadingIndicator.frame = loadingIndicatorFrame(over: content)
     }
 
@@ -935,6 +969,16 @@ final class ShellView: NSView {
         }
         layoutContentChildren()
         animatingFrames = true
+        // The top chrome comes down from above the window as it arrives, and goes back up as it leaves.
+        let chromeLeaves = target.chrome.isEmpty || fullscreen
+        if let topChrome {
+            if topChrome.isHidden, !chromeLeaves {
+                topChrome.frame = target.chrome.offsetBy(dx: 0, dy: target.chrome.height)
+                topChrome.alphaValue = 0
+                topChrome.isHidden = false
+                topChrome.layoutSubtreeIfNeeded()
+            }
+        }
         // Arc 1.172.1's ⌘S at 60 fps (NicheCore SidebarMotion): about 43 / 72 / 89 / 97 % of the travel
         // after frames 1–4.
         let c = SidebarMotion.curve
@@ -946,6 +990,10 @@ final class ShellView: NSView {
             ctx.allowsImplicitAnimation = true
             if !sidebarDetached { sidebarHost.animator().frame = target.sidebar }
             contentContainer.animator().frame = target.content
+            if let topChrome, !topChrome.isHidden {
+                topChrome.animator().frame = chromeLeaves ? topChrome.frame.offsetBy(dx: 0, dy: topChrome.frame.height) : target.chrome
+                topChrome.animator().alphaValue = chromeLeaves ? 0 : 1
+            }
             loadingIndicator.animator().frame = loadingIndicatorFrame(over: target.content)
             cardCornerRadius = target.cornerRadius
             if paneCards.count == 1, let c = paneCards.first { c.cornerRadius = target.cornerRadius }

@@ -1,5 +1,20 @@
 import AppKit
 
+/// What a tab's menu needs from where it opens: the sidebar's list, or the tab strip and the
+/// bookmarks bar across the top of a window.
+@MainActor
+protocol TabMenuHost: AnyObject {
+    var store: SidebarStore { get }
+    var ui: SidebarUIState { get }
+    var actions: SidebarActions { get }
+    var favicons: FaviconCache { get }
+    /// The tabs a close from `id` acts on: every picked tab when it is one of them.
+    func closeGroup(for id: UUID) -> [UUID]
+    func closeTabs(_ ids: [UUID])
+}
+
+extension SpaceListView: TabMenuHost {}
+
 /// The tab list's context menus (the SwiftUI rows' .contextMenu, item for item).
 @MainActor
 enum SidebarMenus {
@@ -48,7 +63,7 @@ enum SidebarMenus {
     // MARK: Tab groups
 
     /// Arc's Tab Group Context Menu: one item, "Remove header" (the tabs stay, loose).
-    static func tabGroup(_ id: UUID, list: SpaceListView) -> NSMenu {
+    static func tabGroup(_ id: UUID, list: TabMenuHost) -> NSMenu {
         let menu = menu()
         add(menu, "Remove header") { list.store.removeGroupHeader(id) }
         return menu
@@ -56,9 +71,14 @@ enum SidebarMenus {
 
     // MARK: Tabs
 
-    static func tab(_ m: TabRowModel, list: SpaceListView) -> NSMenu {
+    static func tab(_ m: TabRowModel, list: TabMenuHost) -> NSMenu {
+        tab(m.id, pinned: m.pinned, navigatedAway: m.navigatedAway, list: list)
+    }
+
+    /// A tab's menu wherever the tab is drawn: `pinned` and `navigatedAway` as its row has them.
+    static func tab(_ id: UUID, pinned: Bool, navigatedAway: Bool, list: TabMenuHost) -> NSMenu {
         let store = list.store, ui = list.ui, actions = list.actions
-        let id = m.id
+        let m = (pinned: pinned, navigatedAway: navigatedAway)
         let menu = menu()
         let group = list.closeGroup(for: id)
         if group.count > 1 {
@@ -153,7 +173,7 @@ enum SidebarMenus {
     }
 
     /// Move to Folder / New Folder for this tab, or for every picked tab.
-    private static func folderItems(_ menu: NSMenu, _ ids: [UUID], list: SpaceListView) {
+    private static func folderItems(_ menu: NSMenu, _ ids: [UUID], list: TabMenuHost) {
         let store = list.store, ui = list.ui
         let folders = store.children(of: store.focusedSpace(window: ui.windowID).pinnedContainerID).filter { $0.isFolder && !$0.isLiveFolder }
         if !folders.isEmpty {
