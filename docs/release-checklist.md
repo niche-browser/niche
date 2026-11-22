@@ -115,6 +115,15 @@ built release app with a test profile. Note anything that fails in the release's
   mid-download) carries on from the bytes it has. A long name ends short of the sidebar's edge.
   Right-click a finished row: Move to Trash, Show in Finder, Copy Download Link; Clear empties
   the list and leaves the files.
+- While a download runs, Finder shows it as `name.crdownload` (or `Unconfirmed <n>.crdownload` for
+  a .dmg, .zip or .pkg while Chromium checks it) with a progress bar, and so does the Downloads
+  stack in the Dock. A file downloaded twice gets a free name ("big (1).zip"); with "Ask where to
+  save", choosing an existing file and Replace replaces it. A `.dmg` started by a page without a click (a first visit to the site)
+  is held: the list opens by itself with the row in the danger colour ("This kind of file can harm
+  your Mac") and Keep / Delete; Keep finishes it under its own name, Delete leaves nothing behind.
+  A file over plain `http://` says "Insecure download" the same way (Chromium 158 holds every
+  one). With tabs on top or the sidebar hidden, a held download shows a toast whose Show opens
+  Library ▸ Downloads.
 - Browse to a news site with the privacy panel closed, then click the shield in the address
   field: the panel has the whole page at once (companies, "On this page", "Who is here") and asks
   for no reload. Go to another page and Back: each page shows its own record. In a window about

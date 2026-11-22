@@ -47,6 +47,13 @@ public enum DownloadList {
         public var url = ""
         /// When Chromium last reported on it.
         public var updated: Date
+        /// What Chromium found unsafe about it: held until Keep or Delete.
+        public var danger: DownloadDanger?
+        /// Chromium blocked the file outright.
+        public var blocked = false
+        /// Where the bytes are while it runs (a .crdownload beside `path`, or Chromium's "Unconfirmed"
+        /// name for a held one); "" when Chromium gave none.
+        public var partPath = ""
 
         public init(id: UInt32, name: String, path: String, started: Date, received: Int64, total: Int64, percent: Int, updated: Date) {
             self.id = id
@@ -62,7 +69,11 @@ public enum DownloadList {
         /// Chromium's next report on this download. A report on one that was cancelled or has
         /// failed can come without its name, path or sizes: the row keeps what it knew.
         public mutating func take(name: String, path: String, url: String, received: Int64, total: Int64, percent: Int,
-                                  failed: Bool, cancelled: Bool, paused: Bool, now: Date) {
+                                  failed: Bool, cancelled: Bool, paused: Bool, now: Date,
+                                  danger: DownloadDanger? = nil, blocked: Bool = false, partPath: String = "") {
+            self.danger = danger
+            self.blocked = blocked
+            if !partPath.isEmpty { self.partPath = partPath }
             if sampleAt == .distantPast {
                 (sampleBytes, sampleAt) = (received, now)
             } else if let speed = DownloadRow.speed(fromBytes: sampleBytes, at: sampleAt, toBytes: received, at: now) {
@@ -86,9 +97,13 @@ public enum DownloadList {
         }
 
         public var running: Bool { !failed && !cancelled }
+        /// Held for the user: no bytes are coming until Keep.
+        public var awaitingDecision: Bool { running && danger != nil }
         public var row: DownloadRow.State {
+            if blocked { return .blocked }
             if failed { return .failed }
             if cancelled { return .cancelled }
+            if let danger { return .held(danger) }
             if paused { return .paused(received: received, total: total) }
             return .downloading(received: received, total: total, bytesPerSecond: bytesPerSecond)
         }

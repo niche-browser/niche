@@ -10,7 +10,19 @@ public enum DownloadRow {
         case paused(received: Int64, total: Int64)
         case failed
         case cancelled
+        /// Chromium holds it until Keep or Delete (DownloadDanger).
+        case held(DownloadDanger)
+        /// Chromium blocked the file outright.
+        case blocked
         case finished(at: Date)
+
+        /// Said in the danger colour: it failed, or Chromium held or blocked the file.
+        public var isWarning: Bool {
+            switch self {
+            case .failed, .held, .blocked: true
+            default: false
+            }
+        }
 
         /// The state in a word, for the log.
         public var word: String {
@@ -19,6 +31,8 @@ public enum DownloadRow {
             case .paused: "paused"
             case .failed: "failed"
             case .cancelled: "cancelled"
+            case .held: "held"
+            case .blocked: "blocked"
             case .finished: "finished"
             }
         }
@@ -49,6 +63,8 @@ public enum DownloadRow {
             return "Paused — " + bytes(received) + (total > 0 ? " of " + bytes(total) : "")
         case .failed: return "Failed to Download"
         case .cancelled: return "Cancelled"
+        case let .held(danger): return detail == .brief ? danger.brief : danger.subtitle
+        case .blocked: return "Blocked"
         // At least a second: a row read just as it finished said "in 0 seconds".
         case let .finished(at): return age.localizedString(fromTimeInterval: -max(1, now.timeIntervalSince(at)))
         }

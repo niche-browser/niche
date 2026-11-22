@@ -38,6 +38,8 @@ enum DownloadsTrayMetrics {
     static let sweep: TimeInterval = 1.2
     /// The track under the bar's fill, as a share of the ink.
     static let trackAlpha: CGFloat = 0.14
+    /// How long a list opened for a held download stays up untouched (as long as the rename card).
+    static let attentionTime: TimeInterval = 8
     static func listHeight(rows: Int) -> CGFloat { rows == 0 ? 0 : header + CGFloat(rows) * rowPitch - (rowPitch - thumbnail) }
     /// The view reaches this far past the list, under its last row (Arc: the last row ends 2 pt below the area).
     static let overhang: CGFloat = 4
@@ -47,6 +49,22 @@ enum DownloadsTrayMetrics {
 }
 
 extension SidebarUIState {
+    /// A download Chromium held for a decision (DownloadDanger): the list opens on its own, as
+    /// Chrome's bubble does, and closes like a hovered one once the pointer has been and gone, or
+    /// after `attentionTime` untouched.
+    func showDownloadsListForAttention() {
+        downloadsListWork?.cancel()
+        downloadsListOpen = true
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.libraryHovered, !self.downloadsListHovered else { return }
+                self.downloadsListOpen = false
+            }
+        }
+        downloadsListWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + DownloadsTrayMetrics.attentionTime, execute: work)
+    }
+
     func downloadsHoverChanged() {
         downloadsListWork?.cancel()
         let open = (libraryHovered || downloadsListHovered) && !DownloadHistory.shared.recent.isEmpty
@@ -421,7 +439,7 @@ private final class DownloadsTrayRowView: NSView, NSDraggingSource {
             if case .live(let l) = listed { progress.show(.running(l.fraction)) }
         case .paused:
             if case .live(let l) = listed { progress.show(.paused(l.fraction ?? 0)) }
-        case .failed, .cancelled, .finished:
+        case .failed, .cancelled, .held, .blocked, .finished:
             progress.show(nil)
         }
         setButtons(DownloadAction.buttons(for: listed.state))
@@ -436,7 +454,7 @@ private final class DownloadsTrayRowView: NSView, NSDraggingSource {
         guard let listed else { return }
         let s = DownloadRow.subtitle(listed.state, now: now, detail: hovering ? .brief : .compact)
         if age.stringValue != s { age.stringValue = s }
-        age.textColor = listed.state == .failed ? Design.dangerNS : colors.ink(.secondary)
+        age.textColor = listed.state.isWarning ? Design.dangerNS : colors.ink(.secondary)
         setAccessibilityLabel(listed.name + ", " + s)
     }
 

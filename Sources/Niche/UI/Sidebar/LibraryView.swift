@@ -1048,7 +1048,7 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
             switch l.row {
             case .downloading: progress.show(.running(l.fraction))
             case .paused: progress.show(.paused(l.fraction ?? 0))
-            case .failed, .cancelled, .finished: progress.show(nil)
+            case .failed, .cancelled, .held, .blocked, .finished: progress.show(nil)
             }
         }
         setActions(DownloadAction.buttons(for: listed.state))
@@ -1066,7 +1066,7 @@ private final class LibraryItemCell: NSView, NSDraggingSource {
         title.lineBreakMode = .byTruncatingMiddle
         tip?.text = ""
         apply(ink: ink)
-        if listed.state == .failed { detail.textColor = Design.dangerNS }
+        if listed.state.isWarning { detail.textColor = Design.dangerNS }
     }
 
     /// A download's two buttons under the pointer (`DownloadAction.buttons`).

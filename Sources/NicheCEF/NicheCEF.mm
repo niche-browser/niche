@@ -89,6 +89,14 @@ struct NicheDownloadRecord {
     // The profile it belongs to: Retry starts it again there or nowhere.
     std::string profile;
     bool incognito = false;
+    // Chromium's own number for it in its profile, for Niche.keepDownload.
+    uint32_t item = 0;
+    // From the "Niche.download" message (safe-downloads.patch): where the file goes once done,
+    // and what Chromium found unsafe about it.
+    std::string target;
+    std::string danger;
+    bool blocked = false;
+    bool silent = false;
 };
 static std::map<uint32_t, NicheDownloadRecord> g_downloads;
 // Chromium numbers downloads per profile, so two profiles can both have a download 1. The app
@@ -182,6 +190,10 @@ enum NicheMenuCommand {
 // MARK: - Downloads
 
 @implementation NicheDownloadInfo
+- (instancetype)init {
+    if ((self = [super init])) { _targetPath = @""; _danger = @""; }
+    return self;
+}
 @end
 
 @implementation NichePrivacyEvent
@@ -2037,6 +2049,22 @@ public:
             }
             return true;
         }
+        // What CefDownloadItem doesn't carry: where the file goes once done and what Chromium
+        // found unsafe about it (scripts/cef-patches/safe-downloads.patch). Comes just before the
+        // OnDownloadUpdated that carries the change.
+        if (message->GetName() == "Niche.download") {
+            CefRefPtr<CefListValue> args = message->GetArgumentList();
+            if (args->GetSize() < 5) return true;
+            const std::string profile = o ? std::string(o.profilePath.UTF8String ?: "") : "";
+            const uint32_t number = NicheDownloadNumber(profile, o && o.isIncognito, static_cast<uint32_t>(args->GetInt(0)));
+            NicheDownloadRecord& record = g_downloads[number];
+            record.target = args->GetString(1).ToString();
+            const std::string danger = args->GetString(2).ToString(), insecure = args->GetString(3).ToString();
+            record.silent = insecure == "silent";
+            record.danger = !danger.empty() ? danger : (!insecure.empty() && !record.silent ? "insecure" : "");
+            record.blocked = args->GetBool(4);
+            return true;
+        }
         if (message->GetName() == "Niche.activate") {
             CefRefPtr<CefListValue> args = message->GetArgumentList();
             BOOL byPage = args->GetSize() > 0 && args->GetBool(0);
@@ -2426,6 +2454,11 @@ public:
         NicheDownloadRecord& record = g_downloads[number];
         record.profile = profile;
         record.incognito = incognito;
+        record.item = item->GetId();
+        info.targetPath = @(record.target.c_str()) ?: @"";
+        info.danger = @(record.danger.c_str()) ?: @"";
+        info.blocked = record.blocked;
+        info.silent = record.silent;
         record.url = item->GetURL().ToString();
         record.browser = browser ? browser->GetIdentifier() : 0;
         record.interrupted = info.state == NicheDownloadStateInterrupted;
@@ -3248,6 +3281,23 @@ static void MarkProfileExitedCleanly(NSString* profileDir) {
 }
 @end
 
+/// The page to act on a download through: the one it came from, or failing that another of the
+/// same profile (a download belongs to a profile, and so do its cookies). An incognito download
+/// whose window is gone has none for Retry (a new download), but `sameIncognito` lets another
+/// incognito page act on it (Keep): every incognito window shares one context.
+static NicheBrowser* NicheBrowserForDownload(const NicheDownloadRecord& record, bool sameIncognito = false) {
+    NSString* profile = @(record.profile.c_str());
+    NicheBrowser* found = nil;
+    for (NicheBrowser* b in [g_allBrowsers allObjects]) {
+        CefRefPtr<CefBrowser> cef = [b cefBrowser];
+        if (!cef) continue;
+        if (cef->GetIdentifier() == record.browser) return b;
+        if (!found && !record.incognito && !b.isIncognito && [b.profilePath ?: @"" isEqualToString:profile]) found = b;
+        if (!found && record.incognito && sameIncognito && b.isIncognito) found = b;
+    }
+    return found;
+}
+
 @implementation NicheCEFRuntime
 
 + (void)setChromeHosting:(BOOL)enabled { g_chromeHosting = enabled; }
@@ -3483,20 +3533,25 @@ static void NichePublishShieldsModes() {
     return YES;
 }
 
++ (BOOL)keepDownload:(uint32_t)identifier {
+    auto it = g_downloads.find(identifier);
+    if (it == g_downloads.end() || it->second.danger.empty() || !it->second.callback) return NO;
+    NicheBrowser* found = NicheBrowserForDownload(it->second, /*sameIncognito=*/true);
+    if (!found) return NO;
+    NSString* params = [NSString stringWithFormat:@"{\"id\":%u}", it->second.item];
+    [found sendDevToolsMethod:@"Niche.keepDownload" params:params completion:^(NSString* result, NSString* error) {
+        if (error.length) NSLog(@"Niche: keeping a download failed: %@", error);
+    }];
+    return YES;
+}
+
 /// Starts the address again in the browser the download came from, or failing that another
 /// browser of the same profile (a download belongs to a profile, and so do its cookies). An
 /// incognito download whose window is gone is not started anywhere else.
 + (BOOL)restartDownload:(uint32_t)identifier {
     auto it = g_downloads.find(identifier);
     if (it == g_downloads.end() || it->second.url.empty()) return NO;
-    NSString* profile = @(it->second.profile.c_str());
-    NicheBrowser* found = nil;
-    for (NicheBrowser* b in [g_allBrowsers allObjects]) {
-        CefRefPtr<CefBrowser> cef = [b cefBrowser];
-        if (!cef) continue;
-        if (cef->GetIdentifier() == it->second.browser) { found = b; break; }
-        if (!found && !it->second.incognito && !b.isIncognito && [b.profilePath ?: @"" isEqualToString:profile]) found = b;
-    }
+    NicheBrowser* found = NicheBrowserForDownload(it->second);
     CefRefPtr<CefBrowser> cef = found ? [found cefBrowser] : nullptr;
     if (!cef) return NO;
     cef->GetHost()->StartDownload(it->second.url);

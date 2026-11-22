@@ -13,7 +13,8 @@ public enum DownloadProgressRing: Equatable, Sendable {
 
     /// The ring for the downloads Chromium reports. Failed and cancelled ones don't count.
     public static func ring(for live: [DownloadList.Live]) -> DownloadProgressRing {
-        let running = live.filter(\.running)
+        // A held download isn't coming until the user keeps it.
+        let running = live.filter { $0.running && !$0.awaitingDecision }
         guard !running.isEmpty else { return .hidden }
         guard running.allSatisfy({ $0.total > 0 }) else { return .turning }
         let total = running.reduce(Int64(0)) { $0 + $1.total }

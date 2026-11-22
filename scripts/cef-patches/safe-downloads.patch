@@ -1,0 +1,380 @@
+diff --git a/cef/libcef/browser/devtools/devtools_controller.cc b/cef/libcef/browser/devtools/devtools_controller.cc
+--- a/cef/libcef/browser/devtools/devtools_controller.cc
++++ b/cef/libcef/browser/devtools/devtools_controller.cc
+@@ -24,7 +24,10 @@
+ #include "components/performance_manager/public/freezing/freezing.h"
+ #include "components/performance_manager/public/performance_manager.h"
+ #include "content/browser/media/session/media_session_impl.h"
++#include "components/download/public/common/download_item.h"
++#include "content/public/browser/browser_context.h"
+ #include "content/public/browser/devtools_agent_host.h"
++#include "content/public/browser/download_manager.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/render_process_host.h"
+@@ -349,10 +352,41 @@
+   if (!method || !id ||
+       (*method != "Niche.setFreezingVote" && *method != "Niche.getFreezingState" &&
+        *method != "Niche.discard" && *method != "Niche.load" &&
+-       *method != "Niche.mediaSession" && *method != "Niche.autoPictureInPicture")) {
++       *method != "Niche.mediaSession" && *method != "Niche.autoPictureInPicture" &&
++       *method != "Niche.keepDownload")) {
+     return false;
+   }
+   *message_id = *id;
++  if (*method == "Niche.keepDownload") {
++    // Niche (safe-downloads.patch): {"id":N,"method":"Niche.keepDownload",
++    // "params":{"id":<download id>}} keeps a download Chrome held for the user
++    // (a dangerous file, or an insecure download), as Keep in Chrome's
++    // download bubble does. The download is one of this page's profile.
++    const base::DictValue* params = dict->FindDict("params");
++    std::optional<int> download_id = params ? params->FindInt("id") : std::nullopt;
++    content::DownloadManager* manager =
++        contents->GetBrowserContext()->GetDownloadManager();
++    download::DownloadItem* item =
++        manager && download_id && *download_id >= 0
++            ? manager->GetDownload(static_cast<uint32_t>(*download_id))
++            : nullptr;
++    if (!item || item->IsDone()) {
++      *error = "no download held with that id";
++      return true;
++    }
++    const bool insecure = item->IsInsecure();
++    const bool dangerous = item->IsDangerous();
++    if (insecure) {
++      item->ValidateInsecureDownload();
++    }
++    // Validating may finish it; look it up again rather than trust the pointer.
++    item = manager->GetDownload(static_cast<uint32_t>(*download_id));
++    if (dangerous && item && !item->IsDone() && item->IsDangerous()) {
++      item->ValidateDangerousDownload();
++    }
++    result->Set("kept", insecure || dangerous);
++    return true;
++  }
+   if (*method == "Niche.autoPictureInPicture") {
+     HandleNicheAutoPictureInPicture(contents, dict->FindDict("params"), result,
+                                   error);
+diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/browser/download_manager_delegate_impl.cc
+--- a/cef/libcef/browser/download_manager_delegate_impl.cc
++++ b/cef/libcef/browser/download_manager_delegate_impl.cc
+@@ -13,12 +13,14 @@
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "cef/include/cef_download_handler.h"
++#include "cef/include/cef_process_message.h"
+ #include "cef/libcef/browser/browser_host_base.h"
+ #include "cef/libcef/browser/browser_info.h"
+ #include "cef/libcef/browser/browser_info_manager.h"
+ #include "cef/libcef/browser/context.h"
+ #include "cef/libcef/browser/download_item_impl.h"
+ #include "cef/libcef/browser/thread_util.h"
++#include "chrome/browser/download/chrome_download_manager_delegate.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/prefs/pref_service.h"
+@@ -110,6 +112,139 @@
+   std::move(callback).Run(std::move(target_info));
+ }
+ 
++// Niche: the client chose where the file goes; Chrome decides the rest, as for
++// one of its own downloads (ChromeDownloadManagerDelegate::
++// DetermineEmbedderChosenTarget): danger type, insecure download, .crdownload.
++// Before this the client's path was the whole decision, so no download was ever
++// checked or held for the user, and a half-done file carried its final name.
++// `replace`: a file is already at `path`. The client only hands back such a path
++// when the person chose to replace it (its folder mode picks a free name), so it
++// is overwritten, as after Chrome's own save dialog.
++void RunChosenDownloadTarget(base::WeakPtr<DownloadManager> manager,
++                             uint32_t download_id,
++                             download::DownloadTargetCallback callback,
++                             const base::FilePath& path,
++                             bool replace) {
++  DownloadItem* item = manager ? manager->GetDownload(download_id) : nullptr;
++  auto* delegate =
++      manager ? static_cast<ChromeDownloadManagerDelegate*>(
++                    manager->GetDelegate())
++              : nullptr;
++  if (path.empty() || !item || !delegate ||
++      item->GetState() != DownloadItem::IN_PROGRESS) {
++    RunDownloadTargetCallback(std::move(callback), path);
++    return;
++  }
++  delegate->DetermineEmbedderChosenTarget(item, path, replace,
++                                          std::move(callback));
++}
++
++// Niche: what Chrome decided about a download that CefDownloadItem doesn't
++// carry, for the client's download list. Sent as a "Niche.download" process
++// message from PID_BROWSER before the OnDownloadUpdated that carries a change:
++// [0] the download's id, [1] the path the file gets once done (GetFullPath is
++// the .crdownload while it runs; "" until decided), [2] its danger ("" when
++// none, else "file", "url", "content", "uncommon", "unwanted", "host", "policy"
++// (held with no Keep), "other"), [3] its insecure download status ("" when none,
++// else "warn", "block", or "silent" for one Chrome drops without listing it),
++// [4] whether Chrome blocked the file outright (interrupted with FILE_BLOCKED).
++// Held downloads wait for Niche.keepDownload or a cancel.
++std::string NicheDanger(const DownloadItem* item) {
++  if (!item->IsDangerous()) {
++    return std::string();
++  }
++  switch (item->GetDangerType()) {
++    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
++      return "file";
++    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL:
++      return "url";
++    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
++    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_ACCOUNT_COMPROMISE:
++      return "content";
++    case download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
++      return "uncommon";
++    case download::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
++      return "unwanted";
++    case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
++      return "host";
++    // Held by policy or for scanning: Chrome offers no Keep.
++    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED:
++    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE:
++    case download::DOWNLOAD_DANGER_TYPE_SENSITIVE_CONTENT_BLOCK:
++    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_SCAN_FAILED:
++    case download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING:
++    case download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_LOCAL_PASSWORD_SCANNING:
++    case download::DOWNLOAD_DANGER_TYPE_FORCE_SAVE_TO_GDRIVE:
++    case download::DOWNLOAD_DANGER_TYPE_FORCE_SAVE_TO_ONEDRIVE:
++      return "policy";
++    default:
++      return "other";
++  }
++}
++
++std::string NicheInsecure(const DownloadItem* item) {
++  switch (item->GetInsecureDownloadStatus()) {
++    case DownloadItem::InsecureDownloadStatus::WARN:
++      return "warn";
++    case DownloadItem::InsecureDownloadStatus::BLOCK:
++      return "block";
++    // Chrome drops it without a word, and lists nothing.
++    case DownloadItem::InsecureDownloadStatus::SILENT_BLOCK:
++      return "silent";
++    default:
++      return std::string();
++  }
++}
++
++// The last safety sent for an item, so a progress tick sends nothing.
++struct NicheSentSafety : public base::SupportsUserData::Data {
++  std::string state;
++};
++const char kNicheSentSafetyKey[] = "NicheSentSafety";
++
++void NicheSendSafety(CefRefPtr<CefBrowserHostBase> browser,
++                     DownloadItem* item) {
++  const bool blocked =
++      item->GetState() == DownloadItem::INTERRUPTED &&
++      item->GetLastReason() == download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED;
++  const std::string danger = NicheDanger(item);
++  const std::string insecure =
++      item->IsInsecure() || item->GetInsecureDownloadStatus() ==
++                                DownloadItem::InsecureDownloadStatus::SILENT_BLOCK
++          ? NicheInsecure(item)
++          : "";
++  const std::string target = item->GetTargetFilePath().AsUTF8Unsafe();
++  const std::string state = target + "|" + danger + "|" + insecure + "|" +
++                            (blocked ? "1" : "0");
++  auto* sent =
++      static_cast<NicheSentSafety*>(item->GetUserData(kNicheSentSafetyKey));
++  if (sent ? sent->state == state : state == "|||0") {
++    return;
++  }
++  // CEF drops a message with no frame to carry it; send it with a later update
++  // rather than remember it as sent.
++  CefRefPtr<CefClient> client = browser->GetClient();
++  CefRefPtr<CefFrame> frame = browser->GetMainFrame();
++  if (!client || !frame) {
++    return;
++  }
++  if (!sent) {
++    auto data = std::make_unique<NicheSentSafety>();
++    sent = data.get();
++    item->SetUserData(kNicheSentSafetyKey, std::move(data));
++  }
++  sent->state = state;
++  CefRefPtr<CefProcessMessage> message =
++      CefProcessMessage::Create("Niche.download");
++  CefRefPtr<CefListValue> args = message->GetArgumentList();
++  args->SetInt(0, static_cast<int>(item->GetId()));
++  args->SetString(1, target);
++  args->SetString(2, danger);
++  args->SetString(3, insecure);
++  args->SetBool(4, blocked);
++  client->OnProcessMessageReceived(browser.get(), frame, PID_BROWSER, message);
++}
++
+ // CefBeforeDownloadCallback implementation.
+ class CefBeforeDownloadCallbackImpl : public CefBeforeDownloadCallback {
+  public:
+@@ -195,18 +330,24 @@
+         suggested_path = suggested_name;
+       }
+     }
++
++    // Niche: a file already at the client's path was chosen to be replaced
++    // (RunChosenDownloadTarget). Read here, off the UI thread.
++    const bool replace =
++        !download_path.empty() && base::PathExists(suggested_path);
+ 
+     CEF_POST_TASK(
+         CEF_UIT,
+         base::BindOnce(&CefBeforeDownloadCallbackImpl::ChooseDownloadPath,
+                        manager, download_id, suggested_path, show_dialog,
+-                       std::move(callback)));
++                       replace, std::move(callback)));
+   }
+ 
+   static void ChooseDownloadPath(base::WeakPtr<DownloadManager> manager,
+                                  uint32_t download_id,
+                                  const base::FilePath& suggested_path,
+                                  bool show_dialog,
++                                 bool replace,
+                                  download::DownloadTargetCallback callback) {
+     if (!manager) {
+       return;
+@@ -241,16 +382,19 @@
+             params,
+             base::BindOnce(
+                 &CefBeforeDownloadCallbackImpl::ChooseDownloadPathCallback,
+-                std::move(callback)));
++                manager, download_id, std::move(callback)));
+       }
+     }
+ 
+     if (!handled) {
+-      RunDownloadTargetCallback(std::move(callback), suggested_path);
++      RunChosenDownloadTarget(manager, download_id, std::move(callback),
++                              suggested_path, replace);
+     }
+   }
+ 
+   static void ChooseDownloadPathCallback(
++      base::WeakPtr<DownloadManager> manager,
++      uint32_t download_id,
+       download::DownloadTargetCallback callback,
+       const std::vector<base::FilePath>& file_paths) {
+     DCHECK_LE(file_paths.size(), (size_t)1);
+@@ -261,7 +405,9 @@
+     }
+ 
+     // The download will be cancelled if |path| is empty.
+-    RunDownloadTargetCallback(std::move(callback), path);
++    // A save dialog asked about replacing an existing file already.
++    RunChosenDownloadTarget(manager, download_id, std::move(callback), path,
++                            /*replace=*/true);
+   }
+ 
+   base::WeakPtr<DownloadManager> manager_;
+@@ -398,6 +544,7 @@
+     CefRefPtr<CefDownloadItemCallback> callback(new CefDownloadItemCallbackImpl(
+         manager_ptr_factory_.GetWeakPtr(), download->GetId()));
+ 
++    NicheSendSafety(browser, download);
+     handler->OnDownloadUpdated(browser.get(), download_item.get(), callback);
+ 
+     std::ignore = download_item->Detach(nullptr);
+diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
+--- a/chrome/browser/download/chrome_download_manager_delegate.cc
++++ b/chrome/browser/download/chrome_download_manager_delegate.cc
+@@ -945,6 +945,37 @@
+   return true;
+ }
+ 
++namespace {
++// Niche: marks a download whose path the embedder chose (see
++// DetermineEmbedderChosenTarget).
++const char kNicheEmbedderChosenPathKey[] = "NicheEmbedderChosenPath";
++struct NicheEmbedderChosenPath : public base::SupportsUserData::Data {};
++}  // namespace
++
++void ChromeDownloadManagerDelegate::DetermineEmbedderChosenTarget(
++    DownloadItem* download,
++    const base::FilePath& path,
++    bool replace,
++    download::DownloadTargetCallback callback) {
++  CHECK_CURRENTLY_ON(BrowserThread::UI);
++  download->SetUserData(kNicheEmbedderChosenPathKey,
++                        std::make_unique<NicheEmbedderChosenPath>());
++  DownloadTargetDeterminer::Start(
++      download, path,
++      replace ? DownloadPathReservationTracker::OVERWRITE
++              : DownloadPathReservationTracker::UNIQUIFY,
++      download_prefs_.get(), this,
++      base::BindOnce(&ChromeDownloadManagerDelegate::OnDownloadTargetDetermined,
++                     weak_ptr_factory_.GetWeakPtr(), download->GetId(),
++                     std::move(callback)));
++}
++
++// static
++bool ChromeDownloadManagerDelegate::HasEmbedderChosenPath(
++    const DownloadItem* download) {
++  return download->GetUserData(kNicheEmbedderChosenPathKey) != nullptr;
++}
++
+ bool ChromeDownloadManagerDelegate::ShouldAutomaticallyOpenFile(
+     const GURL& url,
+     const base::FilePath& path) {
+diff --git a/chrome/browser/download/chrome_download_manager_delegate.h b/chrome/browser/download/chrome_download_manager_delegate.h
+--- a/chrome/browser/download/chrome_download_manager_delegate.h
++++ b/chrome/browser/download/chrome_download_manager_delegate.h
+@@ -129,6 +129,20 @@
+   bool DetermineDownloadTarget(
+       download::DownloadItem* item,
+       download::DownloadTargetCallback* callback) override;
++
++  // Niche: the embedder's download handler chose `path` (its folder for the
++  // profile, or its own save panel). Chrome still decides everything else about
++  // the download, as for one of its own: the danger type (file type, Safe
++  // Browsing), whether it is an insecure download, the .crdownload name while it
++  // runs, and a free name if another download or file already has this one,
++  // unless `replace` (the person chose to replace that file, in a save panel).
++  void DetermineEmbedderChosenTarget(download::DownloadItem* item,
++                                     const base::FilePath& path,
++                                     bool replace,
++                                     download::DownloadTargetCallback callback);
++  // Whether DetermineEmbedderChosenTarget gave `item` its path, for
++  // DownloadTargetDeterminer.
++  static bool HasEmbedderChosenPath(const download::DownloadItem* item);
+   bool ShouldAutomaticallyOpenFile(const GURL& url,
+                                    const base::FilePath& path) override;
+   bool ShouldAutomaticallyOpenFileByPolicy(const GURL& url,
+diff --git a/chrome/browser/download/download_target_determiner.cc b/chrome/browser/download/download_target_determiner.cc
+--- a/chrome/browser/download/download_target_determiner.cc
++++ b/chrome/browser/download/download_target_determiner.cc
+@@ -21,6 +21,7 @@
+ #include "base/time/time.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/download/chrome_download_manager_delegate.h"
++#include "cef/libcef/features/features.h"
+ #include "chrome/browser/download/download_confirmation_reason.h"
+ #include "chrome/browser/download/download_crx_util.h"
+ #include "chrome/browser/download/download_prefs.h"
+@@ -361,8 +362,21 @@
+     // TODO(crbug.com/573944055): CHECK-exclusion: Convert to a CHECK once we
+     // are confident it won't be triggered.
+     DCHECK(virtual_path_.IsAbsolute());
++    return CONTINUE;
++  }
++
++#if BUILDFLAG(ENABLE_CEF)
++  // Niche: the embedder's download handler chose this path (its folder for the
++  // profile, or its save panel). Keep it, as for a forced path, with the
++  // conflict action DetermineEmbedderChosenTarget gave; the checks after this
++  // run as for any download.
++  if (!virtual_path_.empty() && !is_forced_path &&
++      ChromeDownloadManagerDelegate::HasEmbedderChosenPath(download_)) {
++    containment_directory_ = virtual_path_.DirName();
++    CHECK(virtual_path_.IsAbsolute(), base::NotFatalUntil::M161);
+     return CONTINUE;
+   }
++#endif
+ 
+   bool no_prompt_needed = HasPromptedForPath();
+ #if BUILDFLAG(IS_ANDROID)
