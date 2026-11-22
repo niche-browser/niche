@@ -218,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// followed live, no restart.
     private func startContentBlocking() {
         observeContentBlocking()
-        observeHttpsOnly()
+        
         // Arc's "Archive Little Arcs after:": a Little Window left alone that long closes, its page archived.
         littleWindowArchiveCheck = composition.clock.every(60) { [weak self] in self?.archiveIdleLittleWindows() }
         observeChanges(of: { [store] in store.settings.websiteAppearance }) { NicheCEFRuntime.setWebsiteAppearance($0.chromiumMode) }
@@ -265,10 +265,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         for w in mainWindows { w.browsers.sleepIdleTabs(policy) }
     }
 
-    /// Settings > Privacy > "Always use secure connections", live like content blocking.
-    private func observeHttpsOnly() {
-        observeChanges(of: { [store] in store.settings.httpsOnly }, apply: NicheCEFRuntime.setHttpsOnlyModeEnabled)
-    }
 
     /// Chromium's secure DNS setting (Settings > Privacy, chrome://settings/security), left on
     /// Chromium's default like Arc: the log says what is in effect at launch and after each
@@ -315,21 +311,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private var globalHotkey: GlobalHotkey?
 
+    /// The profile of the tab on screen, for the debug hooks that change Shields.
+    private var debugPrivacyProfile: String {
+        guard let main = mainWindows.first(where: { $0.window?.isKeyWindow == true }) ?? mainWindows.first else { return PrivacyProfile.defaultKey }
+        return main.privacyProfile(tab: store.selectedTabID)
+    }
+
+    /// The profiles' keys (`PrivacyProfile.key`), Default first.
+    private var privacyProfiles: [String] { [PrivacyProfile.defaultKey] + store.profiles.map(\.directoryName) }
+
+    /// Each profile's Shields (22 Nov 2026: one set for every profile, so what one was set to
+    /// showed and applied in every other). Every profile has its own Settings ▸ Privacy and its own
+    /// privacy panel choices; the engine gets each profile's whole set whenever any of it changes.
     private func observeContentBlocking() {
-        observeChanges(of: { [store] in ShieldsLists(groups: store.settings.shieldsGroups, extras: store.settings.extraShieldsLists) }) { [composition] in
-            ShieldsService.shared.start(groups: $0.groups, extras: $0.extras, clock: composition.clock)
+        // A profile from before (or one made since) starts with what Default has; a deleted one's go.
+        observeChanges(of: { [store] in Set(store.profiles.map(\.directoryName)) }) { [store] keys in
+            var settings = store.settings
+            settings.adoptPrivacy(profiles: keys)
+            if settings != store.settings { store.settings = settings }
+            PrivacyMonitor.shared.adopt(profiles: keys)
         }
-        observeChanges(of: { [store] in store.settings.blockThirdPartyCookies }, apply: NicheCEFRuntime.setThirdPartyCookiesBlocked)
-        observeChanges(of: { [store] in store.settings.removeTrackingParameters }, apply: NicheCEFRuntime.setTrackingCodeRemoval)
-        observeChanges(of: { [store] in store.settings.filteringMode }) { NicheCEFRuntime.setShieldsFilteringMode($0.rawValue) }
-        // The header on every request from now on; the page's navigator.globalPrivacyControl in
-        // tabs opened from now on (a page's start script is fixed when its browser is made).
-        observeChanges(of: { [store] in store.settings.sendGlobalPrivacyControl }) { [weak self] on in
-            NicheCEFRuntime.setGlobalPrivacyControl(on)
-            self?.installDocumentStartScript()
+        // An engine for each set of lists some profile asks for.
+        observeChanges(of: { [weak self] in Set(self?.privacyProfiles.map { self?.store.settings.privacy(forProfile: $0).shieldsLists ?? ShieldsLists(groups: []) } ?? []) }) { [composition] in
+            ShieldsService.shared.start(lists: $0, clock: composition.clock)
         }
-        // In tabs opened from now on, like the property above.
-        observeChanges(of: { [store] in store.settings.noticeFingerprinting }) { [weak self] _ in self?.installDocumentStartScript() }
+        var published: [String: ProfileShields] = [:]
+        var engineInUse: [String: Int] = [:]
+        observeChanges(of: { [weak self] () -> [String: ProfileShields] in
+            guard let self else { return [:] }
+            let settings = store.settings
+            return Dictionary(uniqueKeysWithValues: privacyProfiles.map { key in
+                let privacy = settings.privacy(forProfile: key)
+                return (key, ProfileShields(privacy: privacy, rules: PrivacyMonitor.shared.rules(for: key),
+                                            engine: ShieldsService.shared.slot(for: privacy.shieldsLists)))
+            })
+        }) { all in
+            for (key, next) in all where published[key] != next {
+                published[key] = next
+                // Until the engine for its new lists is built, a profile keeps the one it had.
+                let engine = next.privacy.shieldsLists.isOff ? nil : next.engine ?? engineInUse[key]
+                engineInUse[key] = engine
+                NicheCEFRuntime.setShields(next.bridged(engine: engine), forProfile: key)
+            }
+            for key in published.keys where all[key] == nil {
+                published[key] = nil
+                engineInUse[key] = nil
+                NicheCEFRuntime.forgetShields(forProfile: key)
+            }
+        }
+        // The Default profile's start script is the one a page whose profile has none yet gets.
+        observeChanges(of: { [store] in store.settings.privacy }) { [weak self] _ in self?.installDocumentStartScript() }
         PrivacyMonitor.shared.install()
     }
 
@@ -337,9 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Every page starts with the fingerprinting watch (PrivacyProbeScript) unless Settings ▸
     /// Privacy turns it off, so the privacy panel knows what a page read whenever it is opened.
     private func installDocumentStartScript() {
-        var page = PageScript.mainWorld(globalPrivacyControl: store.settings.sendGlobalPrivacyControl)
-        if store.settings.noticeFingerprinting { page += "\n" + PrivacyProbeScript.script(event: PageScript.probeEvent) }
-        NicheCEFRuntime.setDocumentStartScript(page, isolatedScript: PageScript.isolatedWorld + WebStoreBranding.script(appName: "Niche"),
+        NicheCEFRuntime.setDocumentStartScript(ProfileShields.pageStartScript(store.settings.privacy), isolatedScript: PageScript.isolatedWorld + WebStoreBranding.script(appName: "Niche"),
                                                world: PageScript.world)
     }
 
@@ -1143,32 +1172,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             // in NicheShields.h), or without a url how much is loaded.
             if let label = dict["shields"] {
                 if let url = dict["url"] {
-                    NicheLog.note("shields[\(label)] " + NicheCEFRuntime.shieldsVerdict(forURL: url, onPageURL: dict["page"] ?? url, type: dict["type"] ?? "other"))
+                    NicheLog.note("shields[\(label)] " + NicheCEFRuntime.shieldsVerdict(forURL: url, onPageURL: dict["page"] ?? url, type: dict["type"] ?? "other",
+                                                                                      profile: debugPrivacyProfile))
                 } else {
-                    let shields = ShieldsService.shared
-                    NicheLog.note("shields[\(label)] status=\(shields.status) lists=\(shields.credits.map(\.id).joined(separator: ","))")
+                    let shields = ShieldsService.shared, lists = store.settings.privacy(forProfile: debugPrivacyProfile).shieldsLists
+                    NicheLog.note("shields[\(label)] status=\(shields.status(for: lists)) lists=\(shields.credits(for: lists).map(\.id).joined(separator: ","))")
                 }
                 return
             }
             if let choice = dict["privacyRule"].flatMap(PrivacyRules.Choice.init(rawValue:)), let party = dict["party"],
                let site = store.selectedTab?.tab.flatMap({ PrivacySite.site(ofURL: $0.url) }) {
-                PrivacyMonitor.shared.setChoice(choice, for: party, on: site)
+                PrivacyMonitor.shared.setChoice(choice, for: party, on: site, profile: debugPrivacyProfile)
                 return
             }
             if let v = dict["privacyProtection"], let site = store.selectedTab?.tab.flatMap({ PrivacySite.site(ofURL: $0.url) }) {
-                PrivacyMonitor.shared.setProtection(off: v == "off", on: site)
+                PrivacyMonitor.shared.setProtection(off: v == "off", on: site, profile: debugPrivacyProfile)
                 return
             }
             // privacyMode=off|basic|optimal|complete: the panel's filtering slider for the site on
             // screen; filteringMode=basic|optimal|complete: Settings ▸ Privacy's, for every site.
-            // shieldsExtra=<id>&on=1|0: a switch of Settings ▸ Privacy "More lists".
+            // shieldsExtra=<id>&on=1|0: a switch of Settings ▸ Privacy "More lists". All of them in
+            // the profile of the tab on screen.
             if let v = dict["privacyMode"], let mode = FilteringMode(word: v), let site = store.selectedTab?.tab.flatMap({ PrivacySite.site(ofURL: $0.url) }) {
-                PrivacyMonitor.shared.setMode(mode, on: site, standard: store.settings.filteringMode)
+                let profile = debugPrivacyProfile
+                PrivacyMonitor.shared.setMode(mode, on: site, standard: store.settings.privacy(forProfile: profile).filteringMode, profile: profile)
                 return
             }
-            if let v = dict["filteringMode"], let mode = FilteringMode(word: v), mode != .none { store.settings.filteringMode = mode; return }
+            if let v = dict["filteringMode"], let mode = FilteringMode(word: v), mode != .none {
+                let profile = debugPrivacyProfile
+                var privacy = store.settings.privacy(forProfile: profile)
+                privacy.filteringMode = mode
+                store.settings.setPrivacy(privacy, forProfile: profile)
+                return
+            }
             if let id = dict["shieldsExtra"] {
-                if dict["on"] == "0" { store.settings.extraShieldsLists.remove(id) } else { store.settings.extraShieldsLists.insert(id) }
+                let profile = debugPrivacyProfile
+                var privacy = store.settings.privacy(forProfile: profile)
+                if dict["on"] == "0" { privacy.extraShieldsLists.remove(id) } else { privacy.extraShieldsLists.insert(id) }
+                store.settings.setPrivacy(privacy, forProfile: profile)
                 return
             }
             // downloadsClear=1: the tray's Clear.
@@ -2082,7 +2123,38 @@ private extension NSMenu {
 }
 
 /// What Shields is built from, as the settings ask: the groups and the optional lists switched on.
-private struct ShieldsLists: Equatable {
-    var groups: Set<ShieldsGroup>
-    var extras: Set<String>
+/// One profile's Shields as the engine gets them (NicheProfileShields): its Settings ▸ Privacy,
+/// its privacy panel choices and its engine's slot (nil until its lists are built).
+private struct ProfileShields: Equatable {
+    var privacy: PrivacySettings
+    var rules: PrivacyRules
+    var engine: Int?
+
+    /// What a page of the profile starts with in its own world: the don't-sell signal and, unless
+    /// switched off, the fingerprinting watch (PrivacyProbeScript).
+    static func pageStartScript(_ privacy: PrivacySettings) -> String {
+        var page = PageScript.mainWorld(globalPrivacyControl: privacy.sendGlobalPrivacyControl)
+        if privacy.noticeFingerprinting { page += "\n" + PrivacyProbeScript.script(event: PageScript.probeEvent) }
+        return page
+    }
+
+    @MainActor
+    func bridged(engine: Int?) -> NicheProfileShields {
+        let b = NicheProfileShields()
+        b.engine = engine ?? -1
+        b.filteringMode = privacy.filteringMode.rawValue
+        b.removesTrackingCodes = privacy.removeTrackingParameters
+        b.globalPrivacyControl = privacy.sendGlobalPrivacyControl
+        b.httpsOnly = privacy.httpsOnly
+        b.blocksThirdPartyCookies = privacy.blockThirdPartyCookies
+        b.pageStartScript = Self.pageStartScript(privacy)
+        let c = rules.compiled()
+        b.blocked = c.blocked
+        b.allowed = c.allowed
+        b.blockedOn = c.blockedOn
+        b.allowedOn = c.allowedOn
+        b.offSites = c.offSites
+        b.siteModes = c.siteModes.mapValues { NSNumber(value: $0) }
+        return b
+    }
 }

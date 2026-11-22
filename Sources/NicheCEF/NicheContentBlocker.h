@@ -93,9 +93,7 @@ inline bool IsIPLiteral(std::string_view host) {
 inline std::string_view SiteOrHost(std::string_view host) { return IsIPLiteral(host) ? host : Site(host); }
 
 // The user's own decisions from the privacy panel, on top of the filter lists. Domains cover
-// their subdomains; sites are SiteOrHost() of the tab's top-level page. An immutable value
-// behind an atomic pointer, never freed (a handful of swaps per session, each a few hundred
-// bytes): an IO-thread lookup may still be reading the old one.
+// their subdomains; sites are SiteOrHost() of the tab's top-level page. Part of a Profile.
 struct Rules {
     DomainSet blocked;   // on every site
     DomainSet allowed;   // on every site, though listed
@@ -110,11 +108,36 @@ struct Rules {
 // hidden, its scripts run); also the generic hiding rules.
 enum : int { kModeNone = 0, kModeBasic = 1, kModeOptimal = 2, kModeComplete = 3 };
 
-// The mode for every site without one of its own (Settings ▸ Privacy "Filtering").
-inline std::atomic<int>& StandardMode() { static std::atomic<int> v{kModeOptimal}; return v; }
+// One browser profile's Shields, as its requests and pages get them: each profile has its own
+// (22 Nov 2026: there was one set for every profile). Immutable, and like every Profiles table
+// never freed (a handful of swaps per session, each a few hundred bytes): an IO-thread lookup may
+// still be reading the old one.
+struct Profile {
+    Rules rules;
+    int standardMode = kModeOptimal;   // for every site without one of its own (Settings ▸ Privacy "Filtering")
+    int engine = -1;                   // its lists' NicheShields slot; -1: no lists
+    bool globalPrivacyControl = false;
+    bool withholdThirdPartyCookies = false;
+    bool cleanAddresses = false;       // "Remove tracking codes from links"
+};
 
-inline std::atomic<const Rules*>& UserRules() { static std::atomic<const Rules*> v{nullptr}; return v; }
-inline void PublishRules(const Rules* rules) { UserRules().store(rules, std::memory_order_release); }
+// By the profile's Chromium folder name ("Default", "Profile <UUID>"); incognito pages are the
+// Default profile's.
+using Profiles = std::unordered_map<std::string, const Profile*>;
+inline std::atomic<const Profiles*>& AllProfiles() { static std::atomic<const Profiles*> v{nullptr}; return v; }
+inline void PublishProfiles(const Profiles* profiles) { AllProfiles().store(profiles, std::memory_order_release); }
+
+inline const std::string& DefaultProfile() { static const std::string v = "Default"; return v; }
+
+// A profile's Shields; one not published yet follows Default, and before anything is published
+// there are none (nothing is blocked).
+inline const Profile* ProfileFor(const std::string& key) {
+    const Profiles* all = AllProfiles().load(std::memory_order_acquire);
+    if (!all) return nullptr;
+    if (auto it = all->find(key); it != all->end()) return it->second;
+    if (auto it = all->find(DefaultProfile()); it != all->end()) return it->second;
+    return nullptr;
+}
 
 inline bool Covers(const DomainSet& set, const std::string& host) { return !set.empty() && !MatchedEntry(set, host).empty(); }
 
@@ -135,13 +158,13 @@ struct UserSay {
 // a request to the page's own site is the engine's alone (the user's rules name other companies);
 // the choice for this site (allow, then block); the choice for every site (allow, then block).
 // Hosts must be normalized.
-inline UserSay Say(const std::string& requestHost, const std::string& pageHost) {
+inline UserSay Say(const Profile* profile, const std::string& requestHost, const std::string& pageHost) {
     UserSay say;
     if (requestHost.empty() || pageHost.empty()) return say;
     std::string page(SiteOrHost(pageHost));
     say.thirdParty = SiteOrHost(requestHost) != std::string_view(page);
-    const Rules* r = UserRules().load(std::memory_order_acquire);
-    if (!r) return say;
+    if (!profile) return say;
+    const Rules* r = &profile->rules;
     if (r->offSites.count(page)) { say.choice = Choice::kOff; return say; }
     if (!say.thirdParty) return say;
     if (auto it = r->allowedOn.find(page); it != r->allowedOn.end() && Covers(it->second, requestHost)) { say.choice = Choice::kAllowed; return say; }
@@ -167,20 +190,18 @@ inline Verdict Combine(const UserSay& say, bool listed) {
 }
 
 // Whether the user turned protection off for the site of this page's host.
-inline bool ProtectionOff(const std::string& pageHost) {
-    const Rules* r = UserRules().load(std::memory_order_acquire);
-    return r && r->offSites.count(std::string(SiteOrHost(pageHost))) > 0;
+inline bool ProtectionOff(const Profile* profile, const std::string& pageHost) {
+    return profile && profile->rules.offSites.count(std::string(SiteOrHost(pageHost))) > 0;
 }
 
-// The filtering mode in force on a page of this host: its site's own, else the one for every site.
-inline int ModeFor(const std::string& pageHost) {
-    const Rules* r = UserRules().load(std::memory_order_acquire);
-    if (r) {
-        const std::string site(SiteOrHost(pageHost));
-        if (r->offSites.count(site)) return kModeNone;
-        if (auto it = r->siteModes.find(site); it != r->siteModes.end()) return it->second;
-    }
-    return StandardMode().load(std::memory_order_relaxed);
+// The filtering mode in force on a page of this host in this profile: its site's own, else the
+// profile's for every site. Nothing before the profile's Shields are published.
+inline int ModeFor(const Profile* profile, const std::string& pageHost) {
+    if (!profile) return kModeNone;
+    const std::string site(SiteOrHost(pageHost));
+    if (profile->rules.offSites.count(site)) return kModeNone;
+    if (auto it = profile->rules.siteModes.find(site); it != profile->rules.siteModes.end()) return it->second;
+    return profile->standardMode;
 }
 
 // Host of an http(s)/ws(s) URL, normalized; empty for other schemes. Parses just

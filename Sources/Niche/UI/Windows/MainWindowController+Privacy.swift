@@ -17,6 +17,13 @@ struct PrivacyPanelState {
 extension MainWindowController {
     var privacyPanelOpen: Bool { shell.privacyPanelWidth > 0 }
 
+    /// The profile whose Shields a tab's pages get (`PrivacyProfile.key`); an incognito window's
+    /// follow the Default profile.
+    func privacyProfile(tab: UUID?) -> String {
+        guard !isIncognito, let tab else { return PrivacyProfile.defaultKey }
+        return store.profileDirectoryName(item: tab)
+    }
+
     func togglePrivacyPanel() {
         if privacyPanelOpen { hidePrivacyPanel() } else { showPrivacyPanel() }
     }
@@ -95,9 +102,12 @@ extension MainWindowController {
         if model.unavailable != reason { model.unavailable = reason }
         let icon = reason == nil ? app.favicons.image(for: url) : nil
         if model.favicon !== icon { model.favicon = icon }
-        let protections = PrivacyProtections(store.settings)
+        let profile = privacyProfile(tab: tab)
+        let privacy = store.settings.privacy(forProfile: profile)
+        if model.profile != profile { model.profile = profile }
+        let protections = PrivacyProtections(privacy)
         if model.protections != protections { model.protections = protections }
-        if model.standardMode != store.settings.filteringMode { model.standardMode = store.settings.filteringMode }
+        if model.standardMode != privacy.filteringMode { model.standardMode = privacy.filteringMode }
     }
 
     /// Asks the page on screen what its scripts were seen reading since the last time; `then` runs
@@ -140,7 +150,8 @@ extension MainWindowController {
                 + (p.cookiesWithheld.isEmpty ? "" : " cookies-kept-back=\(p.cookiesWithheld.count)")
                 + (p.probes.isEmpty ? "" : " probes=" + p.probes.map(\.rawValue).sorted().joined(separator: "+"))
         }
-        let mode = PrivacyMonitor.shared.rules.mode(on: ledger.pageSite, standard: store.settings.filteringMode)
+        let profile = privacyProfile(tab: tab)
+        let mode = PrivacyMonitor.shared.rules(for: profile).mode(on: ledger.pageSite, standard: store.settings.privacy(forProfile: profile).filteringMode)
         NicheLog.note("privacy[\(label)] open=\(privacyPanelOpen) site=\(ledger.pageSite) companies=\(s.parties) blocked=\(s.blocked) see-you=\(s.sawYou) "
                       + "other=\(s.others) requests-blocked=\(s.blockedRequests) cleaned=\(s.cleanedAddress) mode=\(mode.title.lowercased()) | " + parties.joined(separator: " "))
     }

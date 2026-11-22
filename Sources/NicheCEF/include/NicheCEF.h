@@ -94,6 +94,43 @@ typedef NS_ENUM(NSInteger, NichePrivacyEventKind) {
 @property (nonatomic) NSInteger group;
 @end
 
+/// One browser profile's Shields and privacy switches, as its pages get them (setShields:forProfile:).
+/// Each profile has its own; incognito windows follow the Default profile's.
+@interface NicheProfileShields : NSObject
+/// The slot of the engine built from its lists (NicheShieldsBuild installInSlot:); -1: no lists.
+@property (nonatomic) NSInteger engine;
+/// Settings ▸ Privacy "Filtering" for every site without a mode of its own (`siteModes`): 1
+/// requests blocked, 2 also what the lists say about the page's own site (hiding and scripts), 3
+/// also the generic hiding rules. NicheCore's FilteringMode.
+@property (nonatomic) NSInteger filteringMode;
+/// "Remove tracking codes from links": the lists' rules for it apply to a page's address before
+/// it is asked for.
+@property (nonatomic) BOOL removesTrackingCodes;
+/// Global Privacy Control: every request says "Sec-GPC: 1" (do not sell or share my data).
+@property (nonatomic) BOOL globalPrivacyControl;
+/// Chrome's HTTPS-Only Mode ("Always use secure connections"): http:// navigations are
+/// upgraded, and a site without HTTPS shows Chrome's warning page before it loads.
+@property (nonatomic) BOOL httpsOnly;
+/// "Block third-party cookies": a site embedded in another site's page neither gets its cookies
+/// back nor sets new ones, on the network or from a script. On a site where the user turned
+/// protection off the network side is lifted; a script in an embedded frame still can't use
+/// cookies there (Chromium's profile setting has no per-site exception Niche can set: docs/privacy.md).
+@property (nonatomic) BOOL blocksThirdPartyCookies;
+/// What its pages start with in their own world, in place of setDocumentStartScript's `script`
+/// (the Global Privacy Control property and the fingerprinting watch are the profile's). Tabs
+/// opened from now on.
+@property (nonatomic, copy, nullable) NSString *pageStartScript;
+/// The user's own rules on top of the lists (niche_blocker::Rules): domains blocked or allowed
+/// on every site, the same per site of the top-level page, sites where nothing is blocked, and
+/// sites with a filtering mode of their own. Domains cover their subdomains.
+@property (nonatomic, copy) NSArray<NSString *> *blocked;
+@property (nonatomic, copy) NSArray<NSString *> *allowed;
+@property (nonatomic, copy) NSDictionary<NSString *, NSArray<NSString *> *> *blockedOn;
+@property (nonatomic, copy) NSDictionary<NSString *, NSArray<NSString *> *> *allowedOn;
+@property (nonatomic, copy) NSArray<NSString *> *offSites;
+@property (nonatomic, copy) NSDictionary<NSString *, NSNumber *> *siteModes;
+@end
+
 /// Builds a Shields engine from filter lists and makes it the one in use. Building parses
 /// hundreds of thousands of rules (about a tenth of a second): do it off the main thread.
 @interface NicheShieldsBuild : NSObject
@@ -104,8 +141,9 @@ typedef NS_ENUM(NSInteger, NichePrivacyEventKind) {
 /// Resources as JSON (adblock-rust's format): scriptlets (`forPages`) and the stand-ins served
 /// for blocked requests.
 - (void)addResources:(NSData *)json forPages:(BOOL)forPages;
-/// Builds and installs. Returns how many rules the lists held. The builder is spent.
-- (NSInteger)install;
+/// Builds and installs in `slot` (one per set of lists some profile uses: NicheProfileShields'
+/// `engine`), replacing the engine there. Returns how many rules the lists held. The builder is spent.
+- (NSInteger)installInSlot:(NSInteger)slot;
 @end
 
 /// The connection of the page on screen (Chromium's SSL status of the visible navigation entry).
@@ -352,18 +390,21 @@ typedef NS_ENUM(NSInteger, NichePrivacyEventKind) {
 /// one of the installed lists' rules says so (unless the user allowed it, or switched protection
 /// off for the page's site), a blocked script some pages need is answered with a harmless
 /// stand-in, tracking codes come off a page's address, and pages are told what to hide. Nothing
-/// is blocked until an engine is installed (NicheShieldsBuilder).
-+ (BOOL)shieldsInstalled;
-/// Takes the engine out: nothing is blocked or hidden by the lists.
-+ (void)removeShields;
-/// Settings ▸ Privacy "Remove tracking codes from links": the installed lists' rules for it apply
-/// to a page's address before it is asked for.
-+ (void)setTrackingCodeRemoval:(BOOL)enabled;
+/// is blocked until a profile's Shields are set and its engine is installed (NicheShieldsBuild).
++ (BOOL)shieldsInstalledInSlot:(NSInteger)slot;
+/// Takes an engine out: profiles on that slot have nothing blocked or hidden by the lists.
++ (void)removeShieldsFromSlot:(NSInteger)slot;
+/// A profile's Shields (its folder name: "Default", "Profile <UUID>"), for its next request and
+/// the tabs opened from now on; tabs already open get the filtering modes at once. Every profile
+/// gets its own: one not set yet follows Default.
++ (void)setShields:(NicheProfileShields *)shields forProfile:(NSString *)profile;
+/// A profile that is gone.
++ (void)forgetShieldsForProfile:(NSString *)profile;
 /// NicheCore's ShieldsPageScript.content: what pages are given to hide what the lists say.
 + (void)setShieldsPageScript:(NSString *)script;
-/// What the engine says about one request, for checks and the log: "blocked=1 exception=0
-/// group=1 stand-in=0 rewritten=-", or "no engine".
-+ (NSString *)shieldsVerdictForURL:(NSString *)url onPageURL:(NSString *)pageURL type:(NSString *)type;
+/// What a profile's engine says about one request, for checks and the log: "blocked=1
+/// exception=0 group=1 stand-in=0 rewritten=-", or "no engine".
++ (NSString *)shieldsVerdictForURL:(NSString *)url onPageURL:(NSString *)pageURL type:(NSString *)type profile:(NSString *)profile;
 /// The privacy panel's feed, on the main thread in batches a few times a second at most: every
 /// page change, every request to another site than the page's and every cookie it gets back or
 /// leaves, all the time, so a panel opened later has the page's whole story. Nothing is kept
@@ -372,31 +413,6 @@ typedef NS_ENUM(NSInteger, NichePrivacyEventKind) {
 /// A page's address as events name it (`NichePrivacyEvent.pageKey`): a hash of it without its
 /// fragment, the same for the run of the app.
 + (uint64_t)privacyPageKeyForURL:(NSString *)url;
-/// The user's own rules on top of the list (niche_blocker::Rules): domains blocked or allowed on
-/// every site, the same per site of the top-level page, sites where nothing is blocked, and
-/// sites with a filtering mode of their own.
-/// Domains cover their subdomains. Takes effect for the next request.
-+ (void)setPrivacyRulesBlocked:(NSArray<NSString *> *)blocked allowed:(NSArray<NSString *> *)allowed
-                     blockedOn:(NSDictionary<NSString *, NSArray<NSString *> *> *)blockedOn
-                     allowedOn:(NSDictionary<NSString *, NSArray<NSString *> *> *)allowedOn
-                      offSites:(NSArray<NSString *> *)offSites
-                     siteModes:(NSDictionary<NSString *, NSNumber *> *)siteModes;
-/// Settings ▸ Privacy "Filtering": how much Shields does on every site without a mode of its
-/// own (`siteModes` above): 1 requests blocked, 2 also what the lists say about the page's own
-/// site (hiding and scripts), 3 also the generic hiding rules. NicheCore's FilteringMode.
-+ (void)setShieldsFilteringMode:(NSInteger)mode;
-/// Global Privacy Control: every request says "Sec-GPC: 1" (do not sell or share my data).
-+ (void)setGlobalPrivacyControl:(BOOL)enabled;
-/// Chrome's HTTPS-Only Mode ("Always use secure connections") in every profile:
-/// http:// navigations are upgraded, and a site without HTTPS shows Chrome's warning
-/// page before it loads. Profiles that load later get it too. Off until enabled.
-+ (void)setHttpsOnlyModeEnabled:(BOOL)enabled;
-/// "Block third-party cookies" in every profile: a site embedded in another site's page
-/// neither gets its cookies back nor sets new ones, on the network or from a script. On a site
-/// where the user turned protection off the network side is lifted; a script in an embedded
-/// frame still can't use cookies there (Chromium's profile setting has no per-site exception
-/// Niche can set: docs/privacy.md). Profiles that load later get it too.
-+ (void)setThirdPartyCookiesBlocked:(BOOL)blocked;
 /// Arc's View ▸ Appearance ("Websites, Easels, and Notes will use:"): 0 Automatic (the Mac's),
 /// 1 Light, 2 Dark. Chrome's colour mode in every profile, which pages' prefers-color-scheme and
 /// Chrome's own pages follow; profiles that load later get it too.

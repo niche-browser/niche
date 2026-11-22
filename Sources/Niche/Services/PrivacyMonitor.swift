@@ -4,7 +4,8 @@ import Observation
 
 /// What every page has done that concerns the visitor's privacy, for the toolbar's count and the
 /// privacy panel: a `PrivacyLedger` per browser, fed by the engine (NicheCEFRuntime's privacy
-/// events), the user's own rules (privacy.json, pushed to the engine's blocker) and how much was
+/// events), the user's own rules for each profile (privacy.json; AppDelegate gives each profile's to
+/// the engine with the rest of its Shields) and how much was
 /// blocked in all (privacy-stats.json). Every page is recorded from the moment it is asked for,
 /// whether a panel is open or not. Nothing here is sent anywhere, and no ledger is saved: what a
 /// page did is forgotten when its tab closes, and a tab keeps its last few pages only.
@@ -15,10 +16,11 @@ final class PrivacyMonitor {
 
     /// Counts up when a ledger changed, a few times a second at most: what the views follow.
     private(set) var revision = 0
-    /// The rules in force: the saved ones, and what incognito windows chose on top of them.
-    private(set) var rules: PrivacyRules
+    /// The rules in force, each profile's: the saved ones, and what incognito windows chose on top
+    /// of the Default profile's, which incognito follows.
+    private(set) var book: PrivacyRuleBook
     /// What privacy.json holds.
-    @ObservationIgnored private var saved: PrivacyRules
+    @ObservationIgnored private var saved: PrivacyRuleBook
     private(set) var stats: PrivacyStats
 
     @ObservationIgnored private var pages: [Int: PrivacyPages] = [:]
@@ -29,15 +31,15 @@ final class PrivacyMonitor {
     @ObservationIgnored private var unrecorded: Set<Int> = []
     @ObservationIgnored private var offRecordWindows: Set<ObjectIdentifier> = []
     @ObservationIgnored private var publishPending = false
-    @ObservationIgnored private let rulesFile = JSONStore<PrivacyRules>("privacy.json")
+    @ObservationIgnored private let rulesFile = JSONStore<PrivacyRuleBook>("privacy.json")
     @ObservationIgnored private let statsFile = JSONStore<PrivacyStats>("privacy-stats.json")
 
     /// How often the views hear of changes while a page loads.
     private static let publishEvery: TimeInterval = 0.2
 
     private init() {
-        let loaded = rulesFile.load(or: { PrivacyRules() })
-        rules = loaded
+        let loaded = rulesFile.load(or: { PrivacyRuleBook() })
+        book = loaded
         saved = loaded
         stats = statsFile.load(or: { PrivacyStats() })
     }
@@ -45,7 +47,6 @@ final class PrivacyMonitor {
     /// Hooks the engine up; once, after CEF is initialised. From then on every page is recorded,
     /// panel or no panel, so a panel opened later has the whole of what its page did.
     func install() {
-        pushRules()
         NicheCEFRuntime.setPrivacyEventHandler { [weak self] events in
             MainActor.assumeIsolated { self?.take(events) }
         }
@@ -72,9 +73,8 @@ final class PrivacyMonitor {
     /// A window closed. With the last incognito window go the choices made in them.
     func unbind(window: ObjectIdentifier) {
         bind(window: window, tabs: [:])
-        guard offRecordWindows.remove(window) != nil, offRecordWindows.isEmpty, rules != saved else { return }
-        rules = saved
-        pushRules()
+        guard offRecordWindows.remove(window) != nil, offRecordWindows.isEmpty, book != saved else { return }
+        book = saved
     }
 
     /// The ledger for a tab's page; nil for an address that is no website's.
@@ -163,47 +163,56 @@ final class PrivacyMonitor {
 
     // MARK: The user's rules
 
+    /// A profile's rules in force (`PrivacyProfile.key`; incognito windows use Default's).
+    func rules(for profile: String) -> PrivacyRules { book[profile] }
+
+    /// The profiles there are besides Default: one from a file from before per-profile choices
+    /// gets that file's, one that is gone loses its own. At launch and when a profile comes or goes.
+    func adopt(profiles: Set<String>) {
+        var next = saved
+        next.adopt(profiles: profiles)
+        guard next != saved || saved.sharedByEveryProfile else { return }
+        saved = next
+        var live = book
+        live.adopt(profiles: profiles)
+        book = live
+        rulesFile.save(saved)
+    }
+
     /// `remembered` false in an incognito window: the choice holds until the last incognito
     /// window closes and is never written down (it would name a site visited there).
-    func setChoice(_ choice: PrivacyRules.Choice, for party: String, on site: String, remembered: Bool = true) {
-        rules.set(choice, for: party, on: site)
-        if remembered { saved.set(choice, for: party, on: site) }
+    func setChoice(_ choice: PrivacyRules.Choice, for party: String, on site: String, profile: String, remembered: Bool = true) {
+        book[profile].set(choice, for: party, on: site)
+        if remembered { saved[profile].set(choice, for: party, on: site) }
         NicheLog.note("Privacy rule: \(choice.rawValue)")
         rulesChanged()
     }
 
-    func setProtection(off: Bool, on site: String, remembered: Bool = true) {
-        rules.setOff(off, on: site)
-        if remembered { saved.setOff(off, on: site) }
+    func setProtection(off: Bool, on site: String, profile: String, remembered: Bool = true) {
+        book[profile].setOff(off, on: site)
+        if remembered { saved[profile].setOff(off, on: site) }
         NicheLog.note("Privacy protection \(off ? "off" : "on") for a site")
         rulesChanged()
     }
 
     /// The privacy panel's filtering slider for one site (`FilteringMode`). `standard` is the
-    /// mode for every site: picking it gives the site back to the setting.
-    func setMode(_ mode: FilteringMode, on site: String, standard: FilteringMode, remembered: Bool = true) {
-        rules.setMode(mode, on: site, standard: standard)
-        if remembered { saved.setMode(mode, on: site, standard: standard) }
+    /// profile's mode for every site: picking it gives the site back to the setting.
+    func setMode(_ mode: FilteringMode, on site: String, standard: FilteringMode, profile: String, remembered: Bool = true) {
+        book[profile].setMode(mode, on: site, standard: standard)
+        if remembered { saved[profile].setMode(mode, on: site, standard: standard) }
         NicheLog.note("Privacy filtering \(mode.title.lowercased()) for a site")
         rulesChanged()
     }
 
-    /// Settings ▸ Privacy "Reset…": every block, exception and site switch goes.
-    func resetRules() {
-        rules = PrivacyRules()
-        saved = rules
+    /// Settings ▸ Privacy "Reset…": every block, exception and site switch of the profile goes.
+    func resetRules(profile: String) {
+        book[profile] = PrivacyRules()
+        saved[profile] = PrivacyRules()
         NicheLog.note("Privacy rules reset")
         rulesChanged()
     }
 
     private func rulesChanged() {
         rulesFile.save(saved)
-        pushRules()
-    }
-
-    private func pushRules() {
-        let c = rules.compiled()
-        NicheCEFRuntime.setPrivacyRulesBlocked(c.blocked, allowed: c.allowed, blockedOn: c.blockedOn, allowedOn: c.allowedOn, offSites: c.offSites,
-                                               siteModes: c.siteModes.mapValues { NSNumber(value: $0) })
     }
 }

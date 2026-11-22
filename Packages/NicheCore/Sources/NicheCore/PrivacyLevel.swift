@@ -52,9 +52,9 @@ public enum PrivacyLevel: String, CaseIterable, Sendable {
         }
     }
 
-    /// Whether `settings` are this level's; `ignoringMode` for a settings file from before the
-    /// filtering modes, which has none to compare.
-    public func sets(_ settings: AppSettings, ignoringMode: Bool = false) -> Bool {
+    /// Whether a profile's `settings` are this level's; `ignoringMode` for a settings file from
+    /// before the filtering modes, which has none to compare.
+    public func sets(_ settings: PrivacySettings, ignoringMode: Bool = false) -> Bool {
         var preset = settings
         apply(to: &preset)
         if ignoringMode { preset.filteringMode = settings.filteringMode }
@@ -62,8 +62,8 @@ public enum PrivacyLevel: String, CaseIterable, Sendable {
     }
 
     /// Sets the switches the level owns; the others (the don't-sell signal, tracking codes,
-    /// noticing fingerprinting) are on at every level and stay as they are.
-    public func apply(to settings: inout AppSettings) {
+    /// noticing fingerprinting, More lists) stay as they are.
+    public func apply(to settings: inout PrivacySettings) {
         settings.filteringMode = filteringMode
         settings.blockTrackers = true
         settings.blockMaliciousSites = true
@@ -74,29 +74,24 @@ public enum PrivacyLevel: String, CaseIterable, Sendable {
         settings.httpsOnly = self == .strict
     }
 
-    /// The level these settings are, or nil when a switch was changed by hand.
-    public static func level(of settings: AppSettings) -> PrivacyLevel? {
+    /// The level a profile's settings are, or nil when a switch was changed by hand.
+    public static func level(of settings: PrivacySettings) -> PrivacyLevel? {
         allCases.first { $0.sets(settings) }
     }
+
+    /// The Default profile's (`AppSettings.privacy`).
+    public func sets(_ settings: AppSettings, ignoringMode: Bool = false) -> Bool { sets(settings.privacy, ignoringMode: ignoringMode) }
+    public func apply(to settings: inout AppSettings) { apply(to: &settings.privacy) }
+    public static func level(of settings: AppSettings) -> PrivacyLevel? { level(of: settings.privacy) }
 }
 
 public extension AppSettings {
-    /// Settings ▸ Privacy "Trackers". Stored under the name of the one switch that used to cover
-    /// ads too (`blockAdsAndTrackers`), so existing settings files keep their choice.
+    /// The Default profile's "Trackers" (`PrivacySettings.blockTrackers`).
     var blockTrackers: Bool {
         get { blockAdsAndTrackers }
         set { blockAdsAndTrackers = newValue }
     }
 
-    /// The groups of filter lists the switches ask for.
-    var shieldsGroups: Set<ShieldsGroup> {
-        var groups: Set<ShieldsGroup> = []
-        if blockAds { groups.insert(.ads) }
-        if blockTrackers { groups.insert(.trackers) }
-        if blockCookieNotices { groups.insert(.cookies) }
-        if blockAnnoyances { groups.insert(.annoyances) }
-        if blockMaliciousSites { groups.insert(.malware) }
-        if !groups.isEmpty, useRegionalLists { groups.insert(.regional) }
-        return groups
-    }
+    /// The groups of filter lists the Default profile's switches ask for.
+    var shieldsGroups: Set<ShieldsGroup> { privacy.shieldsGroups }
 }

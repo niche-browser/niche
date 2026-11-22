@@ -131,25 +131,57 @@ static NSArray<NSString*>* g_documentStartParams = nil;
 /// script registered over DevTools after the browser exists can come too late for the first
 /// page of a new tab: that page's own scripts ran first (17 Nov 2026).
 static std::string g_pageStartScript;
-/// Shields for page processes (niche_shields_engine_page_blob): the lists' rules that inject
-/// scripts, which NicheHelper works out per document before the page's own scripts run. Main
-/// thread. Replaced when the lists or the groups in use change; a tab keeps the one it was
-/// made with.
-static CefRefPtr<CefBinaryValue> g_shieldsPageBlob;
-/// The filtering modes as page processes take them (NicheHelper's SetModes): the mode for
-/// every site on the first line, then "site<TAB>mode" for each site with one of its own. The
-/// lists' scripts run where the mode is optimal or more.
-static std::string g_shieldsModes = "2\n";
+/// Shields for page processes (niche_shields_engine_page_blob), by engine slot: the lists' rules
+/// that inject scripts, which NicheHelper works out per document before the page's own scripts
+/// run. Main thread. Replaced when a slot's lists change; a tab keeps the one it was made with.
+static std::map<int, CefRefPtr<CefBinaryValue>> g_shieldsPageBlobs;
 /// What NicheCore's ShieldsPageScript gives pages to hide what the lists say to hide.
 static std::string g_shieldsContentScript;
-static CefRefPtr<CefDictionaryValue> NichePageStartInfo() {
-    if (g_pageStartScript.empty() && !g_shieldsPageBlob) return nullptr;
+
+/// The name Shields knows a page's profile by (niche_blocker::Profiles): its folder's, or
+/// "Default" for the Default profile and for incognito windows, which follow it.
+static std::string NicheProfileKey(NSString* profilePath, BOOL incognito) {
+    if (incognito || !profilePath.length) return niche_blocker::DefaultProfile();
+    return std::string(profilePath.lastPathComponent.UTF8String ?: "Default");
+}
+
+/// Each profile's Shields as Niche set them (setShields:forProfile:), main thread. Requests read
+/// the published niche_blocker::Profiles; pages and Chromium's preferences read these.
+struct NicheProfileShieldsState {
+    niche_blocker::Profile profile;
+    bool blockThirdPartyCookies = false;
+    bool httpsOnly = false;
+    std::string pageStartScript;
+    /// The filtering modes as page processes take them (NicheHelper's SetModes): the mode for
+    /// every site on the first line, then "site<TAB>mode" for each site with one of its own. The
+    /// lists' scripts run where the mode is optimal or more.
+    std::string modes = "2\n";
+};
+static std::map<std::string, NicheProfileShieldsState> g_profileShields;
+
+/// A profile's, or Default's while it has none of its own.
+static const NicheProfileShieldsState* NicheShieldsState(const std::string& profile) {
+    if (auto it = g_profileShields.find(profile); it != g_profileShields.end()) return &it->second;
+    if (auto it = g_profileShields.find(niche_blocker::DefaultProfile()); it != g_profileShields.end()) return &it->second;
+    return nullptr;
+}
+
+/// What a new page browser of this profile starts with: its start script, and its engine's
+/// rules for page processes with its filtering modes.
+static CefRefPtr<CefDictionaryValue> NichePageStartInfo(const std::string& profile) {
+    const NicheProfileShieldsState* state = NicheShieldsState(profile);
+    const std::string& start = state && !state->pageStartScript.empty() ? state->pageStartScript : g_pageStartScript;
+    CefRefPtr<CefBinaryValue> blob;
+    if (state) {
+        if (auto it = g_shieldsPageBlobs.find(state->profile.engine); it != g_shieldsPageBlobs.end()) blob = it->second;
+    }
+    if (start.empty() && !blob) return nullptr;
     CefRefPtr<CefDictionaryValue> info = CefDictionaryValue::Create();
-    if (!g_pageStartScript.empty()) info->SetString("niche.start", g_pageStartScript);
-    if (g_shieldsPageBlob) {
+    if (!start.empty()) info->SetString("niche.start", start);
+    if (blob) {
         // A copy: a value belongs to the one dictionary it is put in.
-        info->SetBinary("niche.shields", g_shieldsPageBlob->Copy());
-        info->SetString("niche.shields.modes", g_shieldsModes);
+        info->SetBinary("niche.shields", blob->Copy());
+        info->SetString("niche.shields.modes", state->modes);
     }
     return info;
 }
@@ -516,32 +548,31 @@ static void TurnOffSafeBrowsing(CefRefPtr<CefRequestContext> context) {
     }
 }
 
-static bool g_httpsOnly = false;
 /// Arc's View ▸ Appearance for websites: 0 follows the Mac, 1 light, 2 dark.
 static NSInteger g_websiteAppearance = 0;
 static bool g_incognitoReady = false;
 
-/// Chrome's "Always use secure connections" (Settings ▸ Privacy in Niche).
-static void ApplyHttpsOnly(CefRefPtr<CefRequestContext> context) {
+/// Chrome's "Always use secure connections" (Settings ▸ Privacy in Niche), the profile's own.
+static void ApplyHttpsOnly(CefRefPtr<CefRequestContext> context, const std::string& profile) {
     if (!context) return;
+    const NicheProfileShieldsState* state = NicheShieldsState(profile);
     CefRefPtr<CefValue> value = CefValue::Create();
-    value->SetBool(g_httpsOnly);
+    value->SetBool(state && state->httpsOnly);
     CefString error;
     if (!context->SetPreference("https_only_mode_enabled", value, error)) {
         NSLog(@"NicheCEF: https_only_mode_enabled: %s", error.ToString().c_str());
     }
 }
 
-static bool g_blockThirdPartyCookies = false;
-
 /// Chrome's "Block third-party cookies" (Settings ▸ Privacy in Niche) for what a script reads
 /// and writes through document.cookie while its site is embedded in another site's page. The
 /// cookies a request carries are held back by NichePrivacyCookieFilter. 1 is CookieControlsMode's
-/// kBlockThirdParty, 0 kOff.
-static void ApplyThirdPartyCookies(CefRefPtr<CefRequestContext> context) {
+/// kBlockThirdParty, 0 kOff. The profile's own.
+static void ApplyThirdPartyCookies(CefRefPtr<CefRequestContext> context, const std::string& profile) {
     if (!context) return;
+    const NicheProfileShieldsState* state = NicheShieldsState(profile);
     CefRefPtr<CefValue> value = CefValue::Create();
-    value->SetInt(g_blockThirdPartyCookies ? 1 : 0);
+    value->SetInt(state && state->blockThirdPartyCookies ? 1 : 0);
     CefString error;
     if (!context->SetPreference("profile.cookie_controls_mode", value, error)) {
         NSLog(@"NicheCEF: profile.cookie_controls_mode: %s", error.ToString().c_str());
@@ -556,13 +587,14 @@ static void ApplyWebsiteAppearance(CefRefPtr<CefRequestContext> context) {
     if (context->GetChromeColorSchemeMode() != mode) context->SetChromeColorScheme(mode, 0);
 }
 
-static void ApplyProfilePreferences(CefRefPtr<CefRequestContext> context) {
+/// `profile`: its NicheProfileKey.
+static void ApplyProfilePreferences(CefRefPtr<CefRequestContext> context, const std::string& profile) {
     ApplyWebsiteAppearance(context);
     ApplyWebRTCPolicy(context);
     HideDownloadBubble(context);
     TurnOffSafeBrowsing(context);
-    ApplyHttpsOnly(context);
-    ApplyThirdPartyCookies(context);
+    ApplyHttpsOnly(context, profile);
+    ApplyThirdPartyCookies(context, profile);
 }
 
 static const char kNotificationBlocksCleared[] = "niche.notification_blocks_cleared";
@@ -671,7 +703,7 @@ class ProfileContextHandler : public CefRequestContextHandler {
 public:
     explicit ProfileContextHandler(NSString* path = nil) : path_([path copy]) {}
     void OnRequestContextInitialized(CefRefPtr<CefRequestContext> context) override {
-        ApplyProfilePreferences(context);
+        ApplyProfilePreferences(context, NicheProfileKey(path_, path_ == nil));
         if (!path_) { g_incognitoReady = true; return; }
         ClearSilentNotificationBlocks(context);
         ObserveExtensionSettings(context);
@@ -847,7 +879,7 @@ public:
 
     void OnContextInitialized() override {
         CEF_REQUIRE_UI_THREAD();
-        ApplyProfilePreferences(CefRequestContext::GetGlobalContext());
+        ApplyProfilePreferences(CefRequestContext::GetGlobalContext(), niche_blocker::DefaultProfile());
         ClearSilentNotificationBlocks(CefRequestContext::GetGlobalContext());
         ObserveExtensionSettings(CefRequestContext::GetGlobalContext());
         ObserveSecureDNS();
@@ -1257,10 +1289,6 @@ static uint64_t NichePageKey(const std::string& url) {
 }
 
 
-static std::atomic<bool> g_globalPrivacyControl{false};
-// Third-party cookies are held back on the network (read on the IO thread; the profile's own
-// setting, g_blockThirdPartyCookies, covers a script's document.cookie).
-static std::atomic<bool> g_withholdThirdPartyCookies{false};
 static std::mutex g_privacyMutex;
 static std::vector<NichePrivacyRecord> g_privacyQueue;   // under g_privacyMutex
 static bool g_privacyFlushPending = false;                // under g_privacyMutex
@@ -1380,14 +1408,14 @@ struct NicheDecision {
     std::string standIn;   // for a blocked request the page needs an answer to: a data: address
 };
 
-static NicheDecision NicheDecide(const std::string& url, const std::string& page, const std::string& requestHost,
-                                 const std::string& pageHost, cef_resource_type_t type) {
+static NicheDecision NicheDecide(const niche_blocker::Profile* profile, const std::string& url, const std::string& page,
+                                 const std::string& requestHost, const std::string& pageHost, cef_resource_type_t type) {
     NicheDecision d;
-    const niche_blocker::UserSay say = niche_blocker::Say(requestHost, pageHost);
+    const niche_blocker::UserSay say = niche_blocker::Say(profile, requestHost, pageHost);
     d.thirdParty = say.thirdParty;
-    if (say.choice != niche_blocker::Choice::kOff) {
+    if (say.choice != niche_blocker::Choice::kOff && profile && profile->engine >= 0) {
         NicheShieldsVerdict found;
-        if (niche_shields_check(url.c_str(), page.c_str(), NicheShieldsType(type), &found)) {
+        if (niche_shields_check(uint32_t(profile->engine), url.c_str(), page.c_str(), NicheShieldsType(type), &found)) {
             d.listed = found.blocked;
             if (found.blocked) {
                 d.group = found.group == 255 ? -1 : int(found.group);
@@ -1408,6 +1436,8 @@ static NicheDecision NicheDecide(const std::string& url, const std::string& page
 // third-party cookie setting, so the setting alone let these through (14 Nov 2026).
 class NichePrivacyCookieFilter : public CefCookieAccessFilter {
 public:
+    /// `profile`: its pages' NicheProfileKey, whose Shields decide.
+    explicit NichePrivacyCookieFilter(std::string profile) : profile_(std::move(profile)) {}
     bool CanSendCookie(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
                        const CefCookie& cookie) override {
         return Pass(browser, request, cookie, NichePrivacyEventKindCookieSent);
@@ -1419,18 +1449,19 @@ public:
 
 private:
     // Whether the cookie goes through; reports it either way.
-    static bool Pass(CefRefPtr<CefBrowser> browser, CefRefPtr<CefRequest> request, const CefCookie& cookie, int kind) {
+    bool Pass(CefRefPtr<CefBrowser> browser, CefRefPtr<CefRequest> request, const CefCookie& cookie, int kind) {
         // The page being opened is nobody's third party, wherever the link to it was (the tab's
         // page is still the one before it): arriving from another site must not sign anyone out.
         if (request->GetResourceType() == RT_MAIN_FRAME) return true;
         std::string pageHost, requestHost, page;
         uint64_t pageKey = 0;
         if (!NichePrivacyHosts(browser, request, pageHost, requestHost, pageKey, page)) return true;
-        NicheDecision d = NicheDecide(request->GetURL().ToString(), page, requestHost, pageHost, request->GetResourceType());
+        const niche_blocker::Profile* profile = niche_blocker::ProfileFor(profile_);
+        NicheDecision d = NicheDecide(profile, request->GetURL().ToString(), page, requestHost, pageHost, request->GetResourceType());
         if (!d.thirdParty) return true;
         // A request that is about to be cancelled takes nothing with it, and there is nothing to report.
         if (d.verdict != niche_blocker::Verdict::kAllowed) return false;
-        const bool withheld = g_withholdThirdPartyCookies.load(std::memory_order_relaxed) && !niche_blocker::ProtectionOff(pageHost);
+        const bool withheld = profile && profile->withholdThirdPartyCookies && !niche_blocker::ProtectionOff(profile, pageHost);
         NichePrivacyRecord r;
         r.page = pageKey;
         r.verdict = withheld ? 1 : 0;
@@ -1449,11 +1480,9 @@ private:
         return !withheld;
     }
 
+    const std::string profile_;
     IMPLEMENT_REFCOUNTING(NichePrivacyCookieFilter);
 };
-
-// Settings ▸ Privacy "Remove tracking codes from links".
-static std::atomic<bool> g_cleanAddresses{false};
 
 // Answers a blocked request with the stand-in Shields names for it: a `data:` address
 // ("data:application/javascript;base64,…") served as that request's body, so a page that
@@ -1514,7 +1543,8 @@ private:
 // Decides every request a page makes (NicheContentBlocker.h): cancels third-party requests to
 // listed ad and tracker domains and to what the user blocked, tells the privacy panel what was
 // asked for, sends Global Privacy Control, and takes click identifiers off the address of a page
-// before it is asked for. Runs on the IO thread; stateless, its rules are global atomics.
+// before it is asked for. Runs on the IO thread; its profile's Shields (niche_blocker::ProfileFor)
+// decide, read afresh for each request.
 //
 // Also lets links with a scheme Chromium can't load (macappstore:, mailto:, zoommtg:,
 // slack:, …) reach the app registered for it. CEF only asks a resource request handler,
@@ -1523,6 +1553,8 @@ private:
 // "Open <app>?" with "Always allow" like Chrome and Arc.
 class NicheContentBlockingHandler : public CefResourceRequestHandler {
 public:
+    /// `profile`: its pages' NicheProfileKey.
+    explicit NicheContentBlockingHandler(const std::string& profile) : profile_(profile), cookies_(new NichePrivacyCookieFilter(profile)) {}
     CefRefPtr<CefCookieAccessFilter> GetCookieAccessFilter(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                                             CefRefPtr<CefRequest> request) override {
         if (!browser) return nullptr;
@@ -1531,7 +1563,8 @@ public:
 
     ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                      CefRefPtr<CefRequest> request, CefRefPtr<CefCallback> callback) override {
-        if (g_globalPrivacyControl.load(std::memory_order_relaxed)) request->SetHeaderByName("Sec-GPC", "1", true);
+        const niche_blocker::Profile* profile = niche_blocker::ProfileFor(profile_);
+        if (profile && profile->globalPrivacyControl) request->SetHeaderByName("Sec-GPC", "1", true);
         if (!browser) return RV_CONTINUE;
         const cef_resource_type_t type = request->GetResourceType();
         if (type == RT_MAIN_FRAME) {
@@ -1563,10 +1596,11 @@ public:
             }
             // Click and mailing identifiers come off the address (the lists' removeparam rules),
             // unless the user switched that off or protection is off for the site.
-            if (g_cleanAddresses.load(std::memory_order_relaxed) && request->GetMethod() == "GET" && !niche_blocker::ProtectionOff(host)) {
+            if (profile && profile->cleanAddresses && profile->engine >= 0 && request->GetMethod() == "GET" &&
+                !niche_blocker::ProtectionOff(profile, host)) {
                 std::string clean;
                 NicheShieldsVerdict found;
-                if (niche_shields_check(url.c_str(), url.c_str(), "document", &found)) {
+                if (niche_shields_check(uint32_t(profile->engine), url.c_str(), url.c_str(), "document", &found)) {
                     if (found.rewritten) clean = found.rewritten;
                     niche_shields_verdict_free(&found);
                 }
@@ -1589,7 +1623,7 @@ public:
         uint64_t pageKey = 0;
         if (!NichePrivacyHosts(browser, request, pageHost, requestHost, pageKey, page)) return RV_CONTINUE;
         const std::string url = request->GetURL().ToString();
-        NicheDecision d = NicheDecide(url, page, requestHost, pageHost, type);
+        NicheDecision d = NicheDecide(profile, url, page, requestHost, pageHost, type);
         const bool blocked = d.verdict != niche_blocker::Verdict::kAllowed;
         // Everything a page asks of another site is reported; of its own site, only what was
         // blocked (an ad the site serves itself).
@@ -1649,7 +1683,8 @@ public:
     }
 
 private:
-    CefRefPtr<CefCookieAccessFilter> cookies_ = new NichePrivacyCookieFilter();
+    const std::string profile_;
+    CefRefPtr<CefCookieAccessFilter> cookies_;
     // Requests answered with a stand-in, by request id, between the two callbacks. IO thread.
     std::map<uint64_t, std::string> standIns_;
     IMPLEMENT_REFCOUNTING(NicheContentBlockingHandler);
@@ -1716,7 +1751,11 @@ public:
     /// Niche closed this page (-[NicheBrowser close]). Kept here rather than read from the owner:
     /// the NicheBrowser can be gone before Chromium asks.
     void SetCloseRequested() { close_requested_ = true; }
-    explicit NicheClient(NicheBrowser* owner) : owner_(owner), ownerless_(owner == nil) { NicheClientRegistry().insert(static_cast<const void*>(static_cast<CefClient*>(this))); }
+    /// `profile`: its pages' NicheProfileKey, whose Shields they get.
+    NicheClient(NicheBrowser* owner, const std::string& profile)
+        : owner_(owner), ownerless_(owner == nil), profile_(profile), blocker_(new NicheContentBlockingHandler(profile)) {
+        NicheClientRegistry().insert(static_cast<const void*>(static_cast<CefClient*>(this)));
+    }
     ~NicheClient() override { NicheClientRegistry().erase(static_cast<const void*>(static_cast<CefClient*>(this))); }
 
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -1782,14 +1821,14 @@ public:
         NicheBrowser* o = owner_;
         if (!o || !o.delegate) return true;
         // A window the page opens itself starts its pages the same way.
-        if (!extra_info) extra_info = NichePageStartInfo();
+        if (!extra_info) extra_info = NichePageStartInfo(profile_);
         // Document Picture in Picture (documentPictureInPicture.requestWindow: Google Meet's call
         // window): CEF always makes Chrome's own Picture in Picture window for it. It is not a
         // tab, so it gets a client with no NicheBrowser rather than a new tab to host it, which
         // showed up in the sidebar, was selected and took the window off the tab the user picked
         // (GitHub #198). The page that opened it keeps it, and Chrome closes it with that page.
         if (target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE) {
-            client = new NicheClient(nil);
+            client = new NicheClient(nil, profile_);
             NichePageSettings(settings);
             return false;
         }
@@ -1847,13 +1886,14 @@ public:
     // By the page's filtering mode: nothing below optimal, the page's own site's rules at
     // optimal, the generic rules too at complete.
     void HideWhatTheListsSay(CefRefPtr<CefFrame> frame) {
-        if (g_shieldsContentScript.empty() || !niche_shields_installed()) return;
+        const niche_blocker::Profile* profile = niche_blocker::ProfileFor(profile_);
+        if (g_shieldsContentScript.empty() || !profile || profile->engine < 0 || !niche_shields_installed(uint32_t(profile->engine))) return;
         const std::string url = frame->GetURL().ToString();
         const std::string host = niche_blocker::WebHost(url);
         if (host.empty()) return;
-        const int mode = niche_blocker::ModeFor(host);
+        const int mode = niche_blocker::ModeFor(profile, host);
         if (mode < niche_blocker::kModeOptimal) return;
-        char* found = niche_shields_cosmetic(url.c_str(), mode >= niche_blocker::kModeComplete);
+        char* found = niche_shields_cosmetic(uint32_t(profile->engine), url.c_str(), mode >= niche_blocker::kModeComplete);
         if (!found) return;
         RunPageScript(frame, "shields", g_shieldsContentScript, found);
         niche_shields_string_free(found);
@@ -1863,15 +1903,16 @@ public:
     // the generic selectors that match go back to the script.
     void AnswerGenericSelectors(CefRefPtr<CefBrowser> browser, const std::string& report) {
         CefRefPtr<CefFrame> frame = browser->GetMainFrame();
-        if (!frame || g_shieldsContentScript.empty()) return;
+        const niche_blocker::Profile* profile = niche_blocker::ProfileFor(profile_);
+        if (!frame || g_shieldsContentScript.empty() || !profile || profile->engine < 0) return;
         // Only a page in complete mode is told to ask; one that asks anyway gets no answer.
-        if (niche_blocker::ModeFor(niche_blocker::WebHost(frame->GetURL().ToString())) < niche_blocker::kModeComplete) return;
+        if (niche_blocker::ModeFor(profile, niche_blocker::WebHost(frame->GetURL().ToString())) < niche_blocker::kModeComplete) return;
         const size_t first = report.find('\x1f');
         const size_t second = first == std::string::npos ? std::string::npos : report.find('\x1f', first + 1);
         if (second == std::string::npos) return;
         const std::string classes = report.substr(0, first), ids = report.substr(first + 1, second - first - 1),
                           exceptions = report.substr(second + 1);
-        char* selectors = niche_shields_generic(classes.c_str(), ids.c_str(), exceptions.c_str());
+        char* selectors = niche_shields_generic(uint32_t(profile->engine), classes.c_str(), ids.c_str(), exceptions.c_str());
         if (!selectors) return;
         if (strcmp(selectors, "[]") != 0) {
             RunPageScript(frame, "shields", g_shieldsContentScript, std::string("{\"generic\":") + selectors + "}");
@@ -2544,8 +2585,9 @@ private:
     // Made without a NicheBrowser: Document Picture in Picture's client (owner_ is weak, so it can't say).
     const bool ownerless_;
     bool close_requested_ = false;
+    const std::string profile_;
     CefRefPtr<FaviconState> favicon_ = new FaviconState();
-    CefRefPtr<CefResourceRequestHandler> blocker_ = new NicheContentBlockingHandler();
+    CefRefPtr<CefResourceRequestHandler> blocker_;
     IMPLEMENT_REFCOUNTING(NicheClient);
 };
 
@@ -2707,7 +2749,7 @@ class NicheDevToolsObserver : public CefDevToolsMessageObserver {
     _containerView = [[NSView alloc] initWithFrame:frame];
     _containerView.wantsLayer = YES;
     _containerView.autoresizesSubviews = YES;
-    _client = new NicheClient(self);
+    _client = new NicheClient(self, NicheProfileKey(_profilePath, _isIncognito));
     if (!g_allBrowsers) g_allBrowsers = [NSHashTable weakObjectsHashTable];
     [g_allBrowsers addObject:self];
     if (!_isPopupHost) {
@@ -2731,7 +2773,7 @@ class NicheDevToolsObserver : public CefDevToolsMessageObserver {
         CefBrowserSettings settings;
         NichePageSettings(settings);
         CefRefPtr<CefBrowserView> view = CefBrowserView::CreateBrowserView(
-            _client, CefStringFromNS(_pendingURL ?: @"about:blank"), settings, NichePageStartInfo(),
+            _client, CefStringFromNS(_pendingURL ?: @"about:blank"), settings, NichePageStartInfo(NicheProfileKey(_profilePath, _isIncognito)),
             [self requestContext], new NicheChromeViewDelegate(self));
         CefWindow::CreateTopLevelWindow(new NicheChromeWindowDelegate(self, view));
         return;
@@ -2744,7 +2786,7 @@ class NicheDevToolsObserver : public CefDevToolsMessageObserver {
     CefBrowserSettings settings;
     NichePageSettings(settings);
     CefBrowserHost::CreateBrowser(windowInfo, _client, CefStringFromNS(_pendingURL ?: @"about:blank"), settings,
-                                  NichePageStartInfo(), [self requestContext]);
+                                  NichePageStartInfo(NicheProfileKey(_profilePath, _isIncognito)), [self requestContext]);
 }
 
 - (CefRefPtr<CefRequestContext>)requestContext {
@@ -3277,8 +3319,8 @@ static void MarkProfileExitedCleanly(NSString* profileDir) {
     if (_builder && json.length) niche_shields_builder_add_resources(_builder, static_cast<const char*>(json.bytes), json.length, forPages);
 }
 
-- (NSInteger)install {
-    if (!_builder) return 0;
+- (NSInteger)installInSlot:(NSInteger)slot {
+    if (!_builder || slot < 0) return 0;
     NicheShieldsEngine* engine = niche_shields_builder_build(_builder);
     _builder = nullptr;
     const NSInteger rules = niche_shields_engine_rule_count(engine);
@@ -3287,10 +3329,26 @@ static void MarkProfileExitedCleanly(NSString* profileDir) {
     CefRefPtr<CefBinaryValue> pages = blob ? CefBinaryValue::Create(blob, length) : nullptr;
     niche_shields_blob_free(blob, length);
     NSLog(@"NicheCEF: Shields for pages: %zu KB", length / 1024);
-    niche_shields_install(engine);
+    niche_shields_install(uint32_t(slot), engine);
     // The blob is read where browsers are made, on the main thread.
-    dispatch_async(dispatch_get_main_queue(), ^{ g_shieldsPageBlob = pages; });
+    dispatch_async(dispatch_get_main_queue(), ^{ g_shieldsPageBlobs[int(slot)] = pages; });
     return rules;
+}
+@end
+
+@implementation NicheProfileShields
+- (instancetype)init {
+    if ((self = [super init])) {
+        _engine = -1;
+        _filteringMode = 2;
+        _blocked = @[];
+        _allowed = @[];
+        _blockedOn = @{};
+        _allowedOn = @{};
+        _offSites = @[];
+        _siteModes = @{};
+    }
+    return self;
 }
 @end
 
@@ -3333,7 +3391,6 @@ static NicheBrowser* NicheBrowserForDownload(const NicheDownloadRecord& record, 
 
 + (void)setPrivacyEventHandler:(void (^)(NSArray<NichePrivacyEvent*>*))handler { g_privacyEventHandler = [handler copy]; }
 + (uint64_t)privacyPageKeyForURL:(NSString*)url { return NichePageKey(url.UTF8String ?: ""); }
-+ (void)setGlobalPrivacyControl:(BOOL)enabled { g_globalPrivacyControl.store(enabled); }
 
 static niche_blocker::DomainSet NicheDomainSet(NSArray<NSString*>* domains) {
     niche_blocker::DomainSet set;
@@ -3344,23 +3401,84 @@ static niche_blocker::DomainSet NicheDomainSet(NSArray<NSString*>* domains) {
     return set;
 }
 
-/// Tells page processes the filtering modes when they changed: tabs made from now on as they
-/// are made, the ones that exist now by message. Main thread.
-static void NichePublishShieldsModes() {
-    const niche_blocker::Rules* rules = niche_blocker::UserRules().load(std::memory_order_acquire);
-    std::string modes = std::to_string(niche_blocker::StandardMode().load()) + "\n";
-    if (rules) {
-        std::vector<std::string> lines;
-        for (const std::string& site : rules->offSites) lines.push_back(site + "\t0\n");
-        for (const auto& [site, mode] : rules->siteModes) {
-            if (!rules->offSites.count(site)) lines.push_back(site + "\t" + std::to_string(mode) + "\n");
-        }
-        std::sort(lines.begin(), lines.end());
-        for (const std::string& line : lines) modes += line;
+/// A profile's filtering modes as page processes take them (NicheProfileShieldsState::modes).
+static std::string NicheModesLine(const niche_blocker::Profile& profile) {
+    std::string modes = std::to_string(profile.standardMode) + "\n";
+    std::vector<std::string> lines;
+    for (const std::string& site : profile.rules.offSites) lines.push_back(site + "\t0\n");
+    for (const auto& [site, mode] : profile.rules.siteModes) {
+        if (!profile.rules.offSites.count(site)) lines.push_back(site + "\t" + std::to_string(mode) + "\n");
     }
-    if (modes == g_shieldsModes) return;
-    g_shieldsModes = modes;
+    std::sort(lines.begin(), lines.end());
+    for (const std::string& line : lines) modes += line;
+    return modes;
+}
+
+/// The request path's copy of every profile's Shields, swapped whole (niche_blocker::Profiles).
+static void NichePublishProfiles() {
+    auto* all = new niche_blocker::Profiles();
+    for (const auto& [key, state] : g_profileShields) (*all)[key] = new niche_blocker::Profile(state.profile);
+    niche_blocker::PublishProfiles(all);
+}
+
+/// The contexts a profile's pages load in: the global one and incognito's for Default, the
+/// profile's own folder otherwise. Only ones that finished loading take preferences (an
+/// uninitialised one is fatal); the rest get them from ApplyProfilePreferences when they load.
+static void NicheForEachReadyContext(const std::string& profile, void (^apply)(CefRefPtr<CefRequestContext>)) {
+    if (!g_contextInitialized || g_quitting) return;
+    if (profile == niche_blocker::DefaultProfile()) {
+        apply(CefRequestContext::GetGlobalContext());
+        if (g_incognitoContext && g_incognitoReady) apply(g_incognitoContext);
+        return;
+    }
+    for (auto& [path, context] : g_profileContexts) {
+        NSString* folder = @(path.c_str());
+        if (NicheProfileKey(folder, NO) == profile && [g_readyProfiles containsObject:folder]) apply(context);
+    }
+}
+
++ (void)setShields:(NicheProfileShields*)shields forProfile:(NSString*)profileName {
+    const std::string key = profileName.length ? std::string(profileName.UTF8String) : niche_blocker::DefaultProfile();
+    NicheProfileShieldsState next;
+    niche_blocker::Profile& p = next.profile;
+    niche_blocker::Rules& rules = p.rules;
+    rules.blocked = NicheDomainSet(shields.blocked);
+    rules.allowed = NicheDomainSet(shields.allowed);
+    for (NSString* site in shields.blockedOn) rules.blockedOn[niche_blocker::NormalizeHost(site.UTF8String ?: "")] = NicheDomainSet(shields.blockedOn[site]);
+    for (NSString* site in shields.allowedOn) rules.allowedOn[niche_blocker::NormalizeHost(site.UTF8String ?: "")] = NicheDomainSet(shields.allowedOn[site]);
+    for (NSString* site in shields.offSites) {
+        std::string host = niche_blocker::NormalizeHost(site.UTF8String ?: "");
+        if (!host.empty()) rules.offSites.insert(host);
+    }
+    for (NSString* site in shields.siteModes) {
+        std::string host = niche_blocker::NormalizeHost(site.UTF8String ?: "");
+        const int mode = shields.siteModes[site].intValue;
+        if (host.empty() || mode < niche_blocker::kModeNone || mode > niche_blocker::kModeComplete) continue;
+        if (mode == niche_blocker::kModeNone) rules.offSites.insert(host); else rules.siteModes[host] = mode;
+    }
+    p.standardMode = (int)std::min<NSInteger>(std::max<NSInteger>(shields.filteringMode, niche_blocker::kModeBasic), niche_blocker::kModeComplete);
+    p.engine = shields.engine >= 0 ? int(shields.engine) : -1;
+    p.globalPrivacyControl = shields.globalPrivacyControl;
+    p.withholdThirdPartyCookies = shields.blocksThirdPartyCookies;
+    p.cleanAddresses = shields.removesTrackingCodes;
+    next.blockThirdPartyCookies = shields.blocksThirdPartyCookies;
+    next.httpsOnly = shields.httpsOnly;
+    next.pageStartScript = shields.pageStartScript.UTF8String ?: "";
+    next.modes = NicheModesLine(p);
+
+    const NicheProfileShieldsState* before = g_profileShields.count(key) ? &g_profileShields[key] : nullptr;
+    const bool cookiesChanged = !before || before->blockThirdPartyCookies != next.blockThirdPartyCookies;
+    const bool httpsChanged = !before || before->httpsOnly != next.httpsOnly;
+    const bool modesChanged = !before || before->modes != next.modes;
+    g_profileShields[key] = std::move(next);
+    NichePublishProfiles();
+    if (cookiesChanged) NicheForEachReadyContext(key, ^(CefRefPtr<CefRequestContext> c) { ApplyThirdPartyCookies(c, key); });
+    if (httpsChanged) NicheForEachReadyContext(key, ^(CefRefPtr<CefRequestContext> c) { ApplyHttpsOnly(c, key); });
+    if (!modesChanged) return;
+    // Tabs made from now on get the modes as they are made; the profile's open ones by message.
+    const std::string modes = g_profileShields[key].modes;
     for (NicheBrowser* b in [g_allBrowsers allObjects]) {
+        if (NicheProfileKey(b.profilePath, b.isIncognito) != key) continue;
         CefRefPtr<CefBrowser> cef = [b cefBrowser];
         CefRefPtr<CefFrame> frame = cef ? cef->GetMainFrame() : nullptr;
         if (!frame || !frame->IsValid()) continue;
@@ -3370,46 +3488,24 @@ static void NichePublishShieldsModes() {
     }
 }
 
-+ (void)setPrivacyRulesBlocked:(NSArray<NSString*>*)blocked allowed:(NSArray<NSString*>*)allowed
-                     blockedOn:(NSDictionary<NSString*, NSArray<NSString*>*>*)blockedOn
-                     allowedOn:(NSDictionary<NSString*, NSArray<NSString*>*>*)allowedOn
-                      offSites:(NSArray<NSString*>*)offSites
-                     siteModes:(NSDictionary<NSString*, NSNumber*>*)siteModes {
-    auto* rules = new niche_blocker::Rules();
-    rules->blocked = NicheDomainSet(blocked);
-    rules->allowed = NicheDomainSet(allowed);
-    for (NSString* site in blockedOn) rules->blockedOn[niche_blocker::NormalizeHost(site.UTF8String ?: "")] = NicheDomainSet(blockedOn[site]);
-    for (NSString* site in allowedOn) rules->allowedOn[niche_blocker::NormalizeHost(site.UTF8String ?: "")] = NicheDomainSet(allowedOn[site]);
-    for (NSString* site in offSites) {
-        std::string host = niche_blocker::NormalizeHost(site.UTF8String ?: "");
-        if (!host.empty()) rules->offSites.insert(host);
-    }
-    for (NSString* site in siteModes) {
-        std::string host = niche_blocker::NormalizeHost(site.UTF8String ?: "");
-        const int mode = siteModes[site].intValue;
-        if (host.empty() || mode < niche_blocker::kModeNone || mode > niche_blocker::kModeComplete) continue;
-        if (mode == niche_blocker::kModeNone) rules->offSites.insert(host); else rules->siteModes[host] = mode;
-    }
-    niche_blocker::PublishRules(rules);
-    NichePublishShieldsModes();
++ (void)forgetShieldsForProfile:(NSString*)profileName {
+    const std::string key = profileName.UTF8String ?: "";
+    if (key.empty() || key == niche_blocker::DefaultProfile() || !g_profileShields.erase(key)) return;
+    NichePublishProfiles();
 }
 
-+ (void)setShieldsFilteringMode:(NSInteger)mode {
-    const int clamped = (int)std::min<NSInteger>(std::max<NSInteger>(mode, niche_blocker::kModeBasic), niche_blocker::kModeComplete);
-    niche_blocker::StandardMode().store(clamped);
-    NichePublishShieldsModes();
-}
-
-+ (void)setTrackingCodeRemoval:(BOOL)enabled { g_cleanAddresses.store(enabled); }
 + (void)setShieldsPageScript:(NSString*)script { g_shieldsContentScript = script.UTF8String ?: ""; }
-+ (BOOL)shieldsInstalled { return niche_shields_installed(); }
-+ (void)removeShields {
-    niche_shields_install(nullptr);
-    g_shieldsPageBlob = nullptr;
++ (BOOL)shieldsInstalledInSlot:(NSInteger)slot { return slot >= 0 && niche_shields_installed(uint32_t(slot)); }
++ (void)removeShieldsFromSlot:(NSInteger)slot {
+    if (slot < 0) return;
+    niche_shields_install(uint32_t(slot), nullptr);
+    g_shieldsPageBlobs.erase(int(slot));
 }
-+ (NSString*)shieldsVerdictForURL:(NSString*)url onPageURL:(NSString*)pageURL type:(NSString*)type {
++ (NSString*)shieldsVerdictForURL:(NSString*)url onPageURL:(NSString*)pageURL type:(NSString*)type profile:(NSString*)profile {
+    const NicheProfileShieldsState* state = NicheShieldsState(profile.UTF8String ?: "");
     NicheShieldsVerdict found;
-    if (!niche_shields_check(url.UTF8String ?: "", pageURL.UTF8String ?: "", type.UTF8String ?: "other", &found)) return @"no engine";
+    if (!state || state->profile.engine < 0 ||
+        !niche_shields_check(uint32_t(state->profile.engine), url.UTF8String ?: "", pageURL.UTF8String ?: "", type.UTF8String ?: "other", &found)) return @"no engine";
     NSString* said = [NSString stringWithFormat:@"blocked=%d exception=%d group=%d stand-in=%d rewritten=%s", found.blocked, found.exception,
                       found.group == 255 ? -1 : found.group, found.redirect != nullptr, found.rewritten ?: "-"];
     niche_shields_verdict_free(&found);
@@ -3431,27 +3527,6 @@ static void NichePublishShieldsModes() {
     if (g_incognitoContext && g_incognitoReady) ApplyWebsiteAppearance(g_incognitoContext);
 }
 + (NSInteger)websiteAppearance { return g_websiteAppearance; }
-+ (void)setHttpsOnlyModeEnabled:(BOOL)enabled {
-    if (enabled == g_httpsOnly) return;
-    g_httpsOnly = enabled;
-    if (!g_contextInitialized || g_quitting) return;
-    ApplyHttpsOnly(CefRequestContext::GetGlobalContext());
-    for (auto& [path, context] : g_profileContexts) {
-        if ([g_readyProfiles containsObject:@(path.c_str())]) ApplyHttpsOnly(context);
-    }
-    if (g_incognitoContext && g_incognitoReady) ApplyHttpsOnly(g_incognitoContext);
-}
-+ (void)setThirdPartyCookiesBlocked:(BOOL)blocked {
-    g_withholdThirdPartyCookies.store(blocked);
-    if (blocked == g_blockThirdPartyCookies) return;
-    g_blockThirdPartyCookies = blocked;
-    if (!g_contextInitialized || g_quitting) return;
-    ApplyThirdPartyCookies(CefRequestContext::GetGlobalContext());
-    for (auto& [path, context] : g_profileContexts) {
-        if ([g_readyProfiles containsObject:@(path.c_str())]) ApplyThirdPartyCookies(context);
-    }
-    if (g_incognitoContext && g_incognitoReady) ApplyThirdPartyCookies(g_incognitoContext);
-}
 + (void)spikeChromeWindowWithURL:(NSString*)url handler:(void (^)(NSWindow*))handler {
     g_spikeWindowHandler = [handler copy];
     CefBrowserSettings settings;

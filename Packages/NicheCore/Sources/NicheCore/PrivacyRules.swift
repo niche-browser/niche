@@ -156,3 +156,55 @@ public struct PrivacyRules: Codable, Equatable, Sendable {
                         siteModes: siteModes.merging(offSites.map { ($0, FilteringMode.none.rawValue) }) { _, off in off })
     }
 }
+
+/// The privacy panel's choices for every browser profile (privacy.json), by `PrivacyProfile.key`:
+/// a site switched off or a company allowed in one profile is not in any other (22 Nov 2026).
+/// The Default profile's are at the top of the file, where every version has read them; the
+/// others under `profiles`.
+public struct PrivacyRuleBook: Codable, Equatable, Sendable {
+    private var byProfile: [String: PrivacyRules] = [:]
+    /// Read from a file from before each profile had its own: its one set was every profile's.
+    public private(set) var sharedByEveryProfile = false
+
+    public init() {}
+
+    private enum CodingKeys: String, CodingKey { case profiles }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let mine = try PrivacyRules(from: decoder)
+        if mine != PrivacyRules() { byProfile[PrivacyProfile.defaultKey] = mine }
+        for (key, rules) in (try? c.decodeIfPresent([String: PrivacyRules].self, forKey: .profiles)) ?? [:]
+        where key != PrivacyProfile.defaultKey && rules != PrivacyRules() {
+            byProfile[key] = rules
+        }
+        sharedByEveryProfile = !c.contains(.profiles)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try self[PrivacyProfile.defaultKey].encode(to: encoder)
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(byProfile.filter { $0.key != PrivacyProfile.defaultKey }, forKey: .profiles)
+    }
+
+    /// A profile's choices; none for one that has made none.
+    public subscript(profile: String) -> PrivacyRules {
+        get { byProfile[profile] ?? PrivacyRules() }
+        set { byProfile[profile] = newValue == PrivacyRules() ? nil : newValue }
+    }
+
+    /// The profiles with choices of their own.
+    public var profiles: Set<String> { Set(byProfile.keys) }
+
+    /// After a file from before per-profile choices: each profile gets the one set there was, so
+    /// nothing changes on update. A profile made since starts with none. The choices of profiles
+    /// that are gone are forgotten. `profiles`: the keys of the profiles there are besides Default.
+    public mutating func adopt(profiles: Set<String>) {
+        if sharedByEveryProfile {
+            let shared = self[PrivacyProfile.defaultKey]
+            for key in profiles where key != PrivacyProfile.defaultKey { self[key] = shared }
+            sharedByEveryProfile = false
+        }
+        for key in byProfile.keys where key != PrivacyProfile.defaultKey && !profiles.contains(key) { byProfile[key] = nil }
+    }
+}

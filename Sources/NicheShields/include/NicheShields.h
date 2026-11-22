@@ -40,10 +40,11 @@ uint32_t niche_shields_engine_rule_count(const NicheShieldsEngine* engine);
 uint8_t* niche_shields_engine_page_blob(const NicheShieldsEngine* engine, size_t* length);
 void niche_shields_blob_free(uint8_t* blob, size_t length);
 
-// Makes `engine` the one requests are checked against and frees the one before it once no
+// Makes `engine` the one requests in `slot` are checked against (a slot per set of lists some
+// browser profile uses) and frees the one before it once no
 // check is using it. Takes ownership; null uninstalls.
-void niche_shields_install(NicheShieldsEngine* engine);
-bool niche_shields_installed(void);
+void niche_shields_install(uint32_t slot, NicheShieldsEngine* engine);
+bool niche_shields_installed(uint32_t slot);
 
 // --- Asking (browser process) -----------------------------------------------------------------
 
@@ -64,15 +65,15 @@ typedef struct {
 // `type` is one of: document, sub_frame, script, stylesheet, image, font, media, xmlhttprequest,
 // ping, websocket, other. `source` is the page (or frame) the request is made from. False, with
 // `verdict` cleared, when no engine is installed.
-bool niche_shields_check(const char* url, const char* source, const char* type, NicheShieldsVerdict* verdict);
+bool niche_shields_check(uint32_t slot, const char* url, const char* source, const char* type, NicheShieldsVerdict* verdict);
 void niche_shields_verdict_free(NicheShieldsVerdict* verdict);
 
 // What to hide on a page, as JSON: {"hide": [selectors], "procedural": [filters as JSON text],
 // "exceptions": [selectors], "generichide": bool}. Null when no engine is installed.
-char* niche_shields_cosmetic(const char* url, bool generic);
+char* niche_shields_cosmetic(uint32_t slot, const char* url, bool generic);
 // The generic selectors that apply to a page showing these classes and ids (newline-separated),
 // less the page's `exceptions` (newline-separated): a JSON array.
-char* niche_shields_generic(const char* classes, const char* ids, const char* exceptions);
+char* niche_shields_generic(uint32_t slot, const char* classes, const char* ids, const char* exceptions);
 void niche_shields_string_free(char* string);
 
 // --- Page processes ---------------------------------------------------------------------------
