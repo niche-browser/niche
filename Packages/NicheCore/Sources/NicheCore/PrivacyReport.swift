@@ -18,7 +18,11 @@ public struct PrivacyProtections: Equatable, Sendable {
         self.noticesFingerprinting = noticesFingerprinting
     }
 
-    public init(_ settings: AppSettings) {
+    /// The Default profile's (`AppSettings.privacy`).
+    public init(_ settings: AppSettings) { self.init(settings.privacy) }
+
+    /// A profile's.
+    public init(_ settings: PrivacySettings) {
         self.init(blocksTrackers: settings.blockAdsAndTrackers, withholdsCookies: settings.blockThirdPartyCookies,
                   cleansAddresses: settings.removeTrackingParameters, sendsSignal: settings.sendGlobalPrivacyControl,
                   noticesFingerprinting: settings.noticeFingerprinting)

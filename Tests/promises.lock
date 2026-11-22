@@ -12,6 +12,10 @@
 #12    Packages/NicheCore/Tests/NicheCoreTests/ShippedSidebarTests.swift::peekOptionsDefaultToArcs  2764cc04e622
 #16    Tests/Scenarios/profile-key-kept.scenario  67d77fd1d790
 #16    Tests/Scenarios/upgrade.scenario  d0037adb4339
+#18    Packages/NicheCore/Tests/NicheCoreTests/ProfilePrivacyTests.swift::aChangeStaysInItsProfile  913802ffdf33
+#18    Packages/NicheCore/Tests/NicheCoreTests/ProfilePrivacyTests.swift::aSiteChoiceStaysInItsProfile  59a8a903f87b
+#18    Packages/NicheCore/Tests/NicheCoreTests/ProfilePrivacyTests.swift::anUpdateGivesEveryProfileTheSettingsThereWere  102c8054cfaa
+#18    Tests/Scenarios/shields-per-profile.scenario  16e646596320
 #21    Tests/StoreTests.swift::reopenClosedTabs  1b97b17bcf25
 #22    Tests/PolicyTests.swift::extensionLaunch  8f21949f730d
 #24    Packages/NicheCore/Tests/NicheCoreTests/ShippedThemesTests.swift::edgeToEdgeIsOffUnlessChosen  fcdb8b7fc653

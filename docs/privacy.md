@@ -6,6 +6,11 @@ forgotten when its tab closes (a tab keeps its last few pages, so Back shows the
 
 ## What is on by default (Settings ▸ Privacy)
 
+Each browser profile has its own: the switches below and the privacy panel's choices are a
+profile's, and spaces on one profile share them (incognito windows follow Default). A new profile
+starts with the Default profile's switches. Secure DNS is the whole app's. Details in
+[shields.md](shields.md), "Each profile its own".
+
 | Switch | What it does | Where |
 |---|---|---|
 | Protection level | Relaxed, Balanced (the default) or Strict: a preset over the switches below, chosen in onboarding and at the top of Settings ▸ Privacy. | `PrivacyLevel` |
@@ -51,7 +56,8 @@ by company in `PrivacyLedger` (NicheCore), and the companies' names from `Tracke
 table written by hand for Niche (about 190 companies; a host it doesn't know is listed under its
 own site). A blocked company's row says which lists stopped it ("on the ad lists and the tracker
 lists"), and an ad a site serves from its own address is counted under the site itself ("This
-site"). The user's own blocks are `PrivacyRules` (privacy.json), pushed to the engine as
+site"). The user's own blocks are `PrivacyRules`, one set per profile (`PrivacyRuleBook`,
+privacy.json), pushed to the engine with the rest of that profile's Shields as
 domains; a company is blocked with every domain the directory lists for it, so blocking Google
 also stops its fonts and videos, and the panel says so before the click.
 

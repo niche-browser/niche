@@ -64,10 +64,16 @@ struct Cosmetic {
     generichide: bool,
 }
 
-static INSTALLED: RwLock<Option<Arc<ShieldsEngine>>> = RwLock::new(None);
+/// The engines in use, by slot: one for each set of lists some browser profile asks for, so
+/// profiles set up alike share one and a profile set up differently gets its own (22 Nov 2026:
+/// there was one, and every profile had the same Shields).
+static INSTALLED: RwLock<Vec<Option<Arc<ShieldsEngine>>>> = RwLock::new(Vec::new());
 
-fn installed() -> Option<Arc<ShieldsEngine>> {
-    INSTALLED.read().ok().and_then(|guard| guard.clone())
+/// More slots than that is a mistake, not a set of profiles.
+const SLOTS: u32 = 64;
+
+fn installed(slot: u32) -> Option<Arc<ShieldsEngine>> {
+    INSTALLED.read().ok().and_then(|guard| guard.get(slot as usize).cloned().flatten())
 }
 
 /// A line of a list that is a rule: not blank, a comment (`!`), or a header (`[Adblock Plus]`).
@@ -384,19 +390,27 @@ pub unsafe extern "C" fn niche_shields_blob_free(blob: *mut u8, length: usize) {
     }
 }
 
+/// Puts `engine` in `slot`, replacing the one there; null empties the slot.
+///
 /// # Safety
 /// `engine` is from `niche_shields_builder_build` (or null) and is not used again.
 #[no_mangle]
-pub unsafe extern "C" fn niche_shields_install(engine: *mut ShieldsEngine) {
+pub unsafe extern "C" fn niche_shields_install(slot: u32, engine: *mut ShieldsEngine) {
     let next = if engine.is_null() { None } else { Some(Arc::new(*Box::from_raw(engine))) };
+    if slot >= SLOTS {
+        return;
+    }
     if let Ok(mut guard) = INSTALLED.write() {
-        *guard = next;
+        if guard.len() <= slot as usize {
+            guard.resize(slot as usize + 1, None);
+        }
+        guard[slot as usize] = next;
     }
 }
 
 #[no_mangle]
-pub extern "C" fn niche_shields_installed() -> bool {
-    installed().is_some()
+pub extern "C" fn niche_shields_installed(slot: u32) -> bool {
+    installed(slot).is_some()
 }
 
 #[repr(C)]
@@ -411,12 +425,12 @@ pub struct CVerdict {
 /// # Safety
 /// The strings are null-terminated; `verdict` is writable.
 #[no_mangle]
-pub unsafe extern "C" fn niche_shields_check(url: *const c_char, source: *const c_char, kind: *const c_char, verdict: *mut CVerdict) -> bool {
+pub unsafe extern "C" fn niche_shields_check(slot: u32, url: *const c_char, source: *const c_char, kind: *const c_char, verdict: *mut CVerdict) -> bool {
     if verdict.is_null() {
         return false;
     }
     *verdict = CVerdict { blocked: false, exception: false, group: UNKNOWN_GROUP, redirect: std::ptr::null_mut(), rewritten: std::ptr::null_mut() };
-    let Some(engine) = installed() else { return false };
+    let Some(engine) = installed(slot) else { return false };
     let (url, source, kind) = (text(url), text(source), text(kind));
     let Some(found) = guarded(None, || Some(engine.check(url, source, kind))) else { return false };
     (*verdict).blocked = found.blocked;
@@ -443,8 +457,8 @@ pub unsafe extern "C" fn niche_shields_verdict_free(verdict: *mut CVerdict) {
 /// # Safety
 /// `url` is null-terminated.
 #[no_mangle]
-pub unsafe extern "C" fn niche_shields_cosmetic(url: *const c_char, generic: bool) -> *mut c_char {
-    let Some(engine) = installed() else { return std::ptr::null_mut() };
+pub unsafe extern "C" fn niche_shields_cosmetic(slot: u32, url: *const c_char, generic: bool) -> *mut c_char {
+    let Some(engine) = installed(slot) else { return std::ptr::null_mut() };
     let url = text(url);
     guarded(None, || Some(engine.cosmetic(url, generic))).map(c_string).unwrap_or(std::ptr::null_mut())
 }
@@ -452,8 +466,8 @@ pub unsafe extern "C" fn niche_shields_cosmetic(url: *const c_char, generic: boo
 /// # Safety
 /// The strings are null-terminated.
 #[no_mangle]
-pub unsafe extern "C" fn niche_shields_generic(classes: *const c_char, ids: *const c_char, exceptions: *const c_char) -> *mut c_char {
-    let Some(engine) = installed() else { return std::ptr::null_mut() };
+pub unsafe extern "C" fn niche_shields_generic(slot: u32, classes: *const c_char, ids: *const c_char, exceptions: *const c_char) -> *mut c_char {
+    let Some(engine) = installed(slot) else { return std::ptr::null_mut() };
     let (classes, ids, exceptions) = (text(classes), text(ids), text(exceptions));
     guarded(None, || Some(engine.generic(classes, ids, exceptions))).map(c_string).unwrap_or(std::ptr::null_mut())
 }

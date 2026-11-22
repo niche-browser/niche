@@ -1,0 +1,45 @@
+# Each profile keeps its own Shields (22 Nov 2026: what one profile set showed in every other, so
+# switching spaces carried one profile's choices into the next). Personal is on Default, as it
+# comes (Trackers on, Optimal); Random is on the profile Hobbies, set to Trackers off and Basic.
+# A page in each does what its own profile says, before and after the other one is used, and a
+# site choice made in one stays in it.
+# promise: #18
+port 8132
+budget rss=800 stalls50=20
+seed settings.json {"hasSeenImportPrompt": true, "toolbarDefaultMigrated": true, "showToolbar": false, "profilePrivacy": {"Profile B0000000-0000-0000-0000-000000000001": {"blockAdsAndTrackers": false, "filteringMode": 1}}}
+seed sidebar.json {"version":1,"spaceOrder":["A0000000-0000-0000-0000-000000000001","A0000000-0000-0000-0000-000000000002"],"spaces":[{"id":"A0000000-0000-0000-0000-000000000001","title":"Personal","emoji":"🏠","favoritesContainerID":"C0000000-0000-0000-0000-000000000011","pinnedContainerID":"C0000000-0000-0000-0000-000000000012","todayContainerID":"C0000000-0000-0000-0000-000000000013","createdAt":"2026-11-06T08:00:00Z","theme":{"colors":["#8389FF","#8389FF"],"intensity":0.5,"noise":0,"appearance":"light","accent":"#8389FF","solid":true,"key":["#8389FF"]}},{"id":"A0000000-0000-0000-0000-000000000002","title":"Random","emoji":"🎲","favoritesContainerID":"C0000000-0000-0000-0000-000000000021","pinnedContainerID":"C0000000-0000-0000-0000-000000000022","todayContainerID":"C0000000-0000-0000-0000-000000000023","createdAt":"2026-11-06T08:00:00Z","profileID":"B0000000-0000-0000-0000-000000000001","theme":{"colors":["#8389FF","#8389FF"],"intensity":0.5,"noise":0,"appearance":"light","accent":"#8389FF","solid":true,"key":["#8389FF"]}}],"profiles":[{"id":"B0000000-0000-0000-0000-000000000001","name":"Hobbies"}],"items":[{"id":"C0000000-0000-0000-0000-000000000011","children":[],"isUnread":false,"createdAt":"2026-11-06T08:00:00Z","data":{"container":{"_0":{"favorites":{"spaceID":"A0000000-0000-0000-0000-000000000001"}}}}},{"id":"C0000000-0000-0000-0000-000000000012","children":[],"isUnread":false,"createdAt":"2026-11-06T08:00:00Z","data":{"container":{"_0":{"pinned":{"spaceID":"A0000000-0000-0000-0000-000000000001"}}}}},{"id":"C0000000-0000-0000-0000-000000000013","children":[],"isUnread":false,"createdAt":"2026-11-06T08:00:00Z","data":{"container":{"_0":{"today":{"spaceID":"A0000000-0000-0000-0000-000000000001"}}}}},{"id":"C0000000-0000-0000-0000-000000000021","children":[],"isUnread":false,"createdAt":"2026-11-06T08:00:00Z","data":{"container":{"_0":{"favorites":{"spaceID":"A0000000-0000-0000-0000-000000000002"}}}}},{"id":"C0000000-0000-0000-0000-000000000022","children":[],"isUnread":false,"createdAt":"2026-11-06T08:00:00Z","data":{"container":{"_0":{"pinned":{"spaceID":"A0000000-0000-0000-0000-000000000002"}}}}},{"id":"C0000000-0000-0000-0000-000000000023","children":[],"isUnread":false,"createdAt":"2026-11-06T08:00:00Z","data":{"container":{"_0":{"today":{"spaceID":"A0000000-0000-0000-0000-000000000002"}}}}}]}
+pace 0.5
+expect-log Shields ready: 2 lists
+
+# Random (Hobbies): Basic runs no list script on the page, and with Trackers off the ad loads.
+niche://open?url=${PAGE}?n=hobbies&space=A0000000-0000-0000-0000-000000000002
+expect-log loaded 127\.0\.0\.1
+wait 1
+niche://debug?cdp=Runtime.evaluate&params={"expression":"new Promise(r=>{const s=document.createElement('script');s.src='/shields-first-party-ad.js';s.onload=()=>r('hobbies:'+window.__shields_answered+'-loaded');s.onerror=()=>r('hobbies:'+window.__shields_answered+'-failed');document.head.append(s)})","awaitPromise":true}
+expect-log Niche cdp Runtime.evaluate .*"value":"hobbies:undefined-loaded"
+
+# Personal (Default): its own Optimal and Trackers, not Hobbies'.
+niche://open?url=${PAGE}?n=personal&space=A0000000-0000-0000-0000-000000000001
+expect-log loaded 127\.0\.0\.1
+wait 1
+niche://debug?cdp=Runtime.evaluate&params={"expression":"new Promise(r=>{const s=document.createElement('script');s.src='/shields-first-party-ad.js';s.onload=()=>r('personal:'+window.__shields_answered+'-loaded');s.onerror=()=>r('personal:'+window.__shields_answered+'-failed');document.head.append(s)})","awaitPromise":true}
+expect-log Niche cdp Runtime.evaluate .*"value":"personal:start-failed"
+
+# Protection off for this site, chosen in Personal's privacy panel: Personal's page loads the ad now.
+niche://debug?privacyMode=off
+niche://open?url=${PAGE}?n=personal-off&space=A0000000-0000-0000-0000-000000000001
+expect-log loaded 127\.0\.0\.1
+wait 1
+niche://debug?cdp=Runtime.evaluate&params={"expression":"new Promise(r=>{const s=document.createElement('script');s.src='/shields-first-party-ad.js';s.onload=()=>r('personal-off:loaded');s.onerror=()=>r('personal-off:failed');document.head.append(s)})","awaitPromise":true}
+expect-log Niche cdp Runtime.evaluate .*"value":"personal-off:loaded"
+
+# Personal's mode for every site goes to Complete. Back in Random: still Hobbies' own Basic for
+# this site (not Personal's "off", nor its Complete), no list script, and the ad loads.
+niche://debug?filteringMode=complete
+niche://open?url=${PAGE}?n=hobbies-again&space=A0000000-0000-0000-0000-000000000002
+expect-log loaded 127\.0\.0\.1
+wait 1
+niche://debug?privacy=hobbies
+expect-log privacy\[hobbies\] .* mode=basic
+niche://debug?cdp=Runtime.evaluate&params={"expression":"new Promise(r=>{const s=document.createElement('script');s.src='/shields-first-party-ad.js';s.onload=()=>r('hobbies-again:'+window.__shields_answered+'-loaded');s.onerror=()=>r('hobbies-again:'+window.__shields_answered+'-failed');document.head.append(s)})","awaitPromise":true}
+expect-log Niche cdp Runtime.evaluate .*"value":"hobbies-again:undefined-loaded"

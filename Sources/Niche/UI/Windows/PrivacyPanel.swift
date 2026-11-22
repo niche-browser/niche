@@ -72,6 +72,8 @@ final class PrivacyPanelModel {
     var protections = PrivacyProtections()
     /// Settings ▸ Privacy "Filtering": the mode every site has unless it has its own.
     var standardMode = FilteringMode.standard
+    /// The page's profile (`PrivacyProfile.key`): its choices are the ones shown and made here.
+    var profile = PrivacyProfile.defaultKey
     /// False in an incognito window: what is chosen here is not written down.
     var remembersChoices = true
     /// When the user last changed a rule or the site's switch while a tab was showing.
@@ -212,7 +214,7 @@ struct PrivacyPanelView: View {
     private func content(_ ledger: PrivacyLedger, site: String) -> some View {
         let summary = ledger.summary
         let parties = ledger.sorted
-        let off = monitor.rules.isOff(on: site)
+        let off = monitor.rules(for: model.profile).isOff(on: site)
         return ScrollViewReader { scroller in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: Design.Space.xl) {
@@ -245,7 +247,7 @@ struct PrivacyPanelView: View {
     /// there, the others say how much Shields does. A site left at the mode for every site
     /// follows Settings; one moved keeps its own, and says so.
     private func filtering(site: String) -> some View {
-        let own = monitor.rules.ownMode(on: site)
+        let own = monitor.rules(for: model.profile).ownMode(on: site)
         let mode = own ?? model.standardMode
         return VStack(alignment: .leading, spacing: Design.Space.m) {
             HStack(alignment: .firstTextBaseline) {
@@ -253,7 +255,7 @@ struct PrivacyPanelView: View {
                 Spacer(minLength: Design.Space.m)
                 if own != nil {
                     Button("Use My Setting") {
-                        monitor.setMode(model.standardMode, on: site, standard: model.standardMode, remembered: model.remembersChoices)
+                        monitor.setMode(model.standardMode, on: site, standard: model.standardMode, profile: model.profile, remembered: model.remembersChoices)
                         model.ruleChanged()
                     }
                     .buttonStyle(.link)
@@ -262,7 +264,7 @@ struct PrivacyPanelView: View {
                 }
             }
             FilteringSlider(modes: FilteringMode.allCases, mode: mode) { picked in
-                monitor.setMode(picked, on: site, standard: model.standardMode, remembered: model.remembersChoices)
+                monitor.setMode(picked, on: site, standard: model.standardMode, profile: model.profile, remembered: model.remembersChoices)
                 model.ruleChanged()
             }
             Text(mode == .none ? "Off: ads, trackers and their cookies get through on \(site)." : mode.detail)
@@ -291,11 +293,11 @@ struct PrivacyPanelView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(parties.enumerated()), id: \.element.id) { i, party in
                         if i > 0 { Rectangle().fill(Design.hairline).frame(height: Design.Space.hair).padding(.leading, Design.Space.l + PrivacyPanelMetrics.glyphPlate + Design.Space.l) }
-                        PrivacyPartyRow(party: party, pageSite: site, choice: monitor.rules.choice(for: party.id, on: site),
+                        PrivacyPartyRow(party: party, pageSite: site, choice: monitor.rules(for: model.profile).choice(for: party.id, on: site),
                                         expanded: expanded.contains(party.id),
                                         toggle: { if !expanded.insert(party.id).inserted { expanded.remove(party.id) } },
                                         choose: { choice in
-                                            monitor.setChoice(choice, for: party.id, on: site, remembered: model.remembersChoices)
+                                            monitor.setChoice(choice, for: party.id, on: site, profile: model.profile, remembered: model.remembersChoices)
                                             model.ruleChanged()
                                         })
                         .id(party.id)

@@ -12,7 +12,8 @@ built and how to work on it.
 | Request path | `NicheCEF.mm` (`NicheDecide`, `NicheContentBlockingHandler`) | Every request a page makes: the user's say first (`NicheContentBlocker.h`: allowed, blocked, protection off for the site), then the engine's. A blocked request is cancelled, or answered with a harmless stand-in when the lists name one (`NicheStandInHandler`). A page's address loses its tracking codes (`removeparam` rules). |
 | Page processes | `Sources/NicheHelper/main.cc` | The lists' scriptlets for a document (answer a cookie notice, defuse an ad-block wall) run when its script context is created, before the page's own scripts. The rules for it travel with each tab as a compressed blob (about 0.6 MB). |
 | Hiding | `ShieldsPageScript` (NicheCore), `HideWhatTheListsSay` in `NicheCEF.mm` | The page's top document adopts one stylesheet of selectors to hide, reports its class and id names for the generic rules, and works out procedural rules (`:has-text()`, `:upward()` …). |
-| Lists in the app | `ShieldsService` (app), `ShieldsPack` / `ShieldsGroup` / `ShieldsUpdate` (NicheCore) | Keeps the packs in Application Support/…/Shields, checks their signature, builds the engine off the main thread from the groups switched on, and looks for newer packs daily. |
+| Lists in the app | `ShieldsService` (app), `ShieldsPack` / `ShieldsGroup` / `ShieldsUpdate` (NicheCore) | Keeps the packs in Application Support/…/Shields, checks their signature, builds an engine off the main thread for each set of lists some profile switches on, and looks for newer packs daily. |
+| Profiles | `PrivacySettings`, `PrivacyRuleBook` (NicheCore), `AppDelegate.observeContentBlocking`, `niche_blocker::Profile` | Each browser profile's own Settings ▸ Privacy and privacy panel choices, given to the bridge as one value per profile (`setShields:forProfile:`). Below. |
 | Packs | `scripts/shields-pack.mjs`, `resources/shields/lists.json`, `.github/workflows/shields.yml` | A daily job downloads the lists, exports uBlock Origin's scriptlets and stand-in resources, and publishes signed packs as assets of the repository's `shields` release. |
 | Levels | `PrivacyLevel` (NicheCore) | Relaxed, Balanced, Strict: presets over the switches, for onboarding and Settings ▸ Privacy. |
 
@@ -56,6 +57,37 @@ such lines as rules that match nothing. Until then Peter Lowe's list blocked not
 A few of uBlock Origin's scripts live among its stand-in files (noeval.js, nofab.js,
 popads-dummy.js) and its lists inject them like any scriptlet; page processes get those too
 (72 of the default lists' 18,780 script rules, which did nothing until 18 Nov 2026).
+
+## Each profile its own
+
+Every browser profile has its own Shields (22 Nov 2026: there was one set for every profile, so
+what one space's profile was set to showed, and applied, in every other). Its own Settings ▸
+Privacy (`PrivacySettings`: the level, Filtering, the six switches, More lists, third-party
+cookies, tracking codes, the don't-sell signal, noticing fingerprinting, HTTPS-only) and its own
+choices in the privacy panel (`PrivacyRuleBook`). Spaces on one profile share them; incognito
+windows follow the Default profile. Secure DNS is the whole app's (Chromium keeps it in Local
+State), and so is the "blocked in all" count.
+
+- **Files.** The Default profile's settings stay at the top of settings.json and its choices at
+  the top of privacy.json, where every version has read them; the others are under
+  `profilePrivacy` and `profiles`, by the profile's Chromium folder ("Profile <UUID>",
+  `PrivacyProfile.key`). On the first launch with per-profile Shields each profile gets a copy
+  of the one set there was, so nothing changes on update. A profile made later starts with
+  Default's settings and no choices; a deleted one's go with it.
+- **Engines.** An engine for each distinct set of lists (`ShieldsLists`: the groups and More
+  lists) some profile asks for, each in a slot of its own (`niche_shields_install(slot, …)`);
+  profiles set up alike share one. A profile whose lists change keeps its old engine until the
+  new one is built; a slot no profile uses is freed ten seconds later.
+- **Requests and pages.** Each page browser is made with its profile's name
+  (`NicheProfileKey`), and its client, request handler and cookie filter read that profile's
+  `niche_blocker::Profile` (rules, mode for every site, engine slot, switches) for each request.
+  A new tab starts with its profile's start script, page-process rules and modes; a change of
+  modes goes to that profile's open tabs only. Third-party cookies and HTTPS-only are Chromium
+  preferences of each profile's own context.
+- **Settings.** Settings ▸ Privacy shows one profile's, the current space's to begin with, with a
+  "Settings for" menu when there is more than one profile. The privacy panel and Site Control
+  Center change the page's own profile.
+- `shields-per-profile` (scenario) checks it end to end.
 
 ## Filtering modes
 

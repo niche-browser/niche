@@ -524,6 +524,10 @@ public struct AppSettings: Codable, Equatable {
     public var filteringMode: FilteringMode = .standard
     /// Settings ▸ Privacy "More lists": the optional lists switched on, by id (`ShieldsCatalog`).
     public var extraShieldsLists: Set<String> = []
+    /// Settings ▸ Privacy for every profile but Default, by its folder name (`PrivacyProfile`):
+    /// each profile has its own. The keys above (Trackers, Ads, … Notice fingerprinting) are the
+    /// Default profile's (`privacy`, PrivacySettings.swift).
+    public var profilePrivacy: [String: PrivacySettings] = [:]
     /// Dia's Tabs ▸ "Haptic feedback when reordering tabs" (tabReorderingHapticsEnabled).
     public var hapticFeedbackOnReorder: Bool = true
     /// Dia's Advanced ▸ "Warn before quitting" (shouldWarnBeforeQuitting, off by default).
@@ -866,6 +870,7 @@ extension AppSettings {
         tidyTabTitles = try c.decodeIfPresent(Bool.self, forKey: .tidyTabTitles) ?? false
         tidyDownloads = try c.decodeIfPresent(Bool.self, forKey: .tidyDownloads) ?? false
         downloadLocations = (try? c.decodeIfPresent([String: DownloadLocation].self, forKey: .downloadLocations)) ?? [:]
+        profilePrivacy = (try? c.decodeIfPresent([String: PrivacySettings].self, forKey: .profilePrivacy)) ?? [:]
     }
 }
 

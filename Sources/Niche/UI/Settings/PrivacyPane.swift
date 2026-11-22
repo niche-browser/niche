@@ -1,43 +1,71 @@
 import SwiftUI
 
 /// Content blocking, connections (HTTPS-only and secure DNS) and the profile's browsing data.
+/// Each profile has its own Shields and privacy panel choices (22 Nov 2026: one set for every
+/// profile, so what one was set to showed, and applied, in every other). The pane shows one
+/// profile's, the current space's to begin with; Secure DNS is the whole app's.
 struct PrivacyPane: View {
     @Environment(SidebarStore.self) private var store
     let actions: SettingsActions
+    /// The profile picked at the top; nil: the current space's.
+    @State private var picked: String?
+
+    /// The profile the pane shows (`PrivacyProfile.key`).
+    private var profile: String {
+        if let picked, picked == PrivacyProfile.defaultKey || store.profiles.contains(where: { $0.directoryName == picked }) { return picked }
+        return store.profileDirectoryName(space: store.focusedSpace(window: nil).id)
+    }
+
+    /// Its Settings ▸ Privacy.
+    private var privacy: Binding<PrivacySettings> {
+        let key = profile
+        return Binding(get: { store.settings.privacy(forProfile: key) }, set: { store.settings.setPrivacy($0, forProfile: key) })
+    }
 
     var body: some View {
-        @Bindable var store = store
+        let privacy = privacy
         SettingsCardPane {
+            if !store.profiles.isEmpty {
+                SettingsSection(title: "Profile", footnote: "Each profile has its own Shields and choices from the privacy panel. Spaces on one profile share them.") {
+                    SettingsPickerRow(title: "Settings for", detail: "The current space’s profile to begin with.",
+                                      selection: Binding(get: { profile }, set: { picked = $0 })) {
+                        Text("Default").tag(PrivacyProfile.defaultKey)
+                        ForEach(store.profiles) { p in Text(p.name).tag(p.directoryName) }
+                    }
+                }
+            }
             VStack(alignment: .leading, spacing: 0) {
                 SettingsHeader("Protection")
-                PrivacyLevelPicker(level: PrivacyLevel.level(of: store.settings)) { level in
-                    level.apply(to: &store.settings)
+                PrivacyLevelPicker(level: PrivacyLevel.level(of: privacy.wrappedValue)) { level in
+                    var p = privacy.wrappedValue
+                    level.apply(to: &p)
+                    privacy.wrappedValue = p
                 }
-                SettingsFootnote(PrivacyLevel.level(of: store.settings) == nil
+                SettingsFootnote(PrivacyLevel.level(of: privacy.wrappedValue) == nil
                                  ? "Custom: the switches below were changed by hand. Pick a level to go back to it."
                                  : "A level sets the switches below. Change any of them to make it your own.")
             }
             .padding(.bottom, Design.Space.section)
             SettingsSection(title: "Shields", footnote: shieldsLine) {
                 SettingsCardRow {
-                    SettingsIconLabel(title: "Filtering", detail: store.settings.filteringMode.detail + " A site can have its own in the privacy panel.",
+                    SettingsIconLabel(title: "Filtering", detail: privacy.wrappedValue.filteringMode.detail + " A site can have its own in the privacy panel.",
                                       symbol: "slider.horizontal.below.rectangle", color: .gray)
                 } trailing: {
-                    FilteringSlider(modes: FilteringMode.forEverySite, mode: store.settings.filteringMode) { store.settings.filteringMode = $0 }
+                    FilteringSlider(modes: FilteringMode.forEverySite, mode: privacy.wrappedValue.filteringMode) { privacy.wrappedValue.filteringMode = $0 }
                         .frame(width: Self.sliderWidth)
                 }
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
-                shieldsRow(.ads, color: .red, isOn: $store.settings.blockAds)
+                shieldsRow(.ads, color: .red, isOn: privacy.blockAds)
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
-                shieldsRow(.trackers, color: .orange, isOn: $store.settings.blockTrackers)
+                shieldsRow(.trackers, color: .orange, isOn: privacy.blockTrackers)
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
-                shieldsRow(.cookies, color: .yellow, isOn: $store.settings.blockCookieNotices)
+                shieldsRow(.cookies, color: .yellow, isOn: privacy.blockCookieNotices)
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
-                shieldsRow(.annoyances, color: .indigo, isOn: $store.settings.blockAnnoyances)
+                shieldsRow(.annoyances, color: .indigo, isOn: privacy.blockAnnoyances)
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
-                shieldsRow(.malware, color: .green, isOn: $store.settings.blockMaliciousSites)
+                shieldsRow(.malware, color: .green, isOn: privacy.blockMaliciousSites)
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
-                shieldsRow(.regional, color: .blue, isOn: $store.settings.useRegionalLists)
+                shieldsRow(.regional, color: .blue, isOn: privacy.useRegionalLists)
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
                     SettingsIconLabel(title: "Filter lists",
@@ -46,13 +74,13 @@ struct PrivacyPane: View {
                 } trailing: {
                     HStack(spacing: Design.Space.m) {
                         Button("Credits") { showingCredits = true }
-                            .disabled(ShieldsService.shared.credits.isEmpty)
+                            .disabled(ShieldsService.shared.credits(for: privacy.wrappedValue.shieldsLists).isEmpty)
                         Button(ShieldsService.shared.checking ? "Updating…" : "Update Now") { ShieldsService.shared.look() }
-                            .disabled(ShieldsService.shared.checking || store.settings.shieldsGroups.isEmpty)
+                            .disabled(ShieldsService.shared.checking || privacy.wrappedValue.shieldsGroups.isEmpty)
                     }
                 }
             }
-            .sheet(isPresented: $showingCredits) { ShieldsCredits(credits: ShieldsService.shared.credits) { showingCredits = false } }
+            .sheet(isPresented: $showingCredits) { ShieldsCredits(credits: ShieldsService.shared.credits(for: privacy.wrappedValue.shieldsLists)) { showingCredits = false } }
             moreLists
             SettingsSection(title: "Tracking") {
                 SettingsCardRow {
@@ -60,7 +88,7 @@ struct PrivacyPane: View {
                                       detail: "A company embedded in another site’s page can’t use cookies to recognise you there.",
                                       symbol: "person.crop.circle.badge.xmark", color: .purple)
                 } trailing: {
-                    SettingsSwitch(title: "Block third-party cookies", isOn: $store.settings.blockThirdPartyCookies)
+                    SettingsSwitch(title: "Block third-party cookies", isOn: privacy.blockThirdPartyCookies)
                 }
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
@@ -68,7 +96,7 @@ struct PrivacyPane: View {
                                       detail: "Codes that say which ad or email you clicked are taken off a page’s address before it opens.",
                                       symbol: "link.badge.plus", color: .teal)
                 } trailing: {
-                    SettingsSwitch(title: "Remove tracking codes from links", isOn: $store.settings.removeTrackingParameters)
+                    SettingsSwitch(title: "Remove tracking codes from links", isOn: privacy.removeTrackingParameters)
                 }
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
@@ -76,7 +104,7 @@ struct PrivacyPane: View {
                                       detail: "Sends the Global Privacy Control signal, which some laws require sites to honour.",
                                       symbol: "megaphone.fill", color: .blue)
                 } trailing: {
-                    SettingsSwitch(title: "Tell websites not to sell or share my data", isOn: $store.settings.sendGlobalPrivacyControl)
+                    SettingsSwitch(title: "Tell websites not to sell or share my data", isOn: privacy.sendGlobalPrivacyControl)
                 }
                 SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                 SettingsCardRow {
@@ -84,7 +112,7 @@ struct PrivacyPane: View {
                                       detail: "The privacy panel names scripts that read your Mac’s details to recognise it without a cookie.",
                                       symbol: "touchid", color: .pink)
                 } trailing: {
-                    SettingsSwitch(title: "Notice fingerprinting", isOn: $store.settings.noticeFingerprinting)
+                    SettingsSwitch(title: "Notice fingerprinting", isOn: privacy.noticeFingerprinting)
                 }
             }
             SettingsSection(title: "Privacy panel",
@@ -96,7 +124,7 @@ struct PrivacyPane: View {
                 } trailing: {
                     Button("Show") { actions.showPrivacyPanel() }
                 }
-                if !PrivacyMonitor.shared.rules.isEmpty {
+                if !PrivacyMonitor.shared.rules(for: profile).isEmpty {
                     SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                     SettingsCardRow {
                         SettingsIconLabel(title: "Your own blocks and exceptions",
@@ -108,7 +136,7 @@ struct PrivacyPane: View {
                 }
             }
             .confirmationDialog("Forget what you blocked and allowed in the privacy panel?", isPresented: $confirmingReset) {
-                Button("Reset", role: .destructive) { PrivacyMonitor.shared.resetRules() }
+                Button("Reset", role: .destructive) { PrivacyMonitor.shared.resetRules(profile: profile) }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Niche goes back to its own list on every site.")
@@ -121,7 +149,7 @@ struct PrivacyPane: View {
                                           detail: "Niche warns you before opening a site that doesn’t support HTTPS.",
                                           symbol: "lock.fill", color: .green)
                     } trailing: {
-                        SettingsSwitch(title: "Always use secure connections", isOn: $store.settings.httpsOnly)
+                        SettingsSwitch(title: "Always use secure connections", isOn: privacy.httpsOnly)
                     }
                     SettingsCardDivider(inset: SettingsMetrics.glyphDividerInset)
                     SecureDNSRows(error: $dnsError)
@@ -148,7 +176,8 @@ struct PrivacyPane: View {
     /// has arrived, and nothing while Shields are off.
     @ViewBuilder private var moreLists: some View {
         let sections = ShieldsService.shared.catalog.sections
-        if !sections.isEmpty, !store.settings.shieldsGroups.isEmpty {
+        let privacy = privacy
+        if !sections.isEmpty, !privacy.wrappedValue.shieldsGroups.isEmpty {
             SettingsSection(title: "More lists",
                             footnote: "Optional lists, off to start with as in uBlock Origin Lite. More lists block more, and each one is one more thing that can break a page.") {
                 let entries = sections.flatMap { section in section.entries.map { (section.group, $0) } }
@@ -158,8 +187,8 @@ struct PrivacyPane: View {
                         SettingsIconLabel(title: pair.1.title, detail: extraDetail(pair.1, group: pair.0), symbol: pair.0.symbol, color: .gray)
                     } trailing: {
                         SettingsSwitch(title: pair.1.title, isOn: Binding(
-                            get: { store.settings.extraShieldsLists.contains(pair.1.id) },
-                            set: { on in if on { store.settings.extraShieldsLists.insert(pair.1.id) } else { store.settings.extraShieldsLists.remove(pair.1.id) } }))
+                            get: { privacy.wrappedValue.extraShieldsLists.contains(pair.1.id) },
+                            set: { on in if on { privacy.wrappedValue.extraShieldsLists.insert(pair.1.id) } else { privacy.wrappedValue.extraShieldsLists.remove(pair.1.id) } }))
                     }
                 }
             }
@@ -167,7 +196,7 @@ struct PrivacyPane: View {
     }
 
     private func extraDetail(_ entry: ShieldsCatalog.Entry, group: ShieldsGroup) -> String {
-        if ShieldsService.shared.extrasPending.contains(entry.id), store.settings.extraShieldsLists.contains(entry.id) { return "Getting the list…" }
+        if ShieldsService.shared.extrasPending.contains(entry.id), privacy.wrappedValue.extraShieldsLists.contains(entry.id) { return "Getting the list…" }
         return entry.detail.isEmpty ? group.title : entry.detail
     }
 
@@ -186,13 +215,14 @@ struct PrivacyPane: View {
 
     /// Under the switches: how much is loaded and how fresh it is.
     private var shieldsLine: String {
-        switch ShieldsService.shared.status {
+        let lists = privacy.wrappedValue.shieldsLists
+        switch ShieldsService.shared.status(for: lists) {
         case .off: return "Shields are off: nothing is blocked or hidden."
         case .waiting: return "Getting the filter lists. Nothing is blocked until they arrive."
         case .ready(let rules):
             let number = NumberFormatter()
             number.numberStyle = .decimal
-            var line = "\(number.string(from: NSNumber(value: rules)) ?? "\(rules)") rules from \(PrivacyWords.count(ShieldsService.shared.credits.count, "list"))"
+            var line = "\(number.string(from: NSNumber(value: rules)) ?? "\(rules)") rules from \(PrivacyWords.count(ShieldsService.shared.credits(for: lists).count, "list"))"
             if let built = ShieldsService.shared.built {
                 let date = RelativeDateTimeFormatter()
                 date.unitsStyle = .full

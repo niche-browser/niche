@@ -169,3 +169,41 @@ fn a_stand_in_script_can_be_injected_like_a_scriptlet() {
     assert!(script.contains("window.__noeval = 1;"), "{script}");
     assert!(script.contains("window.__flag = 'answered';") && !script.contains("__wrong"), "{script}");
 }
+
+/// Each set of lists a browser profile asks for is an engine in a slot of its own, so a profile
+/// set up differently from another is checked against its own lists (22 Nov 2026: one engine for
+/// every profile). Slots 40 and 41: tests run side by side, and none other uses these.
+#[test]
+fn each_slot_answers_with_its_own_lists() {
+    use std::ffi::{CStr, CString};
+    let build = |list: &str| {
+        let mut b = Builder::new();
+        b.add_list(list, COOKIES, false);
+        Box::into_raw(Box::new(b.build()))
+    };
+    let hidden = |slot: u32| unsafe {
+        let url = CString::new("https://news.example/").unwrap();
+        let found = niche_shields::niche_shields_cosmetic(slot, url.as_ptr(), true);
+        if found.is_null() {
+            return None;
+        }
+        let text = CStr::from_ptr(found).to_string_lossy().into_owned();
+        niche_shields::niche_shields_string_free(found);
+        Some(text)
+    };
+    unsafe {
+        niche_shields::niche_shields_install(40, build("news.example##.banner-of-one"));
+        niche_shields::niche_shields_install(41, build("news.example##.banner-of-other"));
+    }
+    let (one, other) = (hidden(40).unwrap(), hidden(41).unwrap());
+    assert!(one.contains("banner-of-one") && !one.contains("banner-of-other"));
+    assert!(other.contains("banner-of-other") && !other.contains("banner-of-one"));
+    // An empty slot, and one emptied, answer nothing; the other keeps its engine.
+    assert!(!niche_shields::niche_shields_installed(42));
+    unsafe { niche_shields::niche_shields_install(40, std::ptr::null_mut()) };
+    assert!(hidden(40).is_none());
+    assert!(niche_shields::niche_shields_installed(41));
+    // Past the last slot nothing is kept (and nothing breaks).
+    unsafe { niche_shields::niche_shields_install(1000, build("##.x")) };
+    assert!(!niche_shields::niche_shields_installed(1000));
+}

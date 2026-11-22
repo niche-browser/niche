@@ -2,9 +2,10 @@ import AppKit
 import NicheCEF
 import Observation
 
-/// Shields in the app: keeps the filter packs (Application Support/…/Shields), builds the engine
-/// from the lists the switches in Settings ▸ Privacy ask for (the groups, and the optional
-/// lists of "More lists"), and looks for newer packs every six hours. A pack is trusted only with the signature of the repository's Shields workflow
+/// Shields in the app: keeps the filter packs (Application Support/…/Shields), builds an engine
+/// for each set of lists some profile's switches in Settings ▸ Privacy ask for (the groups, and
+/// the optional lists of "More lists"; profiles that ask for the same ones share it), and looks
+/// for newer packs every six hours. A pack is trusted only with the signature of the repository's Shields workflow
 /// (`ShieldsPack.isSigned`), on download and again every time it is read from disk. The only
 /// thing sent anywhere is the request for the packs themselves, to GitHub.
 ///
@@ -33,8 +34,18 @@ final class ShieldsService {
         let homepage: String
     }
 
-    private(set) var status = Status.waiting
-    private(set) var credits: [Credit] = []
+    /// An engine in use: its slot in the bridge (NicheShieldsBuild installInSlot:), how many rules
+    /// its lists hold, and the lists, for the credits.
+    struct Engine: Equatable {
+        let slot: Int
+        let rules: Int
+        let credits: [Credit]
+    }
+
+    /// The engines built, by the lists each was built from.
+    private(set) var engines: [ShieldsLists: Engine] = [:]
+    /// No pack yet: the first download hasn't finished (or there is no network).
+    private(set) var waitingForLists = true
     /// When the lists in use were put together, and when Niche last looked for newer ones.
     private(set) var built: Date?
     private(set) var lastChecked: Date?
@@ -44,8 +55,10 @@ final class ShieldsService {
     /// Optional lists switched on whose pack hasn't arrived yet.
     private(set) var extrasPending: Set<String> = []
 
-    @ObservationIgnored private var groups: Set<ShieldsGroup> = []
-    @ObservationIgnored private var extras: Set<String> = []
+    /// Which engine is in which slot, what to build and when an old one can go (`ShieldsSlots`).
+    @ObservationIgnored private var slots = ShieldsSlots()
+    /// The sets of lists the profiles ask for (none switched off entirely).
+    private var wanted: Set<ShieldsLists> { slots.wanted }
     @ObservationIgnored private var started = false
     @ObservationIgnored private var clock: Scheduler?
     @ObservationIgnored private var looking: ScheduledWork?
@@ -85,16 +98,26 @@ final class ShieldsService {
 
     // MARK: The switches
 
-    /// Starts Shields with the groups and optional lists the settings ask for; after that, `use`
-    /// follows the switches.
-    func start(groups: Set<ShieldsGroup>, extras: Set<String> = [], clock: Scheduler) {
-        guard !started else { return use(groups, extras: extras) }
+    /// What Settings shows for a profile's lists.
+    func status(for lists: ShieldsLists) -> Status {
+        if lists.isOff { return .off }
+        if let e = engines[lists] { return .ready(rules: e.rules) }
+        return .waiting
+    }
+
+    func credits(for lists: ShieldsLists) -> [Credit] { engines[lists]?.credits ?? [] }
+
+    /// The slot of the engine built from these lists, once it is built.
+    func slot(for lists: ShieldsLists) -> Int? { engines[lists]?.slot }
+
+    /// Starts Shields with the sets of lists the profiles ask for; after that, `use` follows them.
+    func start(lists: Set<ShieldsLists>, clock: Scheduler) {
+        guard !started else { return use(lists) }
         started = true
-        self.groups = groups
-        self.extras = extras
+        _ = slots.want(lists)
         self.clock = clock
         NicheCEFRuntime.setShieldsPageScript(ShieldsPageScript.content)
-        rebuild()
+        rebuild(all: true)
         // Soon after launch, not during it; then hourly, which is when a day may have passed.
         // A Mac with no lists yet (a first launch) asks at once; otherwise soon after launch,
         // not during it.
@@ -106,16 +129,19 @@ final class ShieldsService {
         looking = clock.every(ShieldsUpdate.retry) { [weak self] in self?.lookIfDue() }
     }
 
-    func use(_ groups: Set<ShieldsGroup>, extras: Set<String>) {
-        guard started, groups != self.groups || extras != self.extras else { return }
-        let regionalAdded = groups.contains(.regional) && !self.groups.contains(.regional)
+    func use(_ lists: Set<ShieldsLists>) {
+        let next = lists.filter { !$0.isOff }
+        guard started, next != wanted else { return }
+        let regionalAdded = Self.wantsRegional(next) && !Self.wantsRegional(wanted)
         // A list just switched on has no pack on this Mac yet: it is fetched now.
-        let extrasAdded = !extras.subtracting(self.extras).isEmpty
-        self.groups = groups
-        self.extras = extras
-        rebuild()
+        let extrasAdded = !Self.extras(next).subtracting(Self.extras(wanted)).isEmpty
+        _ = slots.want(next)
+        rebuild(all: false)
         if regionalAdded || extrasAdded { look() }
     }
+
+    nonisolated private static func wantsRegional(_ lists: Set<ShieldsLists>) -> Bool { lists.contains { $0.groups.contains(.regional) } }
+    nonisolated private static func extras(_ lists: Set<ShieldsLists>) -> Set<String> { lists.reduce(into: []) { $0.formUnion($1.extras) } }
 
     // MARK: Building
 
@@ -135,58 +161,92 @@ final class ShieldsService {
         return try? ShieldsPack.read(data)
     }
 
-    private func rebuild() {
+    /// How long an engine no profile asks for stays in its slot after the one that replaced it is
+    /// built: the profiles move to the new slot first, so no page is left without its lists.
+    private static let freeAfter: TimeInterval = 10
+
+    /// Builds the engines the profiles ask for that aren't built yet, or every one (`all`: the
+    /// packs changed), each in its own slot (`ShieldsSlots`).
+    private func rebuild(all: Bool) {
         generation += 1
-        let generation = generation, groups = groups, extras = extras
-        guard !groups.isEmpty else {
-            NicheCEFRuntime.removeShields()
-            status = .off
-            credits = []
+        let generation = generation
+        guard !wanted.isEmpty else {
+            for slot in slots.clear() { NicheCEFRuntime.removeShields(fromSlot: slot) }
+            engines = [:]
+            waitingForLists = false
             NicheLog.note("Shields off")
             return
         }
+        let jobs = slots.want(wanted, all: all)
+        guard !jobs.isEmpty else { return }
         let languages = Locale.preferredLanguages
         work.async {
             guard let main = Self.pack(ShieldsUpdate.mainPack) else {
                 DispatchQueue.main.async {
                     let me = ShieldsService.shared
-                    guard me.generation == generation else { return }
-                    if !NicheCEFRuntime.shieldsInstalled() { me.status = .waiting }
+                    for job in jobs { _ = me.slots.finished(job.lists, slot: job.slot, installed: false) }
+                    if me.engines.isEmpty { me.waitingForLists = true }
                     NicheLog.note("Shields: no lists yet")
                 }
                 return
             }
-            var lists = main.lists(for: groups)
-            if groups.contains(.regional), let data = try? Data(contentsOf: Self.file(ShieldsUpdate.regionalIndex)),
-               let index = try? JSONDecoder().decode(ShieldsRegionalIndex.self, from: data) {
-                for entry in index.wanted(languages: languages) {
-                    if let pack = Self.pack(ShieldsUpdate.regionalPack(entry.id)) { lists += pack.lists.filter { $0.group == .regional } }
-                }
+            var built: [(ShieldsLists, Engine)] = [], pending: Set<String> = []
+            for job in jobs {
+                let (engine, missing) = Self.build(job.lists, main: main, languages: languages, slot: job.slot)
+                built.append((job.lists, engine))
+                pending.formUnion(missing)
             }
-            // The optional lists switched on, each from its own pack. One whose pack isn't here
-            // yet is left out until it arrives.
-            var pending: Set<String> = []
-            for id in extras.sorted() {
-                if let pack = Self.pack(ShieldsUpdate.extraPack(id)) { lists += pack.lists } else { pending.insert(id) }
-            }
-            let build = NicheShieldsBuild()
-            for list in lists { build.addList(list.text, group: list.group.number, trusted: list.trusted) }
-            build.addResources(main.scriptlets, forPages: true)
-            build.addResources(main.redirects, forPages: false)
-            let started = Date()
-            let rules = build.install()
-            let took = Date().timeIntervalSince(started)
-            let credits = lists.map { Credit(id: $0.id, title: $0.title, group: $0.group, licence: $0.licence, homepage: $0.homepage) }
             DispatchQueue.main.async {
                 let me = ShieldsService.shared
-                guard me.generation == generation else { return }
-                me.status = .ready(rules: rules)
-                me.credits = credits
+                for (lists, engine) in built {
+                    switch me.slots.finished(lists, slot: engine.slot) {
+                    case .keep: me.engines[lists] = engine
+                    case .empty(let slot): NicheCEFRuntime.removeShields(fromSlot: slot)
+                    case .drop: break
+                    }
+                }
+                me.waitingForLists = false
                 me.built = main.built
-                me.extrasPending = pending
-                NicheLog.note("Shields ready: \(lists.count) lists, \(rules) rules, groups \(groups.map(\.rawValue).sorted().joined(separator: "+")), built in \(Int(took * 1000)) ms")
+                if me.generation == generation { me.extrasPending = pending }
+                me.clock?.after(Self.freeAfter) { me.freeUnwanted() }
             }
         }
+    }
+
+    /// Empties the slots of lists no profile asks for any more, once every set asked for has its
+    /// engine (until then a profile whose lists changed may still be on its old one).
+    private func freeUnwanted() {
+        let free = slots.freeable()
+        for slot in free { NicheCEFRuntime.removeShields(fromSlot: slot) }
+        for lists in engines.keys where slots.slots[lists] == nil { engines[lists] = nil }
+    }
+
+    /// One engine, built and installed in `slot`; and the optional lists whose pack isn't here yet.
+    nonisolated private static func build(_ wanted: ShieldsLists, main: ShieldsPack, languages: [String], slot: Int) -> (Engine, Set<String>) {
+        let groups = wanted.groups
+        var lists = main.lists(for: groups)
+        if groups.contains(.regional), let data = try? Data(contentsOf: file(ShieldsUpdate.regionalIndex)),
+           let index = try? JSONDecoder().decode(ShieldsRegionalIndex.self, from: data) {
+            for entry in index.wanted(languages: languages) {
+                if let pack = pack(ShieldsUpdate.regionalPack(entry.id)) { lists += pack.lists.filter { $0.group == .regional } }
+            }
+        }
+        // The optional lists switched on, each from its own pack. One whose pack isn't here
+        // yet is left out until it arrives.
+        var pending: Set<String> = []
+        for id in wanted.extras.sorted() {
+            if let pack = pack(ShieldsUpdate.extraPack(id)) { lists += pack.lists } else { pending.insert(id) }
+        }
+        let build = NicheShieldsBuild()
+        for list in lists { build.addList(list.text, group: list.group.number, trusted: list.trusted) }
+        build.addResources(main.scriptlets, forPages: true)
+        build.addResources(main.redirects, forPages: false)
+        let started = Date()
+        let rules = build.install(inSlot: slot)
+        let took = Date().timeIntervalSince(started)
+        let credits = lists.map { Credit(id: $0.id, title: $0.title, group: $0.group, licence: $0.licence, homepage: $0.homepage) }
+        NicheLog.note("Shields ready: \(lists.count) lists, \(rules) rules, groups \(groups.map(\.rawValue).sorted().joined(separator: "+")), built in \(Int(took * 1000)) ms")
+        return (Engine(slot: slot, rules: rules, credits: credits), pending)
     }
 
     // MARK: Updating
@@ -201,11 +261,11 @@ final class ShieldsService {
 
     /// Looks for newer packs now (Settings ▸ Privacy "Update Now" too).
     func look() {
-        guard let source = Self.source, !checking, !groups.isEmpty else { return }
+        guard let source = Self.source, !checking, !wanted.isEmpty else { return }
         checking = true
         state.lastAttempt = Date()
         stateFile.save(state)
-        let wantsRegional = groups.contains(.regional), languages = Locale.preferredLanguages, extras = extras
+        let wantsRegional = Self.wantsRegional(wanted), languages = Locale.preferredLanguages, extras = Self.extras(wanted)
         Task.detached(priority: .utility) {
             var changed = false, reached = false
             do {
@@ -243,7 +303,7 @@ final class ShieldsService {
                     me.lastChecked = me.state.lastSuccess
                     me.stateFile.save(me.state)
                 }
-                if didChange || !NicheCEFRuntime.shieldsInstalled() || !me.extrasPending.isEmpty { me.rebuild() }
+                if didChange || me.wanted.contains(where: { me.engines[$0] == nil }) || !me.extrasPending.isEmpty { me.rebuild(all: didChange || !me.extrasPending.isEmpty) }
                 NicheLog.note("Shields: looked for newer lists, \(didChange ? "got some" : didReach ? "none" : "unreachable")")
             }
         }

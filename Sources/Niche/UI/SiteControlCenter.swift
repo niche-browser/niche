@@ -180,13 +180,18 @@ final class SiteControlCenterView: NSView {
         let settings = SiteSectionView(title: "Settings", hoverText: nil, colors: colors, onHeaderClick: {})
         let developer = store.settings.isDeveloperMode(url: url)
         let store = store, url = url
+        // The page's profile's Shields (its folder name is the key Shields uses): each profile has its own.
+        let shieldsProfile = profile
+        let privacy = store.settings.privacy(forProfile: shieldsProfile)
+        let blocking = privacy.blockAds || privacy.blockTrackers
         var rowsSpec: [(String, String, String, Bool, () -> Void)] = [
             ("hammer.fill", "Developer Mode", developer ? "On" : "Off", developer, { store.settings.toggleDeveloperMode(url: url) }),
-            ("shield.fill", "Block Ads & Trackers", store.settings.blockAds || store.settings.blockTrackers ? "On" : "Off",
-             store.settings.blockAds || store.settings.blockTrackers, {
-                 let on = !(store.settings.blockAds || store.settings.blockTrackers)
-                 store.settings.blockAds = on
-                 store.settings.blockTrackers = on
+            ("shield.fill", "Block Ads & Trackers", blocking ? "On" : "Off", blocking, {
+                 var p = store.settings.privacy(forProfile: shieldsProfile)
+                 let on = !(p.blockAds || p.blockTrackers)
+                 p.blockAds = on
+                 p.blockTrackers = on
+                 store.settings.setPrivacy(p, forProfile: shieldsProfile)
              }),
             ("gearshape.fill", "Automatic Picture-In-Picture", store.settings.autoPictureInPicture ? "Allowed" : "Disabled",
              store.settings.autoPictureInPicture, { store.settings.autoPictureInPicture.toggle() }),
