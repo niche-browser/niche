@@ -55,13 +55,10 @@ final class ShieldsService {
     /// Optional lists switched on whose pack hasn't arrived yet.
     private(set) var extrasPending: Set<String> = []
 
+    /// Which engine is in which slot, what to build and when an old one can go (`ShieldsSlots`).
+    @ObservationIgnored private var slots = ShieldsSlots()
     /// The sets of lists the profiles ask for (none switched off entirely).
-    @ObservationIgnored private var wanted: Set<ShieldsLists> = []
-    /// The slot each set of lists has, built or building; one no profile wants any more keeps its
-    /// slot until it is freed, a little after the build that replaced it.
-    @ObservationIgnored private var slots: [ShieldsLists: Int] = [:]
-    /// Sets of lists on their way to an engine, so a second ask while one builds doesn't build it twice.
-    @ObservationIgnored private var queued: Set<ShieldsLists> = []
+    private var wanted: Set<ShieldsLists> { slots.wanted }
     @ObservationIgnored private var started = false
     @ObservationIgnored private var clock: Scheduler?
     @ObservationIgnored private var looking: ScheduledWork?
@@ -117,7 +114,7 @@ final class ShieldsService {
     func start(lists: Set<ShieldsLists>, clock: Scheduler) {
         guard !started else { return use(lists) }
         started = true
-        wanted = lists.filter { !$0.isOff }
+        _ = slots.want(lists)
         self.clock = clock
         NicheCEFRuntime.setShieldsPageScript(ShieldsPageScript.content)
         rebuild(all: true)
@@ -138,7 +135,7 @@ final class ShieldsService {
         let regionalAdded = Self.wantsRegional(next) && !Self.wantsRegional(wanted)
         // A list just switched on has no pack on this Mac yet: it is fetched now.
         let extrasAdded = !Self.extras(next).subtracting(Self.extras(wanted)).isEmpty
-        wanted = next
+        _ = slots.want(next)
         rebuild(all: false)
         if regionalAdded || extrasAdded { look() }
     }
@@ -169,70 +166,59 @@ final class ShieldsService {
     private static let freeAfter: TimeInterval = 10
 
     /// Builds the engines the profiles ask for that aren't built yet, or every one (`all`: the
-    /// packs changed), each in its own slot.
+    /// packs changed), each in its own slot (`ShieldsSlots`).
     private func rebuild(all: Bool) {
         generation += 1
-        let generation = generation, wanted = wanted
-        let unwanted = Set(slots.keys).subtracting(wanted)
+        let generation = generation
         guard !wanted.isEmpty else {
-            for (lists, slot) in slots { NicheCEFRuntime.removeShields(fromSlot: slot); slots[lists] = nil }
+            for slot in slots.clear() { NicheCEFRuntime.removeShields(fromSlot: slot) }
             engines = [:]
             waitingForLists = false
             NicheLog.note("Shields off")
             return
         }
-        for lists in wanted.sorted(by: Self.order) where slots[lists] == nil {
-            slots[lists] = (0...).first { !slots.values.contains($0) }
-        }
-        let jobs = wanted.sorted(by: Self.order).filter { all || (engines[$0] == nil && !queued.contains($0)) }.map { ($0, slots[$0]!) }
-        queued.formUnion(jobs.map(\.0))
+        let jobs = slots.want(wanted, all: all)
+        guard !jobs.isEmpty else { return }
         let languages = Locale.preferredLanguages
         work.async {
             guard let main = Self.pack(ShieldsUpdate.mainPack) else {
                 DispatchQueue.main.async {
                     let me = ShieldsService.shared
-                    me.queued.subtract(jobs.map(\.0))
-                    guard me.generation == generation else { return }
+                    for job in jobs { _ = me.slots.finished(job.lists, slot: job.slot, installed: false) }
                     if me.engines.isEmpty { me.waitingForLists = true }
                     NicheLog.note("Shields: no lists yet")
                 }
                 return
             }
             var built: [(ShieldsLists, Engine)] = [], pending: Set<String> = []
-            for (lists, slot) in jobs {
-                let (engine, missing) = Self.build(lists, main: main, languages: languages, slot: slot)
-                built.append((lists, engine))
+            for job in jobs {
+                let (engine, missing) = Self.build(job.lists, main: main, languages: languages, slot: job.slot)
+                built.append((job.lists, engine))
                 pending.formUnion(missing)
             }
             DispatchQueue.main.async {
                 let me = ShieldsService.shared
-                me.queued.subtract(jobs.map(\.0))
-                // An engine is kept while a profile still asks for its lists, whichever ask built it.
-                for (lists, engine) in built where me.wanted.contains(lists) && me.slots[lists] == engine.slot { me.engines[lists] = engine }
+                for (lists, engine) in built {
+                    switch me.slots.finished(lists, slot: engine.slot) {
+                    case .keep: me.engines[lists] = engine
+                    case .empty(let slot): NicheCEFRuntime.removeShields(fromSlot: slot)
+                    case .drop: break
+                    }
+                }
                 me.waitingForLists = false
                 me.built = main.built
-                if me.generation == generation {
-                    for lists in unwanted where !me.wanted.contains(lists) { me.engines[lists] = nil }
-                    me.extrasPending = pending
-                }
+                if me.generation == generation { me.extrasPending = pending }
                 me.clock?.after(Self.freeAfter) { me.freeUnwanted() }
             }
         }
     }
 
-    /// Frees the slots of lists no profile asks for any more.
+    /// Empties the slots of lists no profile asks for any more, once every set asked for has its
+    /// engine (until then a profile whose lists changed may still be on its old one).
     private func freeUnwanted() {
-        for (lists, slot) in slots where !wanted.contains(lists) {
-            NicheCEFRuntime.removeShields(fromSlot: slot)
-            slots[lists] = nil
-            engines[lists] = nil
-        }
-    }
-
-    /// A stable order for the sets of lists, so slots are given out the same way each launch.
-    nonisolated private static func order(_ a: ShieldsLists, _ b: ShieldsLists) -> Bool { key(a) < key(b) }
-    nonisolated private static func key(_ l: ShieldsLists) -> String {
-        l.groups.map(\.rawValue).sorted().joined(separator: "+") + "|" + l.extras.sorted().joined(separator: "+")
+        let free = slots.freeable()
+        for slot in free { NicheCEFRuntime.removeShields(fromSlot: slot) }
+        for lists in engines.keys where slots.slots[lists] == nil { engines[lists] = nil }
     }
 
     /// One engine, built and installed in `slot`; and the optional lists whose pack isn't here yet.
