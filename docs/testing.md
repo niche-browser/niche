@@ -43,7 +43,7 @@ Commands for each piece are in [development.md](development.md#tests).
 | L2 contract | production files compiled against fakes: browser manager, store and importers on a manual clock, policies | `scripts/test-*.sh` | every PR |
 | L3 component | Arc-specified views drawn from the running app and compared with `Tests/Snapshots` | `component-snapshots` scenario | nightly |
 | L4 scenario | the real app driven through a journey, invariants only | `scripts/scenario.sh` | one per PR, all nightly |
-| L4 update | the latest release's profile opened by this build | `scripts/test-upgrade.sh` | every PR and every release, blocking |
+| L4 update | the latest release's profile opened by this build | `scripts/update-from-release.sh` | every PR and every release, blocking |
 | L5 human | the sidebar blur, fullscreen Spaces, GPU, real sites | the PR description | each PR, release |
 
 L0–L2 need no CEF and finish in about 20 seconds. L3 lives in the running app because Niche's
@@ -129,13 +129,13 @@ is a text file; the invariants come for free.
 which half each window draws (`niche://debug?themeShown=<label>`): an Auto space must switch its
 window content and sidebar both ways, and a Light one must not (#155).
 
-**Updates.** `scripts/test-upgrade.sh` downloads the latest release, lets it make a profile (a
+**Updates.** `scripts/update-from-release.sh` downloads the latest release, lets it make a profile (a
 cookie, a page's site data, an open tab) and opens that profile with this build (the `upgrade`
 directive, scenario `upgrade`). It fails when any of them is gone or Chromium reset the protected
 settings. CI runs it on every pull request and the release workflow before it publishes; a red
 run blocks both. 0.1.11 is why: Chromium 158 couldn't read what 156 had written, and the update
 signed everyone out of every site and lost every extension (22 Nov 2026). Run it on 0.1.10 →
-0.1.11 (`NICHE_APP=<0.1.11 app> scripts/test-upgrade.sh v0.1.10`) and it fails on both. Both
+0.1.11 (`NICHE_APP=<0.1.11 app> scripts/update-from-release.sh v0.1.10`) and it fails on both. Both
 apps run as ad-hoc signed copies, on Chromium's mock Keychain, so it never touches the login
 Keychain's "Niche Safe Store" item.
 

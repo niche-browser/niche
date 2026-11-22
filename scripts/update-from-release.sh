@@ -5,9 +5,9 @@
 # 0.1.11 shipped Chromium 158, which could no longer read what 156 had written: everyone it
 # updated was signed out of every site and lost every extension (22 Nov 2026).
 #
-#   scripts/test-upgrade.sh                     the latest release → build/Niche.app
-#   scripts/test-upgrade.sh v0.1.10             that release → build/Niche.app
-#   scripts/test-upgrade.sh <previous Niche.app> an app on disk → build/Niche.app
+#   scripts/update-from-release.sh                     the latest release → build/Niche.app
+#   scripts/update-from-release.sh v0.1.10             that release → build/Niche.app
+#   scripts/update-from-release.sh <previous Niche.app> an app on disk → build/Niche.app
 #
 # NICHE_APP picks the new build. Both run as ad-hoc signed copies: a Developer ID build would use
 # the login Keychain's "Niche Safe Store" item, which an unsigned build can't read without asking

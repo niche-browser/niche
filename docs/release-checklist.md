@@ -222,7 +222,7 @@ built release app with a test profile. Note anything that fails in the release's
 
 ### Profiles, privacy, media and the engine
 
-- **Engine update (0.1.11):** `scripts/test-upgrade.sh` checks this on every PR with the mock
+- **Engine update (0.1.11):** `scripts/update-from-release.sh` checks this on every PR with the mock
   Keychain; this is the same on the real one. On a test profile made with the previous release, sign in to a
   Google account and install a Web Store extension; quit, install the new build over it and
   open it. The account is still signed in, the extension is still in the toolbar and

@@ -27,7 +27,7 @@
 #   relaunch                    niche://debug?relaunch=1, then follow the new process
 #   upgrade                     quit the previous release (NICHE_PREVIOUS_APP, which the run starts
 #                               on) and open the same data folder with NICHE_APP, as an update does
-#                               (scripts/test-upgrade.sh); without NICHE_PREVIOUS_APP it's skipped
+#                               (scripts/update-from-release.sh); without NICHE_PREVIOUS_APP it's skipped
 #   expect-log <regex>          a line Niche logged (niche.log or stdout)
 #   reject-log <regex>          no such line logged so far
 #   snapshot <View[,n]> <name>  the nth visible view of that class drawn to PNG and compared with
@@ -80,7 +80,7 @@ fi
 # An update: the run starts on the release before this one and `upgrade` moves to $APP.
 FIRST_APP="$APP"
 if grep -q '^upgrade' "$FILE"; then
-  [ -n "${NICHE_PREVIOUS_APP:-}" ] || { echo "$NAME: skipped (an update; scripts/test-upgrade.sh runs it)"; exit 0; }
+  [ -n "${NICHE_PREVIOUS_APP:-}" ] || { echo "$NAME: skipped (an update; scripts/update-from-release.sh runs it)"; exit 0; }
   [ -x "$NICHE_PREVIOUS_APP/Contents/MacOS/Niche" ] || { echo "No Niche at $NICHE_PREVIOUS_APP"; exit 2; }
   FIRST_APP="$NICHE_PREVIOUS_APP"
 fi

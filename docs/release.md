@@ -243,7 +243,7 @@ that (0.1.11, 22 Nov 2026): outside Chrome's own folder it marks the "v10" key u
 (`KeychainKeyProviderUserDataDirProtection`). `keychain-key-v10-kept.patch` keeps "v10" as the key
 that encrypts and still decrypts the "v11" values 0.1.11 wrote. The `profile-key-kept` scenario
 writes a cookie the old way and reads it after a relaunch. For every change, not only engine
-updates, `scripts/test-upgrade.sh` opens a profile the latest release made with the new build;
+updates, `scripts/update-from-release.sh` opens a profile the latest release made with the new build;
 CI runs it on each pull request and the release workflow won't publish unless it passes
 ([testing.md](testing.md), "Updates"). It uses the mock Keychain, so before tagging an engine
 update also run the engine check in [release-checklist.md](release-checklist.md) on the real one.
