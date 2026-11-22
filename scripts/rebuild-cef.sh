@@ -47,18 +47,8 @@ export PATH="$CEF_BUILD_DIR/depot_tools:$PATH"  # make_distrib needs its clang-f
 export DEPOT_TOOLS_UPDATE=0
 export CEF_ARCHIVE_FORMAT=tar.bz2
 
-# Niche's patches: new ones go on, applied ones stay. A changed patch applies neither way:
-# reverse its old version by hand (git -C chromium/src apply -R) and run again.
-for p in "$PATCHES"/*.patch; do
-  if git -C "$SRC" apply --check --reverse "$p" 2>/dev/null; then
-    continue
-  elif git -C "$SRC" apply --check "$p" 2>/dev/null; then
-    git -C "$SRC" apply "$p" && echo "Applied $(basename "$p")"
-  else
-    echo "$(basename "$p") does not apply; reverse its old version first" >&2
-    exit 1
-  fi
-done
+# Niche's patches: all of them on, in order (scripts/cef-patches-apply.sh).
+scripts/cef-patches-apply.sh "$SRC"
 
 for cpu in "${CPUS[@]}"; do
   OUT="out/Release_GN_$cpu"

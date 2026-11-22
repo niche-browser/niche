@@ -208,14 +208,14 @@ are a compile-time switch and FFmpeg is linked into the framework, so there is n
 around building it.
 
     scripts/build-cef.sh      # ~80 GB free, several hours; resumes where it stopped
-    scripts/publish-cef.sh    # uploads the archive as pre-release cef-<version>-codecsN
+    scripts/publish-cef.sh    # uploads the archive as pre-release cef-<version>-nicheN
 
 `build-cef.sh` checks out the same CEF commit `fetch-cef.sh` pins, applies
 `scripts/cef-patches/*.patch` on top of CEF's own patches, and builds an official
 release with `proprietary_codecs=true ffmpeg_branding=Chrome`. `fetch-cef.sh` (and CI,
 keyed on its hash) downloads the published archive into `vendor/cef`, replacing a copy
 from a different source. To change the build without a CEF version bump, bump the
-`codecsN` suffix of `CEF_RELEASE` and publish again. Needs Xcode's Metal toolchain
+`nicheN` suffix of `CEF_RELEASE` and publish again. Needs Xcode's Metal toolchain
 (`xcodebuild -downloadComponent MetalToolchain`).
 
 **Patch rounds and Intel.** Once `build-cef.sh` has built a version, a new or changed

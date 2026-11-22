@@ -2,7 +2,7 @@ diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.cc b/chrome
 --- a/chrome/browser/ui/extensions/extension_side_panel_utils.cc
 +++ b/chrome/browser/ui/extensions/extension_side_panel_utils.cc
 @@ -20,6 +20,10 @@
- #include "chrome/browser/ui/views/tabs/organizer/organizer_panel_utils.h"
+ #include "chrome/browser/ui/tabs/organizer/organizer_panel_utils.h"
  #endif
  
 +#if BUILDFLAG(ENABLE_CEF)
@@ -12,10 +12,12 @@ diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.cc b/chrome
  namespace extensions::side_panel_util {
  
  namespace {
-@@ -43,6 +47,32 @@ SidePanelRegistry* GetTabRegistry(content::WebContents* web_contents) {
+@@ -41,6 +45,32 @@
+     return nullptr;
+   }
    return GetTabRegistry(tabs::TabInterface::MaybeGetFromContents(web_contents));
- }
- 
++}
++
 +// Niche: see SetNicheSidePanelHandler.
 +NicheSidePanelHandler g_niche_side_panel_handler = nullptr;
 +
@@ -40,12 +42,10 @@ diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.cc b/chrome
 +#else
 +  return false;
 +#endif
-+}
-+
+ }
+ 
  // Returns true if `registry` exists and has an active entry whose key matches
- // the provided `key`.
- bool IsKeyActiveInRegistry(SidePanelRegistry* registry,
-@@ -56,12 +86,20 @@ bool IsKeyActiveInRegistry(SidePanelRegistry* registry,
+@@ -56,12 +86,20 @@
  
  }  // namespace
  
@@ -66,7 +66,7 @@ diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.cc b/chrome
  
  #if BUILDFLAG(ENABLE_EXTENSIONS)
    auto* organizer_controller =
-@@ -88,6 +126,10 @@ void ToggleExtensionSidePanel(BrowserWindowInterface* browser_window,
+@@ -88,6 +126,10 @@
  void OpenGlobalExtensionSidePanel(BrowserWindowInterface& browser_window,
                                    content::WebContents* web_contents,
                                    const ExtensionId& extension_id) {
@@ -77,7 +77,7 @@ diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.cc b/chrome
  #if BUILDFLAG(ENABLE_EXTENSIONS)
    auto* organizer_controller =
        organizer_panel::IsShowExtensionsSidePanelUiInOrganizerPanelEnabled()
-@@ -172,6 +214,10 @@ void OpenGlobalExtensionSidePanel(BrowserWindowInterface& browser_window,
+@@ -172,6 +214,10 @@
  void OpenContextualExtensionSidePanel(BrowserWindowInterface& browser_window,
                                        content::WebContents& web_contents,
                                        const ExtensionId& extension_id) {
@@ -88,7 +88,7 @@ diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.cc b/chrome
  #if BUILDFLAG(ENABLE_EXTENSIONS)
    auto* organizer_controller =
        organizer_panel::IsShowExtensionsSidePanelUiInOrganizerPanelEnabled()
-@@ -213,6 +259,10 @@ void CloseGlobalExtensionSidePanel(BrowserWindowInterface* browser_window,
+@@ -213,6 +259,10 @@
    if (!browser_window) {
      return;
    }
@@ -99,7 +99,7 @@ diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.cc b/chrome
  
  #if BUILDFLAG(ENABLE_EXTENSIONS)
    auto* organizer_controller =
-@@ -261,6 +311,10 @@ void CloseContextualExtensionSidePanel(BrowserWindowInterface* browser_window,
+@@ -261,6 +311,10 @@
    if (!browser_window || !web_contents) {
      return;
    }
@@ -113,7 +113,7 @@ diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.cc b/chrome
 diff --git a/chrome/browser/ui/extensions/extension_side_panel_utils.h b/chrome/browser/ui/extensions/extension_side_panel_utils.h
 --- a/chrome/browser/ui/extensions/extension_side_panel_utils.h
 +++ b/chrome/browser/ui/extensions/extension_side_panel_utils.h
-@@ -17,6 +17,17 @@ class WebContents;
+@@ -17,6 +17,17 @@
  
  namespace extensions::side_panel_util {
  

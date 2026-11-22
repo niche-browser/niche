@@ -68,7 +68,9 @@ final class ExtensionActions {
             NSLog("Niche: extension action %@ failed: %@", extensionID, String(describing: error))
             // Off (CEF's TriggerAction patch says so too): nothing to fall back to.
             if case Failure.turnedOff = error { ExtensionStore.shared.reload(); return true }
-            if case let Failure.protocolError(message) = error, message.contains("No enabled extension") {
+            // No action for the id: Chromium 158's own words, and those of the patch Niche carried before it.
+            if case let Failure.protocolError(message) = error,
+               message.contains("No action found for the provided extension id") || message.contains("No enabled extension") {
                 ExtensionStore.shared.reload()
                 return true
             }
