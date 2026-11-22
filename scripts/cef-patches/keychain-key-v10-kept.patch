@@ -1,0 +1,62 @@
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+index 3c239c749d..42be794207 100644
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -317,32 +317,6 @@ static constexpr base::TimeDelta kEndSessionTimeout = base::Seconds(10);
+ #endif
+ // LINT.ThenChange(//chrome/browser/shutdown_watchdog_mac.cc:EndSessionTimeout)
+ 
+-#if BUILDFLAG(IS_MAC)
+-namespace {
+-
+-// A KeyProvider that always reports `kTemporarilyUnavailable` for a given tag
+-// and is never used for encryption. Used when running with a non-default user
+-// data directory so that default user data directory ("v10") encrypted data
+-// cannot be decrypted.
+-class UnavailableKeyProvider : public os_crypt_async::KeyProvider {
+- public:
+-  explicit UnavailableKeyProvider(std::string tag) : tag_(std::move(tag)) {}
+-  ~UnavailableKeyProvider() override = default;
+-
+-  // os_crypt_async::KeyProvider:
+-  void GetKey(KeyCallback callback) override {
+-    std::move(callback).Run(
+-        tag_, base::unexpected(KeyError::kTemporarilyUnavailable));
+-  }
+-
+-  bool UseForEncryption() override { return false; }
+-
+- private:
+-  const std::string tag_;
+-};
+-
+-}  // namespace
+-#endif  // BUILDFLAG(IS_MAC)
+ 
+ using content::BrowserThread;
+ using content::ChildProcessSecurityPolicy;
+@@ -1699,14 +1673,21 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
+           /*precedence=*/10u,
+           std::make_unique<os_crypt_async::KeychainKeyProvider>());
+     } else {
++      // Niche: its profile is never Chrome's folder, and its Keychain item is its own ("Niche
++      // Safe Store", keychain-service-name.patch), so there is no other browser's "v10" data to
++      // keep out of reach. Marked unavailable, every cookie and sign-in Niche wrote before 158
++      // went and the protected settings reset, forgetting every extension (22 Nov 2026). The
++      // "v10" key stays the one that encrypts (Niche's importer writes "v10" too); "v11"
++      // values, written by the first 158 build, still decrypt.
+       constexpr auto kCustomUserDataSalt =
+           std::to_array<uint8_t>({'p', 'e', 'p', 'p', 'e', 'r'});
+       providers.emplace_back(
+-          /*precedence=*/10u, std::make_unique<UnavailableKeyProvider>("v10"));
+-      providers.emplace_back(
+-          /*precedence=*/15u,
++          /*precedence=*/10u,
+           std::make_unique<os_crypt_async::KeychainKeyProvider>(
+               "v11", kCustomUserDataSalt));
++      providers.emplace_back(
++          /*precedence=*/15u,
++          std::make_unique<os_crypt_async::KeychainKeyProvider>());
+     }
+   }
+ #endif  // BUILDFLAG(IS_MAC)

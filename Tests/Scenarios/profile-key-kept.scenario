@@ -1,0 +1,17 @@
+# A profile written before Chromium 158 keeps its cookies, and with them every sign-in. Chromium 158
+# (KeychainKeyProviderUserDataDirProtection) stops reading the Keychain key's "v10" values in any
+# profile outside Chrome's own folder, as Niche's is, and writes new ones as "v11". The first launch
+# of 0.1.11 dropped every cookie in the profile it opened, and the reset settings it could no longer
+# check forgot every extension (22 Nov 2026).
+# The first launch writes the cookie as Niche 0.1.10 did (the `arg` is dropped by the relaunch).
+arg --disable-features=KeychainKeyProviderUserDataDirProtection
+niche://open?url=${PAGE}
+wait 3
+niche://debug?cdp=Runtime.evaluate&params={"expression":"document.cookie='kept=before-158; max-age=86400',document.cookie"}
+expect-log Niche cdp Runtime.evaluate .*"value":"kept=before-158"
+wait 2
+relaunch
+niche://open?url=${PAGE}
+wait 3
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'cookies:'+document.cookie"}
+expect-log Niche cdp Runtime.evaluate .*"value":"cookies:kept=before-158"
