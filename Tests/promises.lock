@@ -10,6 +10,8 @@
 #12    Packages/NicheCore/Tests/NicheCoreTests/PeekTriggerTests.swift::shiftClickPeeksFromAnyTab  6f7985d191f4
 #12    Packages/NicheCore/Tests/NicheCoreTests/PeekTriggerTests.swift::todayTabsLoadUnlessEveryTabIsOn  cf286dab7277
 #12    Packages/NicheCore/Tests/NicheCoreTests/ShippedSidebarTests.swift::peekOptionsDefaultToArcs  2764cc04e622
+#16    Tests/Scenarios/profile-key-kept.scenario  67d77fd1d790
+#16    Tests/Scenarios/upgrade.scenario  d0037adb4339
 #21    Tests/StoreTests.swift::reopenClosedTabs  1b97b17bcf25
 #22    Tests/PolicyTests.swift::extensionLaunch  8f21949f730d
 #24    Packages/NicheCore/Tests/NicheCoreTests/ShippedThemesTests.swift::edgeToEdgeIsOffUnlessChosen  fcdb8b7fc653

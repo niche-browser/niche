@@ -25,6 +25,9 @@
 #     (stalls count from the first command; start-up has its own launchstall budget)
 #   helpers baseline | helpers settle [slack]
 #   relaunch                    niche://debug?relaunch=1, then follow the new process
+#   upgrade                     quit the previous release (NICHE_PREVIOUS_APP, which the run starts
+#                               on) and open the same data folder with NICHE_APP, as an update does
+#                               (scripts/test-upgrade.sh); without NICHE_PREVIOUS_APP it's skipped
 #   expect-log <regex>          a line Niche logged (niche.log or stdout)
 #   reject-log <regex>          no such line logged so far
 #   snapshot <View[,n]> <name>  the nth visible view of that class drawn to PNG and compared with
@@ -73,6 +76,13 @@ FILE="Tests/Scenarios/$NAME.scenario"
 [ -x "$APP/Contents/MacOS/Niche" ] || { echo "No Niche at $APP (scripts/build.sh; budgets are a release build's)"; exit 2; }
 if grep -q '^requires screen' "$FILE" && [ "${NICHE_SCENARIO_SCREEN:-}" != "1" ]; then
   echo "$NAME: skipped (takes over the screen; NICHE_SCENARIO_SCREEN=1 runs it)"; exit 0
+fi
+# An update: the run starts on the release before this one and `upgrade` moves to $APP.
+FIRST_APP="$APP"
+if grep -q '^upgrade' "$FILE"; then
+  [ -n "${NICHE_PREVIOUS_APP:-}" ] || { echo "$NAME: skipped (an update; scripts/test-upgrade.sh runs it)"; exit 0; }
+  [ -x "$NICHE_PREVIOUS_APP/Contents/MacOS/Niche" ] || { echo "No Niche at $NICHE_PREVIOUS_APP"; exit 2; }
+  FIRST_APP="$NICHE_PREVIOUS_APP"
 fi
 
 OUT="$ROOT/build/scenarios/$NAME${NICHE_FLAGS:+-${NICHE_FLAGS//[^a-z]/}}"
@@ -162,11 +172,17 @@ app_args=()
 while read -r _ a; do app_args+=("$(expand "$a")"); done < <(grep '^arg ' "$FILE")
 while read -r _ f; do mkdir -p "$DATA/Extensions" && cp -R "$(expand "$f")" "$DATA/Extensions/"; done < <(grep '^extension ' "$FILE")
 
-NICHE_DATA_DIR="$DATA" NICHE_COMMAND_FILE="$CMD" NICHE_HITCH_LOG="$HITCH" NICHE_TEST_BACKGROUND=1 NICHE_WEBKIT_HOSTS=localhost \
-  NICHE_ARC_DIR="$FIXTURES/Arc" NICHE_FLAGS="${NICHE_FLAGS:-}" \
-  "${app_env[@]}" "$APP/Contents/MacOS/Niche" ${app_args[@]+"${app_args[@]}"} >"$OUT/stdout.log" 2>&1 &
-PID=$!
-PIDS+=("$PID")
+# $1: the app; the rest goes on its command line. Its output goes on stdout.log.
+launch() {
+  local app="$1"; shift
+  NICHE_DATA_DIR="$DATA" NICHE_COMMAND_FILE="$CMD" NICHE_HITCH_LOG="$HITCH" NICHE_TEST_BACKGROUND=1 NICHE_WEBKIT_HOSTS=localhost \
+    NICHE_ARC_DIR="$FIXTURES/Arc" NICHE_FLAGS="${NICHE_FLAGS:-}" \
+    "${app_env[@]}" "$app/Contents/MacOS/Niche" "$@" >>"$OUT/stdout.log" 2>&1 &
+  PID=$!
+  PIDS+=("$PID")
+}
+: > "$OUT/stdout.log"
+launch "$FIRST_APP" ${app_args[@]+"${app_args[@]}"}
 
 cleanup() {
   for p in "${PIDS[@]}"; do kill -KILL "$p" 2>/dev/null; done
@@ -241,6 +257,20 @@ while IFS= read -r raw || [ -n "$raw" ]; do
       [ -n "$PID" ] || { problem "no new Niche after relaunch"; PID="$old"; break; }
       PIDS+=("$PID"); echo "  relaunched: pid $PID"
       ready "$PID" || problem "the relaunched Niche did not read commands in 30 s"
+      sleep 2 ;;
+    upgrade)
+      count_faults
+      { cat "$HITCH" 2>/dev/null; echo "0 relaunch"; } >> "$OUT/hitch.earlier"
+      send "niche://debug?quit=1"
+      for _ in $(seq 1 100); do alive || break; sleep 0.2; done
+      if alive; then problem "the previous release did not quit within 20 s"; kill -KILL "$PID"; fi
+      wait "$PID" 2>/dev/null; status=$?
+      [ "$status" -gt 128 ] && problem "the previous release ended on signal $((status - 128)) while quitting"
+      : > "$CMD"
+      launch "$APP"
+      v() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
+      echo "  updated: $(v "$FIRST_APP") → $(v "$APP"), pid $PID"
+      ready "$PID" || problem "the updated Niche did not read commands in 30 s"
       sleep 2 ;;
     expect-log)
       shift; re="$*"; found=""
@@ -326,6 +356,18 @@ if [ "$PID" = "${PIDS[0]}" ] && ! alive; then
 fi
 count_faults
 [ "$FAULTS" -eq 0 ] || problem "$FAULTS fault line(s) in niche.log (faults.txt)"
+
+# Chromium trusted every profile's protected settings. When it can't check them (a key it can no
+# longer read: Chromium 158, 0.1.11) it resets them, which forgets every extension; the same key
+# held the cookies, so every sign-in went too.
+while IFS= read -r reset; do problem "$reset"; done < <(python3 -I - "$DATA/Chromium" <<'PY'
+import glob, json, os, sys
+for f in sorted(glob.glob(os.path.join(sys.argv[1], "*", "Secure Preferences"))):
+    try: when = json.load(open(f)).get("prefs", {}).get("preference_reset_time")
+    except (OSError, ValueError): continue
+    if when: print(f"Chromium reset the protected settings of {os.path.basename(os.path.dirname(f))} (its extensions are forgotten)")
+PY
+)
 
 # Crash reports written for any of this run's processes (ReportCrash needs a moment).
 sleep 3

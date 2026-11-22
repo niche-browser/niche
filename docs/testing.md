@@ -43,6 +43,7 @@ Commands for each piece are in [development.md](development.md#tests).
 | L2 contract | production files compiled against fakes: browser manager, store and importers on a manual clock, policies | `scripts/test-*.sh` | every PR |
 | L3 component | Arc-specified views drawn from the running app and compared with `Tests/Snapshots` | `component-snapshots` scenario | nightly |
 | L4 scenario | the real app driven through a journey, invariants only | `scripts/scenario.sh` | one per PR, all nightly |
+| L4 update | the latest release's profile opened by this build | `scripts/test-upgrade.sh` | every PR and every release, blocking |
 | L5 human | the sidebar blur, fullscreen Spaces, GPU, real sites | the PR description | each PR, release |
 
 L0–L2 need no CEF and finish in about 20 seconds. L3 lives in the running app because Niche's
@@ -64,8 +65,10 @@ no page content), so it checks geometry, ink and fills.
   (`SidebarIntegrity`), main-thread stalls inside the scenario's budget, Niche's memory inside
   its budget, helper processes back to baseline five seconds after tabs close, the performance
   recorder under 0.1 % of a core (`selfCost.cpuPct` in its perf.json, `budget perfcpu=`) with its
-  count of 250 ms stalls within a few of HitchMonitor's, and a quit within 20 seconds that ends
-  without a signal (#227: ReportCrash can take longer to write its report than the run waits).
+  count of 250 ms stalls within a few of HitchMonitor's, a quit within 20 seconds that ends
+  without a signal (#227: ReportCrash can take longer to write its report than the run waits),
+  and no profile whose protected settings Chromium reset (`prefs.preference_reset_time` in its
+  `Secure Preferences`: the extension list is forgotten, 0.1.11).
   The budgets are for a release build (`scripts/build.sh`), which is what the nightly runs: a
   debug build's recorder costs about six times as much (0.16–0.22 % against 0.03–0.04 %, 6 Nov
   2026), so on a debug build the recorder line fails and means nothing.
@@ -116,7 +119,7 @@ one. Every launch checks the sidebar and logs a fault for each broken link.
     scripts/scenario.sh all             # every one, about 6 minutes
 
 A scenario (`Tests/Scenarios/*.scenario`) is a list of `niche://` commands plus a few
-directives (`wait`, `repeat`, `budget`, `helpers`, `relaunch`, `expect-log`, `snapshot`, `seed`, `env`,
+directives (`wait`, `repeat`, `budget`, `helpers`, `relaunch`, `upgrade`, `expect-log`, `snapshot`, `seed`, `env`,
 `arg`, `extension`, `home`; the header of `scripts/scenario.sh` lists them). It runs `build/Niche.app` on a throwaway data
 folder, behind your windows (`NICHE_TEST_BACKGROUND`), with the fixture pages served from
 127.0.0.1. Logs, hitch log and snapshots land in `build/scenarios/<name>/`. Adding a journey
@@ -125,6 +128,16 @@ is a text file; the invariants come for free.
 `auto-theme` flips the app between light and dark (`niche://debug?systemAppearance=`) and reads
 which half each window draws (`niche://debug?themeShown=<label>`): an Auto space must switch its
 window content and sidebar both ways, and a Light one must not (#155).
+
+**Updates.** `scripts/test-upgrade.sh` downloads the latest release, lets it make a profile (a
+cookie, a page's site data, an open tab) and opens that profile with this build (the `upgrade`
+directive, scenario `upgrade`). It fails when any of them is gone or Chromium reset the protected
+settings. CI runs it on every pull request and the release workflow before it publishes; a red
+run blocks both. 0.1.11 is why: Chromium 158 couldn't read what 156 had written, and the update
+signed everyone out of every site and lost every extension (22 Nov 2026). Run it on 0.1.10 →
+0.1.11 (`NICHE_APP=<0.1.11 app> scripts/test-upgrade.sh v0.1.10`) and it fails on both. Both
+apps run as ad-hoc signed copies, on Chromium's mock Keychain, so it never touches the login
+Keychain's "Niche Safe Store" item.
 
 `fullscreen` takes over a Space and runs only with `NICHE_SCENARIO_SCREEN=1` (CI does).
 `NICHE_FLAGS=backdrop=material` runs any scenario on the sidebar's `NSVisualEffectView` path

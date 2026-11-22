@@ -96,6 +96,15 @@ jobs:
         timeout-minutes: 5
         run: scripts/scenario.sh sleep-tabs
 
+      # Blocking: the latest release makes a profile and this build opens it. A cookie, a page's
+      # site data, the open tab and Chromium's protected settings (the extension list) must all
+      # survive; 0.1.11 signed everyone out and lost every extension (22 Nov 2026).
+      - name: Update from the latest release
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/test-upgrade.sh
+
       - name: Keep scenario logs
         if: always()
         uses: actions/upload-artifact@v7
