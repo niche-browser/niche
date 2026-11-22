@@ -4,6 +4,7 @@
 # of 0.1.11 dropped every cookie in the profile it opened, and the reset settings it could no longer
 # check forgot every extension (22 Nov 2026).
 # The first launch writes the cookie as Niche 0.1.10 did (the `arg` is dropped by the relaunch).
+# promise: #16
 arg --disable-features=KeychainKeyProviderUserDataDirProtection
 niche://open?url=${PAGE}
 wait 3

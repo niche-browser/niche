@@ -91,6 +91,22 @@ jobs:
           NICHE_GOOGLE_API_KEY: ${{ secrets.NICHE_GOOGLE_API_KEY }}
         run: scripts/release.sh
 
+      # Nothing is published unless the latest release's profile survives the update to this
+      # build: cookies (sign-ins), site data, tabs and the extension list (0.1.11 lost them).
+      - name: Update from the latest release
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/update-from-release.sh
+
+      - name: Keep the update test's logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: upgrade-logs
+          path: build/scenarios
+          if-no-files-found: ignore
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:

@@ -1,0 +1,17 @@
+# An update keeps the profile: a page's cookie and its site data, the open tab, and Chromium's
+# protected settings (the extension list; every scenario checks those). The run starts on the
+# previous release and `upgrade` opens the same data folder with this build, as Sparkle's update
+# does. 0.1.11 (Chromium 158) lost every cookie, so every sign-in, and reset the protected
+# settings, so every extension went (22 Nov 2026). scripts/update-from-release.sh runs it with the latest
+# release, on every pull request and before a release is published.
+# promise: #16
+budget rss=800
+niche://open?url=${PAGE}?n=upgrade
+wait 3
+niche://debug?cdp=Runtime.evaluate&params={"expression":"localStorage.setItem('kept','site-data'),document.cookie='kept=sign-in; max-age=86400','before:'+document.cookie+'|'+localStorage.getItem('kept')"}
+expect-log Niche cdp Runtime.evaluate .*"value":"before:kept=sign-in\|site-data"
+wait 2
+upgrade
+wait 4
+niche://debug?cdp=Runtime.evaluate&params={"expression":"'after:'+location.search+'|'+document.cookie+'|'+localStorage.getItem('kept')"}
+expect-log Niche cdp Runtime.evaluate .*"value":"after:\?n=upgrade\|kept=sign-in\|site-data"
