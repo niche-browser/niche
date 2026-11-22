@@ -222,6 +222,11 @@ built release app with a test profile. Note anything that fails in the release's
 
 ### Profiles, privacy, media and the engine
 
+- **Engine update (0.1.11):** on a test profile made with the previous release, sign in to a
+  Google account and install a Web Store extension; quit, install the new build over it and
+  open it. The account is still signed in, the extension is still in the toolbar and
+  chrome://extensions, and the profile's `Secure Preferences` has no `prefs.preference_reset_time`.
+
 - **#111:** reset Niche's camera access (`tccutil reset Camera <bundle id>`), open Meet, click "Use
   microphone and camera" and Allow. One Niche prompt shows, then macOS's own dialog, and nothing
   crashes.

@@ -196,7 +196,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Saves, quits and starts again once this process is gone (the CEF profile is
     /// single-instance). A NICHE_DATA_DIR instance is re-executed directly so it keeps
-    /// its environment; an installed one goes through LaunchServices.
+    /// its environment and its output (a scenario reads what the relaunched Niche logs);
+    /// an installed one goes through LaunchServices.
     func relaunch() {
         store.saveAll()
         let custom = ProcessInfo.processInfo.environment["NICHE_DATA_DIR"] != nil
@@ -205,8 +206,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; sleep 0.3; " + (custom ? "exec \"$2\"" : "exec /usr/bin/open \"$2\""),
                        "niche-relaunch", String(ProcessInfo.processInfo.processIdentifier), target]
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
+        p.standardOutput = custom ? FileHandle.standardOutput : FileHandle.nullDevice
+        p.standardError = custom ? FileHandle.standardError : FileHandle.nullDevice
         do { try p.run() } catch { main.showWindow(nil); return }
         isRelaunching = true
         NSApp.terminate(nil)

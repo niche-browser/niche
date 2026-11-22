@@ -235,6 +235,16 @@ itself, and ninja recompiles nearly everything (about 2½ hours on the M2 Max). 
 major needs a fresh checkout as well. Then test `build/Niche.app`, commit `scripts/fetch-cef.sh`, close the
 issue and tag a release.
 
+**The profile has to survive the update.** Chromium encrypts cookies, passwords and the hashes
+that guard its protected settings (the extension list among them) with the key in "Niche Safe
+Store". A new Chromium that can't read what the old one wrote drops every cookie, so every
+sign-in, and resets the protected settings, so every extension goes. Chromium 158 did exactly
+that (0.1.11, 22 Nov 2026): outside Chrome's own folder it marks the "v10" key unavailable
+(`KeychainKeyProviderUserDataDirProtection`). `keychain-key-v10-kept.patch` keeps "v10" as the key
+that encrypts and still decrypts the "v11" values 0.1.11 wrote. The `profile-key-kept` scenario
+writes a cookie the old way and reads it after a relaunch. Before tagging an engine update, also run the
+engine check in [release-checklist.md](release-checklist.md): install it over the previous release.
+
 ## Later
 
 - **Homebrew.** A cask (`brew install --cask niche`) pointing at the DMG and
