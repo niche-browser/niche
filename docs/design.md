@@ -207,7 +207,11 @@ Library glyph instead, which closes to a full circle before it fades. Under Redu
 thumbnail and ring show their state without moving.
 
 The tray over the Library button (`DownloadsTrayView`) starts with a line: "Downloads", which
-opens Library ▸ Downloads, and Clear when there is something to clear. A row is the thumbnail,
+opens Library ▸ Downloads, and Clear when there is something to clear. It opens right over the
+Library button, where the sidebar player's cards rest, so the pointer never crosses the player on
+its way to a row; while it is open the player fades with the tab list and its cards don't open
+(`SidebarBottom`). It closes when the pointer leaves it: whether the pointer is on a view is asked
+of the part of it that shows (`shownPart`), never of a visible rect that can be the whole window. A row is the thumbnail,
 the name (truncated in the middle, never to the sidebar's edge) over one line of state: "5 MB of
 20 MB — 38 s left", "Paused — 5 MB of 20 MB", "Failed to Download" in the danger colour, or how
 long ago it finished. A running or paused download has a 3 pt bar under its two lines: the

@@ -596,7 +596,7 @@ final class BookmarkItemView: NSView, NSTextFieldDelegate {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
-        let inside = window.map { visibleRect.intersection(bounds).contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        let inside = pointerIsOnShownPart
         var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
         if inside { options.insert(.assumeInside) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil))

@@ -373,7 +373,7 @@ final class StripItemView: NSView, NSTextFieldDelegate {
     /// Within its own bounds: a view that doesn't clip (one that was carried) reports a visible
     /// rect as large as what holds it, and every such tab took the pointer for its own.
     var isUnderPointer: Bool {
-        window.map { !isHiddenOrHasHiddenAncestor && visibleRect.intersection(bounds).contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        window.map { !isHiddenOrHasHiddenAncestor && shownPartContains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
     }
     var showsHover: Bool { hovering }
 

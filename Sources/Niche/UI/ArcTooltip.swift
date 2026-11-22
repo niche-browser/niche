@@ -255,7 +255,7 @@ final class ArcTooltipAnchorView: NSView, ArcTooltipTarget {
         // activeAlways: the key window is usually a Chromium page window, not the sidebar's.
         var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect]
         // Rebuilt under the pointer (its control moved): no mouseEntered comes, so only this gets the mouseExited.
-        if let w = window, visibleRect.contains(convert(w.mouseLocationOutsideOfEventStream, from: nil)) { options.insert(.assumeInside) }
+        if pointerIsOnShownPart { options.insert(.assumeInside) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil))
     }
 

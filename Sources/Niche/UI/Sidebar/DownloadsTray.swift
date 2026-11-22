@@ -39,6 +39,11 @@ enum DownloadsTrayMetrics {
     /// The track under the bar's fill, as a share of the ink.
     static let trackAlpha: CGFloat = 0.14
     static func listHeight(rows: Int) -> CGFloat { rows == 0 ? 0 : header + CGFloat(rows) * rowPitch - (rowPitch - thumbnail) }
+    /// The view reaches this far past the list, under its last row (Arc: the last row ends 2 pt below the area).
+    static let overhang: CGFloat = 4
+    /// The tab list behind is hidden from this far under the view's top (as before the list moved
+    /// over the player, 22 Nov 2026).
+    static let maskLead: CGFloat = 3
 }
 
 extension SidebarUIState {
@@ -98,7 +103,7 @@ final class DownloadsTrayView: NSView {
             animate(open: open)
             // The pointer may already rest where a row has just come up.
             let point = window.map { convert($0.mouseLocationOutsideOfEventStream, from: nil) }
-            if open, let point, visibleRect.contains(point) { pointer(at: point) } else { for r in rows { r.hovering = false } }
+            if open, let point, shownPartContains(point) { pointer(at: point) } else { for r in rows { r.hovering = false } }
         }
         // TimelineView(.periodic(by: 1)): the ages tick while the list is up.
         if open, ticker == nil {
@@ -164,7 +169,16 @@ final class DownloadsTrayView: NSView {
 
     // MARK: Pointer
 
-    override func hitTest(_ point: NSPoint) -> NSView? { shownOpen ? super.hitTest(point) : nil }
+    /// The list's own height: the view reaches further down, to the Library button, only to keep
+    /// the pointer (SidebarBottom.trayHoverBottom); a click there goes to what is under it.
+    var listHeight: CGFloat = 0
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard shownOpen else { return nil }
+        // `point` is in the superview's coordinates; the list's part is its top `listHeight`.
+        guard convert(point, from: superview).y < listHeight else { return nil }
+        return super.hitTest(point)
+    }
 
     /// One tracking area for the tray: it says which row the pointer is on. Rows change under the
     /// pointer (their buttons come and go), which re-makes tracking areas; an area made under a
@@ -173,7 +187,7 @@ final class DownloadsTrayView: NSView {
         super.updateTrackingAreas()
         for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
         let point = window.map { convert($0.mouseLocationOutsideOfEventStream, from: nil) }
-        let inside = point.map { visibleRect.contains($0) } ?? false
+        let inside = point.map { shownPartContains($0) } ?? false
         var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect]
         if inside { options.insert(.assumeInside) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil))

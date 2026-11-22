@@ -801,7 +801,7 @@ final class ToolbarGlyphButton: NSView {
         super.updateTrackingAreas()
         for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
         // A new area under the pointer gets no mouseEntered, and without assumeInside no mouseExited either.
-        let inside = window.map { visibleRect.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        let inside = pointerIsOnShownPart
         var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
         if inside { options.insert(.assumeInside) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil))
