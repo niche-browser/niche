@@ -345,7 +345,7 @@ final class SidebarGlyphButton: NSView {
         for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
         // A new area under the pointer gets no mouseEntered, so without assumeInside it never sends
         // the mouseExited either and the hover fill sticks (buttons moved under a resting pointer).
-        let inside = window.map { visibleRect.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        let inside = pointerIsOnShownPart
         var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
         if inside { options.insert(.assumeInside) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil))

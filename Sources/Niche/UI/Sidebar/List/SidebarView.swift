@@ -111,7 +111,8 @@ final class SidebarView: NSView {
 
     private func observe() {
         var bannerHeight: CGFloat = 0
-        let (space, library, trayOpen, recentCount) = withObservationTracking {
+        // The list's state and rows are read only to relay the column when they change.
+        let (space, library, _, _) = withObservationTracking {
             let space = store.focusedSpace(window: ui.windowID)
             _ = SystemAppearance.shared.isDark
             bannerHeight = UpdateBannerView.preferredHeight
@@ -139,7 +140,7 @@ final class SidebarView: NSView {
             libraryHost?.palette = palette
         }
         self.bannerHeight = bannerHeight
-        updateTrayMask(open: trayOpen, rows: recentCount)
+        // layout() redraws the mask from the list's new frame (needsLayout below).
         showLibrary(library)
         needsLayout = true
     }
@@ -149,11 +150,12 @@ final class SidebarView: NSView {
     /// `niche://debug?downloadsHover=<row>` (DownloadsTrayView.debugHover).
     func debugHoverDownload(row: Int) { trayHost.debugHover(row: row) }
 
-    /// DownloadsTrayMask: the tab list is hidden from 3 pt above the downloads list's first row
+    /// DownloadsTrayMask: the tab list is hidden from 3 pt under the top of the downloads list's view
     /// and fades back in over the 170 pt above that.
     private func updateTrayMask(open: Bool, rows: Int) {
         let h = max(pager.bounds.height, 1)
-        let clearTop = max(0, h - DownloadsTrayMetrics.listHeight(rows: rows) - 1)
+        // The list opens over the player's resting cards (SidebarBottom), so it can reach below the tab list.
+        let clearTop = min(h, max(0, trayHost.frame.minY - pager.frame.minY + DownloadsTrayMetrics.maskLead))
         let fadeTop = max(0, clearTop - DownloadsTrayMetrics.fade)
         CATransaction.begin()
         CATransaction.setAnimationDuration(open ? Design.Motion.standard : Design.Motion.fast)
@@ -290,12 +292,18 @@ final class SidebarView: NSView {
         let bannerTop = b.height - 6 - dockH - 8 - bannerHeight
         bannerHost.frame = NSRect(x: 0, y: bannerTop, width: b.width, height: bannerHeight)
         // The player rests where the list ends and takes that room from it; opened, it grows over the list.
-        player.frame = NSRect(x: 0, y: th, width: b.width, height: max(0, bannerTop - th))
-        let listBottom = bannerTop - NowPlayingMetrics.restHeight(cards: player.shownCount)
-        pager.frame = NSRect(x: 0, y: th, width: b.width, height: max(0, listBottom - th))
+        // The downloads list opens over the player's place and the player gives way (SidebarBottom).
         let rows = DownloadHistory.shared.recent.count
-        let trayH = DownloadsTrayMetrics.listHeight(rows: rows) + 4
-        trayHost.frame = NSRect(x: 0, y: pager.frame.maxY - trayH, width: b.width, height: trayH)
+        let trayH = rows == 0 ? 0 : DownloadsTrayMetrics.listHeight(rows: rows) + DownloadsTrayMetrics.overhang
+        let bottom = SidebarBottom(areaBottom: bannerTop, playerRest: NowPlayingMetrics.restHeight(cards: player.shownCount),
+                                   trayHeight: trayH, trayOpen: ui.downloadsListOpen,
+                                   buttonTop: dock.frame.minY + (dockH - SpaceDockView.librarySide) / 2)
+        player.frame = NSRect(x: 0, y: th, width: b.width, height: max(0, bannerTop - th))
+        player.givesWay = bottom.playerGivesWay
+        pager.frame = NSRect(x: 0, y: th, width: b.width, height: max(0, bottom.listBottom - th))
+        // The view reaches down to the Library button, so the gap under the list keeps the pointer.
+        trayHost.listHeight = trayH
+        trayHost.frame = NSRect(x: 0, y: bottom.trayTop, width: b.width, height: bottom.trayHoverBottom - bottom.trayTop)
         updateTrayMask(open: ui.downloadsListOpen, rows: rows)
         if renameCard?.layer?.animationKeys()?.isEmpty ?? true { layoutRenameCard() }
     }
@@ -883,6 +891,8 @@ final class SidebarURLPill: NSView {
 /// space. Widths and what each cell draws come from NicheCore's SpaceDock.
 final class SpaceDockView: NSView {
     static let cell = CGSize(width: 34, height: 32)
+    /// The Library button, centred in the dock's height.
+    static let librarySide: CGFloat = 28
     private let store: SidebarStore
     private let ui: SidebarUIState
     private let actions: SidebarActions
@@ -988,7 +998,7 @@ final class SpaceDockView: NSView {
     override func layout() {
         super.layout()
         let h = bounds.height
-        library.frame = NSRect(x: 0, y: (h - 28) / 2, width: 28, height: 28)
+        library.frame = NSRect(x: 0, y: (h - Self.librarySide) / 2, width: Self.librarySide, height: Self.librarySide)
         plus.frame = NSRect(x: bounds.width - 28, y: (h - 28) / 2, width: 28, height: 28)
         // A narrower sidebar can squeeze the dock into dots.
         refreshCells()
@@ -1577,10 +1587,23 @@ final class LibraryButtonView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
+        // Rebuilt under a resting pointer (the downloads list opening relays the column): no
+        // mouseEntered comes, and without assumeInside no mouseExited either, so the plate stuck.
+        // Only a pointer over this window: another of Niche's windows can cover the sidebar's corner.
+        let inside = pointerIsOnShownPart
+            && window.map { NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == $0.windowNumber } == true
+        var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+        if inside { options.insert(.assumeInside) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil))
+        if hovering != inside { setHovering(inside) }
     }
-    override func mouseEntered(with event: NSEvent) { hovering = true; ui.libraryHovered = true; ui.downloadsHoverChanged() }
-    override func mouseExited(with event: NSEvent) { hovering = false; ui.libraryHovered = false; ui.downloadsHoverChanged() }
+    override func mouseEntered(with event: NSEvent) { setHovering(true) }
+    override func mouseExited(with event: NSEvent) { setHovering(false) }
+    private func setHovering(_ on: Bool) {
+        hovering = on
+        ui.libraryHovered = on
+        ui.downloadsHoverChanged()
+    }
     override func mouseDown(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)

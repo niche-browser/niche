@@ -36,6 +36,13 @@ gains a finding fails, one that loses one is reported so the baseline can come d
       docs/design.md), which is what keeps one bar's glyphs, plates and type like the next one's.
       A component's own value is a named `static let` beside a comment saying what it is; the
       token files themselves (Design, Colors, Theme, the emoji catalog) are exempt.
+  unbounded-visible-rect
+      `visibleRect.contains(…)` to ask whether the pointer is on a view. A view that doesn't clip
+      (the default since macOS 14) reports a visible rect as large as the window, so the check is
+      true anywhere in it: the downloads list over the Library button took a pointer on the page
+      for its own and never closed, and buttons lit up after a layout with the pointer elsewhere
+      (22 Nov 2026). Ask `NSView.pointerIsOnShownPart` (or `shownPart`), which keeps to the
+      view's bounds.
   perf-boundary
       The performance recorder stays removable (#91, docs/performance.md): outside its two folders
       only the files in PERF_CALLERS reach it, and inside Sources/Niche/Perf only PerfCEF.swift sees
@@ -67,6 +74,7 @@ DESIGN_LITERAL = re.compile(
     r"|hex:\s*\"")
 DESIGN_NAMED = re.compile(r"^\s*(?:(?:private|fileprivate|public|internal)\s+)?static\s+(?:let|var|func)\s")
 DESIGN_EXEMPT = {"UI/Design.swift", "UI/Colors.swift", "UI/Theme.swift", "UI/Sidebar/EmojiCatalog+Data.swift"}
+UNBOUNDED_VISIBLE = re.compile(r"\bvisibleRect\.contains\(")
 CLOCK_FILES = {"Services/SidebarStore.swift", "Services/BrowserManager.swift", "Services/LiveFolderManager.swift",
                "Services/SidebarIntegrity.swift", "App/AppComposition.swift"}
 
@@ -125,6 +133,8 @@ def findings():
             if (top == "UI" or rel == "Perf/PerformancePane.swift") and rel not in DESIGN_EXEMPT \
                     and DESIGN_LITERAL.search(line) and not DESIGN_NAMED.match(line):
                 hit("design-literal", rel, i)
+            if UNBOUNDED_VISIBLE.search(line):
+                hit("unbounded-visible-rect", rel, i)
             for name in re.findall(r"\benum (\w+)Importer\b", line):
                 if not os.path.isdir(os.path.join(ROOT, "Tests", "Fixtures", name)):
                     hit("importer-without-fixture", f"{rel}:{name}", i)

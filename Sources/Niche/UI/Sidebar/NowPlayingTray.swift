@@ -117,6 +117,24 @@ final class NowPlayingTrayView: NSView {
     private var colors = NowPlayingColors(themeColor: nil, dark: true)
     /// The number of cards changed: the sidebar gives the list more or less room.
     var onCountChange: (() -> Void)?
+    /// The downloads list is open over the cards (SidebarBottom): they fold, fade with the tab list
+    /// behind it and don't open under the pointer until it closes.
+    var givesWay = false {
+        didSet {
+            guard givesWay != oldValue else { return }
+            if givesWay, expanded {
+                expanded = false
+                drawerID = nil
+                place(animated: true)
+            }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Design.Motion.duration(givesWay ? Design.Motion.standard : Design.Motion.fast)
+                animator().alphaValue = givesWay ? 0 : 1
+            }
+            // Back under a resting pointer: the cards open as if it had just come.
+            if !givesWay, let window { setHovered(overStack(convert(window.mouseLocationOutsideOfEventStream, from: nil))) }
+        }
+    }
     var shownCount: Int { order.count }
 
     init(store: SidebarStore, ui: SidebarUIState, favicons: FaviconCache) {
@@ -269,7 +287,7 @@ final class NowPlayingTrayView: NSView {
     }
 
     private func setHovered(_ hovered: Bool) {
-        let want = hovered && !order.isEmpty
+        let want = hovered && !order.isEmpty && !givesWay
         guard want != expanded else { return }
         expanded = want
         if !want { drawerID = nil }
@@ -277,6 +295,7 @@ final class NowPlayingTrayView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !givesWay else { return nil }
         let p = convert(point, from: superview)
         guard cards.values.contains(where: { $0.alphaValue > 0 && $0.frame.contains(p) }) else { return nil }
         return super.hitTest(point)

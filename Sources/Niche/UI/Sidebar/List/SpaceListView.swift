@@ -837,7 +837,7 @@ final class SpaceListView: NSView, NSDraggingSource {
     fileprivate func refreshHover() {
         guard let w = window else { return }
         let p = w.mouseLocationOutsideOfEventStream
-        let inside = document.visibleRect.contains(document.convert(p, from: nil)) && w.isVisible
+        let inside = document.shownPartContains(document.convert(p, from: nil)) && w.isVisible
         hoverAt(inside && document.isMouseInside ? p : nil)
     }
 
@@ -853,7 +853,7 @@ final class SpaceListView: NSView, NSDraggingSource {
         // A swipe slides the strip under the pointer: no hover until it settles.
         if let wp = windowPoint, ui.spaceSwipe == 0, ui.libraryPage == nil {
             let p = document.convert(wp, from: nil)
-            if document.visibleRect.contains(p), let row = rows.first(where: { placed($0).contains(p) }), let v = views[row.key] {
+            if document.shownPartContains(p), let row = rows.first(where: { placed($0).contains(p) }), let v = views[row.key] {
                 target = v
                 local = v.convert(wp, from: nil)
             }
@@ -1266,7 +1266,7 @@ final class SpaceListDocument: NSView {
     /// The pointer is on the list's visible part, and a click there would land in this window.
     private var pointerIsOver: Bool {
         guard let w = window, w.isVisible, !NSApp.isHidden,
-              visibleRect.contains(convert(w.mouseLocationOutsideOfEventStream, from: nil)) else { return false }
+              shownPartContains(convert(w.mouseLocationOutsideOfEventStream, from: nil)) else { return false }
         return NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == w.windowNumber
     }
 
