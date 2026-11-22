@@ -111,7 +111,8 @@ final class SidebarView: NSView {
 
     private func observe() {
         var bannerHeight: CGFloat = 0
-        let (space, library, trayOpen, recentCount) = withObservationTracking {
+        // The list's state and rows are read only to relay the column when they change.
+        let (space, library, _, _) = withObservationTracking {
             let space = store.focusedSpace(window: ui.windowID)
             _ = SystemAppearance.shared.isDark
             bannerHeight = UpdateBannerView.preferredHeight
@@ -139,7 +140,7 @@ final class SidebarView: NSView {
             libraryHost?.palette = palette
         }
         self.bannerHeight = bannerHeight
-        updateTrayMask(open: trayOpen, rows: recentCount)
+        // layout() redraws the mask from the list's new frame (needsLayout below).
         showLibrary(library)
         needsLayout = true
     }
@@ -293,12 +294,12 @@ final class SidebarView: NSView {
         // The player rests where the list ends and takes that room from it; opened, it grows over the list.
         // The downloads list opens over the player's place and the player gives way (SidebarBottom).
         let rows = DownloadHistory.shared.recent.count
-        let trayH = DownloadsTrayMetrics.listHeight(rows: rows) + DownloadsTrayMetrics.overhang
+        let trayH = rows == 0 ? 0 : DownloadsTrayMetrics.listHeight(rows: rows) + DownloadsTrayMetrics.overhang
         let bottom = SidebarBottom(areaBottom: bannerTop, playerRest: NowPlayingMetrics.restHeight(cards: player.shownCount),
                                    trayHeight: trayH, trayOpen: ui.downloadsListOpen,
                                    buttonTop: dock.frame.minY + (dockH - SpaceDockView.librarySide) / 2)
         player.frame = NSRect(x: 0, y: th, width: b.width, height: max(0, bannerTop - th))
-        player.givesWay = !bottom.playerShown
+        player.givesWay = bottom.playerGivesWay
         pager.frame = NSRect(x: 0, y: th, width: b.width, height: max(0, bottom.listBottom - th))
         // The view reaches down to the Library button, so the gap under the list keeps the pointer.
         trayHost.listHeight = trayH
@@ -1588,7 +1589,9 @@ final class LibraryButtonView: NSView {
         for t in trackingAreas where t.owner === self { removeTrackingArea(t) }
         // Rebuilt under a resting pointer (the downloads list opening relays the column): no
         // mouseEntered comes, and without assumeInside no mouseExited either, so the plate stuck.
+        // Only a pointer over this window: another of Niche's windows can cover the sidebar's corner.
         let inside = pointerIsOnShownPart
+            && window.map { NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == $0.windowNumber } == true
         var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
         if inside { options.insert(.assumeInside) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil))

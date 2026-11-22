@@ -37,12 +37,14 @@ struct SidebarBottomTests {
     /// While the list is open it owns the bottom: the player fades with the tab list behind it and
     /// its cards don't open under the pointer, so the list's rows never sit on a card.
     @Test func thePlayerGivesWayWhileTheListIsOpen() {
-        let open = bottom(open: true)
-        #expect(!open.playerShown)
-        #expect(!open.playerTakesHover)
-        let closed = bottom(open: false)
-        #expect(closed.playerShown)
-        #expect(closed.playerTakesHover)
+        #expect(bottom(open: true).playerGivesWay)
+        #expect(!bottom(open: false).playerGivesWay)
+    }
+
+    /// Clear, or Remove on the last row, empties the open list under the pointer: the player comes
+    /// back rather than staying hidden behind a list with nothing in it.
+    @Test func anEmptyListDoesNotHideThePlayer() {
+        #expect(!bottom(open: true, tray: 0).playerGivesWay)
     }
 
     /// No player: the list ends where the list area does, as before.

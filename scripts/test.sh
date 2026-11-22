@@ -31,6 +31,7 @@ if [ "${1:-}" != core ]; then
   suite "Shields engine" scripts/build-shields.sh --test
   suite "Command bar glyph" scripts/test-command-bar-glyph.sh
   suite "Folder glyph" scripts/test-folder-glyph.sh
+  suite "Shown part" scripts/test-shown-part.sh
   suite "Perf recorder" scripts/test-perf.sh
   suite "Lint" scripts/lint.py
 fi

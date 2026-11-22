@@ -15,14 +15,13 @@ public struct SidebarBottom: Equatable, Sendable {
     /// the button and the list is the list's (a slow move took longer to cross it than the list
     /// waits before closing, 22 Nov 2026).
     public var trayHoverBottom: CGFloat
-    /// Whether the player's cards show, and whether they open under the pointer.
-    public var playerShown: Bool
-    public var playerTakesHover: Bool
+    /// The player gives way to the open list: its cards fade with the tab list and don't open.
+    public var playerGivesWay: Bool
 
     /// - Parameters:
     ///   - areaBottom: the bottom of the room the list and player share (above the update banner and the dock).
     ///   - playerRest: the room the player's resting cards take (0 with none).
-    ///   - trayHeight: the downloads list's height with its rows.
+    ///   - trayHeight: the downloads list's height with its rows (0 with none).
     ///   - trayOpen: whether the downloads list is open, or opening.
     ///   - buttonTop: the top of the Library button, under the list.
     public init(areaBottom: CGFloat, playerRest: CGFloat, trayHeight: CGFloat, trayOpen: Bool, buttonTop: CGFloat) {
@@ -32,8 +31,8 @@ public struct SidebarBottom: Equatable, Sendable {
         trayBottom = areaBottom
         trayTop = trayBottom - trayHeight
         trayHoverBottom = max(trayBottom, buttonTop)
-        // While the list is open it owns the bottom: the player fades with the tab list behind it.
-        playerShown = !trayOpen
-        playerTakesHover = !trayOpen
+        // While the list is open it owns the bottom: the player fades with the tab list behind it. A
+        // list whose last row went (Clear, Remove) shows nothing, and the player comes back.
+        playerGivesWay = trayOpen && trayHeight > 0
     }
 }

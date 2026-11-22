@@ -96,6 +96,8 @@ final class DownloadsTrayView: NSView {
             addSubview(r)
         }
         while rows.count > entries.count { rows.removeLast().removeFromSuperview() }
+        // The last row went under the pointer (Clear, Remove): a hidden view gets no mouseExited.
+        if entries.isEmpty { setHovered(false) }
         for (r, e) in zip(rows, entries) { r.show(e) }
         header.canClear = DownloadHistory.shared.canClear
         refreshAges()
