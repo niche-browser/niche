@@ -48,8 +48,11 @@ final class DownloadHistory {
 
     /// Chromium's report on a download: running ones update their row, a finished one leaves for
     /// `add(path:)`, a failed or cancelled one stays listed for this session.
+    /// `danger` and `blocked`: what Chromium decided about its safety (DownloadDanger); `partPath`:
+    /// where the bytes are while it runs.
     func report(id: UInt32, name: String, path: String, url: String = "", received: Int64, total: Int64, percent: Int,
-                complete: Bool, cancelled: Bool, failed: Bool, paused: Bool = false, now: Date = Date()) {
+                complete: Bool, cancelled: Bool, failed: Bool, paused: Bool = false, danger: DownloadDanger? = nil,
+                blocked: Bool = false, partPath: String = "", now: Date = Date()) {
         if complete {
             live.removeAll { $0.id == id }
             return
@@ -60,7 +63,7 @@ final class DownloadHistory {
         var l = live.first { $0.id == id } ?? Live(id: id, name: name, path: path, started: now, received: received, total: total,
                                                     percent: percent, updated: now)
         l.take(name: name, path: path, url: url, received: received, total: total, percent: percent,
-               failed: failed, cancelled: cancelled, paused: paused, now: now)
+               failed: failed, cancelled: cancelled, paused: paused, now: now, danger: danger, blocked: blocked, partPath: partPath)
         if let i = live.firstIndex(where: { $0.id == id }) { live[i] = l } else { live.append(l) }
     }
 
@@ -128,6 +131,13 @@ final class DownloadHistory {
             update(l.id) { $0.cancelled = true; $0.paused = false }
         case (.retry, .live(let l)):
             retry(l)
+        case (.keep, .live(let l)):
+            keep(l)
+        case (.discard, .live(let l)):
+            // Chrome's Delete: Chromium deletes what it got under its temporary name.
+            NicheCEFRuntime.cancelDownload(l.id)
+            dismissed.insert(l.id)
+            live.removeAll { $0.id == l.id }
         case (.remove, .live(let l)):
             // A failed download Chromium still holds, with the part of the file it got: let go of both.
             NicheCEFRuntime.cancelDownload(l.id)
@@ -162,6 +172,27 @@ final class DownloadHistory {
         }
     }
 
+    /// Keep a download Chromium held. One Safe Browsing knows to be dangerous asks first, as Chrome
+    /// does; the others are kept at once. The row carries on as a download once Chromium says so.
+    private func keep(_ l: Live) {
+        guard let danger = l.danger else { return }
+        if danger.isKnownBad, (confirmKeep?(l.name) ?? true) == false { return }
+        // The row carries on once Chromium reports the download kept (Niche.download says no danger).
+        if !NicheCEFRuntime.keepDownload(l.id) { NicheLog.note("Download keep: no page of its profile to ask") }
+    }
+
+    /// Asks whether to keep a file Safe Browsing knows to be dangerous (true to keep). Set by the app;
+    /// a scenario can answer without a panel (`niche://debug?downloadKeepAnswer=`).
+    @ObservationIgnored var confirmKeep: ((String) -> Bool)? = { name in
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Keep “\(name)”?"
+        alert.informativeText = "Safe Browsing knows this file to be dangerous. It can harm your Mac or steal your information."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Keep Anyway")
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
     private func update(_ id: UInt32, _ change: (inout Live) -> Void) {
         guard let i = live.firstIndex(where: { $0.id == id }) else { return }
         change(&live[i])
@@ -185,8 +216,11 @@ final class DownloadHistory {
     /// or it starts over (Chromium keeps it for a resume that is no longer coming). Never a
     /// whole file: only one that stopped short of its size.
     private func discardPart(of l: Live) {
-        guard !l.path.isEmpty, l.total <= 0 || l.received < l.total, FileManager.default.fileExists(atPath: l.path) else { return }
-        NSWorkspace.shared.recycle([URL(fileURLWithPath: l.path)]) { _, _ in }
+        // The bytes are under their own name while it runs (a .crdownload); never the file it was
+        // going to be, which a finished download Chromium went quiet about can be.
+        let part = l.partPath
+        guard !part.isEmpty, part != l.path, l.total <= 0 || l.received < l.total, FileManager.default.fileExists(atPath: part) else { return }
+        NSWorkspace.shared.recycle([URL(fileURLWithPath: part)]) { _, _ in }
     }
 
     private func startOver(_ l: Live) {

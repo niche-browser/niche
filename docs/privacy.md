@@ -14,6 +14,7 @@ forgotten when its tab closes (a tab keeps its last few pages, so Back shows the
 | Block third-party cookies | A site embedded in another site's page neither gets its cookies back nor leaves new ones: on the network (`NichePrivacyCookieFilter`) and from a script (Chromium's `profile.cookie_controls_mode`). | `NicheCEF.mm` |
 | Remove tracking codes from links | Click and mailing identifiers (fbclid, gclid, … and whatever else the lists' `removeparam` rules name) are taken off a page's address before it is asked for. | `NicheContentBlockingHandler` |
 | Tell websites not to sell or share my data | Global Privacy Control: `Sec-GPC: 1` on every request, and `navigator.globalPrivacyControl` in the page. | `NicheCEF.mm`, `PageScript` |
+| Downloads checked on the Mac | Chromium's own checks hold a kind of file that can harm the Mac and an insecure (http) download until Keep or Delete; macOS quarantines every download. Google Safe Browsing is off (`TurnOffSafeBrowsing`): it would send each checked download's address and hash to Google. | `safe-downloads.patch`, `NicheCEF.mm`, [release.md](release.md#safe-browsing) |
 | Notice fingerprinting | Every page is watched for scripts that read what tells this Mac from others (`PrivacyProbeScript`); the panel names them. | `PageScript`, `NicheHelper` |
 
 Existing users get the newer switches on: a settings file from before them has no key for them,

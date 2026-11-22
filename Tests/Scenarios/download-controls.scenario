@@ -10,7 +10,8 @@ niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mouseReleased","x":36
 expect-log Download finished from a data: address
 niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mousePressed","x":36,"y":56,"button":"left","clickCount":1}
 niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mouseReleased","x":36,"y":56,"button":"left","clickCount":1}
-wait 2
+# Finishing waits for macOS to mark the file as downloaded, seconds on a busy Mac.
+expect-log Download finished from a data: address \(2 in this window\)
 niche://debug?downloadsList=two
 expect-log downloads\[two\] 2 rows: finished finished clearable=true
 

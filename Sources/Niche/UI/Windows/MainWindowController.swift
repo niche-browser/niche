@@ -816,25 +816,40 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     }
 
     func browserManager(download: NicheDownloadInfo) {
-        let name = (download.fullPath as NSString).lastPathComponent.isEmpty ? download.suggestedName : (download.fullPath as NSString).lastPathComponent
+        // Where the file goes: `fullPath` is a .crdownload while it runs, or Chromium's
+        // "Unconfirmed …" name while it holds the file (safe-downloads.patch).
+        let path = download.targetPath.isEmpty ? download.fullPath : download.targetPath
+        // One Chromium blocked before naming it has only its address to go by.
+        let name = !(path as NSString).lastPathComponent.isEmpty ? (path as NSString).lastPathComponent
+            : !download.suggestedName.isEmpty ? download.suggestedName
+            : URL(string: download.url)?.lastPathComponent ?? ""
         if let tab = browsers.downloadSourceTab, let item = store.item(tab), let t = item.tab {
             TidyDownloadsService.shared.noteSource(download.identifier, title: item.displayTitle, url: t.url)
         }
         if windowDownloads.insert(download.identifier).inserted {
             ChromeDownloadAnimation.suppress()
-            showDownloadInSidebar(download, name: name)
+            showDownloadInSidebar(download, name: name, path: path)
         }
         // Progress and failures show in the downloads list, as in Arc (it has no download toast).
-        DownloadHistory.shared.report(id: download.identifier, name: name, path: download.fullPath, url: download.url,
+        let danger = DownloadDanger(engine: download.danger)
+        let heldBefore = DownloadHistory.shared.live.first { $0.id == download.identifier }?.awaitingDecision ?? false
+        DownloadHistory.shared.report(id: download.identifier, name: name, path: path, url: download.url,
                                       received: download.receivedBytes, total: download.totalBytes, percent: download.percent,
                                       complete: download.state == .complete, cancelled: download.state == .cancelled,
-                                      failed: download.state == .interrupted, paused: download.paused)
-        updateRecentDownload(download)
+                                      failed: download.state == .interrupted, paused: download.paused,
+                                      danger: danger, blocked: download.blocked, partPath: download.fullPath)
+        // Held for a decision (as Chrome's bubble opens on a dangerous file): the list shows it.
+        if danger != nil, download.state == .inProgress, !heldBefore, windowDownloads.contains(download.identifier) {
+            NicheLog.note("Download held: \(danger?.rawValue ?? "")")
+            showHeldDownload(name: name)
+        }
+        updateRecentDownload(download, path: path)
         if download.state == .complete, !download.fullPath.isEmpty, finishedDownloads.insert(download.identifier).inserted {
             DownloadHistory.shared.add(path: download.fullPath, profile: browsers.downloadSourceTab.map(store.profileDirectoryName(item:)) ?? profileDirectoryName,
                                        url: download.url, remembered: !isIncognito)
             // The address's scheme only, never the file: scenarios wait for this line.
-            NicheLog.note("Download finished from a \(URL(string: download.url)?.scheme ?? "unknown"): address")
+            // With how many this window has finished, so a check can wait for the nth.
+            NicheLog.note("Download finished from a \(URL(string: download.url)?.scheme ?? "unknown"): address (\(finishedDownloads.count) in this window)")
             let id = download.identifier
             TidyDownloadsService.shared.finished(id, path: download.fullPath, downloadURL: download.url, window: windowID, store: store) { [weak self] path in
                 guard let self, var recent = self.sidebarUI.recentDownload, recent.id == id else { return }
@@ -851,32 +866,54 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
 
     private var downloadWatchdog: Timer?
 
+    /// A download Chromium held for a decision, shown where this window shows downloads: the list over
+    /// the Library button opens by itself, or with no sidebar (tabs on top, sidebar hidden) a toast
+    /// whose Show opens Library ▸ Downloads.
+    private func showHeldDownload(name: String) {
+        if sidebarVisible, !lastTabsOnTop {
+            NicheLog.note("Held download shown in the downloads list")
+            sidebarUI.showDownloadsListForAttention()
+        } else {
+            NicheLog.note("Held download shown in a toast")
+            showToast("“\(name)” is waiting for you", action: ShinyToast.Action(title: "Show") { [weak self] in
+                self?.showLibrary(.downloads)
+            })
+        }
+    }
+
     /// Chromium stops reporting a download once the tab that started it is gone (the
     /// download carries on, or ends, silently), which left its row "in progress" for
     /// good. A row that hasn't heard from Chromium for a while reads the file instead:
     /// gone means it ended, the full size with no .crdownload beside it means it's done.
     private func checkStalledDownloads() {
-        // A paused download is silent because it was asked to be.
-        let inProgress = DownloadHistory.shared.live.filter { $0.running && !$0.paused && windowDownloads.contains($0.id) }
+        // A paused download is silent because it was asked to be, a held one until Keep.
+        let inProgress = DownloadHistory.shared.live.filter {
+            $0.running && !$0.paused && !$0.awaitingDecision && windowDownloads.contains($0.id)
+        }
         guard !inProgress.isEmpty else {
             downloadWatchdog?.invalidate()
             downloadWatchdog = nil
             return
         }
         let fm = FileManager.default
-        for t in inProgress where !t.path.isEmpty && Date().timeIntervalSince(t.updated) > 5 {
-            guard !fm.fileExists(atPath: t.path + ".crdownload") else { continue }
-            let size = (try? fm.attributesOfItem(atPath: t.path))?[.size] as? Int64
+        for t in inProgress where !t.path.isEmpty && Date().timeIntervalSince(t.updated) > StalledDownload.quietFor {
+            // The bytes are under their own name while it runs (StalledDownload).
+            let size = { (path: String) in (try? fm.attributesOfItem(atPath: path))?[.size] as? Int64 }
             let state: NicheDownloadState
-            if size == nil { state = .cancelled }
-            else if let size, t.total > 0, size >= t.total { state = .complete }
-            else { continue }
+            switch StalledDownload.outcome(t, exists: fm.fileExists(atPath:), size: size) {
+            case .running: continue
+            case .complete: state = .complete
+            case .cancelled: state = .cancelled
+            }
             let info = NicheDownloadInfo()
             info.identifier = t.id
-            info.fullPath = t.path
+            info.url = t.url
+            info.targetPath = t.path
+            // Done, the file is where it was going; ended, there is no part to point at.
+            info.fullPath = state == .complete ? t.path : ""
             info.suggestedName = t.name
             info.totalBytes = t.total
-            info.receivedBytes = size ?? 0
+            info.receivedBytes = state == .complete ? t.total : t.received
             info.percent = state == .complete ? 100 : t.percent
             info.state = state
             browserManager(download: info)
@@ -886,9 +923,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     /// Arc's download animation: the file drops onto the Library button and a download
     /// glyph is thrown at it from the pointer (DownloadFlight). Measured on Arc 1.170: the
     /// file stays 30 s after the glyph lands, then fades out over 0.15 s.
-    private func showDownloadInSidebar(_ download: NicheDownloadInfo, name: String) {
+    private func showDownloadInSidebar(_ download: NicheDownloadInfo, name: String, path: String) {
         let type = UTType(filenameExtension: (name as NSString).pathExtension) ?? .data
-        sidebarUI.recentDownload = RecentDownload(id: download.identifier, path: download.fullPath,
+        sidebarUI.recentDownload = RecentDownload(id: download.identifier, path: path,
                                                   image: NSWorkspace.shared.icon(for: type))
         var flight: TimeInterval = 0
         if let window, window.isVisible, let anchor = sidebarUI.libraryAnchor, let host = anchor.window,
@@ -911,12 +948,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
 
     /// Keeps the Library button's file current: its path once known, its Quick Look
     /// thumbnail once the download is complete (Arc showed a text file's page).
-    private func updateRecentDownload(_ download: NicheDownloadInfo) {
+    private func updateRecentDownload(_ download: NicheDownloadInfo, path: String) {
         // Only the first complete update counts; Chromium sends more after it.
         guard var recent = sidebarUI.recentDownload, recent.id == download.identifier,
               !finishedDownloads.contains(download.identifier) else { return }
-        if !download.fullPath.isEmpty, recent.path != download.fullPath {
-            recent.path = download.fullPath
+        if !path.isEmpty, recent.path != path {
+            recent.path = path
             sidebarUI.recentDownload = recent
         }
         guard download.state == .complete, !download.fullPath.isEmpty else { return }

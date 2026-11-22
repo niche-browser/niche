@@ -85,6 +85,7 @@ automate() {
 }
 
 PATCHES="$PWD/scripts/cef-patches"
+REPO="$PWD"
 cd "$CEF_BUILD_DIR"
 # 0. A CEF update on the same branch (Chromium 156.0.8078.80 → .88): automate-git with
 #    --no-chromium-history never moves an existing checkout, and gclient sync skips
@@ -110,21 +111,11 @@ automate --no-build --no-distrib
 #    patcher run re-applies that one. automate --force-build runs this hook right
 #    before ninja, which is why the build below calls autoninja itself.
 #    On a re-run Niche's patches from last time are still on the files CEF patches too, and
-#    CEF's patcher then fails, so take them off first (newest last, so in reverse).
-for p in $(ls -r "$PATCHES"/*.patch); do
-  if git -C chromium/src apply --check --reverse "$p" 2>/dev/null; then
-    git -C chromium/src apply --reverse "$p" && echo "Took off $(basename "$p")"
-  fi
-done
+#    CEF's patcher then fails, so take them off first.
+"$REPO/scripts/cef-patches-apply.sh" "$PWD/chromium/src" --off
 (cd chromium/src/cef && python3 tools/gclient_hook.py)
-# 3. Niche's Chromium fixes on top (skipped when already applied).
-for p in "$PATCHES"/*.patch; do
-  if git -C chromium/src apply --check "$p" 2>/dev/null; then
-    git -C chromium/src apply "$p" && echo "Applied $(basename "$p")"
-  else
-    git -C chromium/src apply --check --reverse "$p" || { echo "$(basename "$p") does not apply" >&2; exit 1; }
-  fi
-done
+# 3. Niche's Chromium fixes on top.
+"$REPO/scripts/cef-patches-apply.sh" "$PWD/chromium/src"
 # 4. Build. make_distrib takes the framework from cefclient.app.
 (cd chromium/src && autoninja -C "out/Release_GN_$CEF_TARGET_ARCH" cefclient)
 LC_ALL=C grep -c -a GCM.RegistrationCacheStatus \

@@ -43,8 +43,11 @@ sides must agree on are compiled into that binary:
 
 - DevTools methods sent by `BrowserManager`, `ExtensionStore` and `WebKitBrowser`:
   `Niche.discard`, `Niche.load`, `Niche.getFreezingState`, `Niche.setFreezingVote`,
-  `Niche.mediaSession`, `Niche.autoPictureInPicture`, `Niche.installFromWebStore`.
-- Process messages handled in `NicheCEF.mm`: `Niche.audible`, `Niche.capture`, `Niche.activate`.
+  `Niche.mediaSession`, `Niche.autoPictureInPicture`, `Niche.installFromWebStore`,
+  `Niche.keepDownload`.
+- Process messages handled in `NicheCEF.mm`: `Niche.audible`, `Niche.capture`, `Niche.activate`,
+  `Niche.download` (a download's final path and what Chromium found unsafe about it,
+  `safe-downloads.patch`).
 - The command-line switch `niche-load-extension-profiles`.
 
 - The Keychain item `Niche Safe Store` (`keychain-service-name.patch`, `SafeStorage.swift`).

@@ -146,32 +146,25 @@ app that claims an entitlement its profile lacks. Ad-hoc builds never get them.
 
 ## Safe Browsing
 
-Chromium's phishing and malware lists come from Google's Safe Browsing API, which
-needs an API key. Without one the lists never download and dangerous pages load
-without a warning.
+Off. NicheCEF sets Chromium's `safebrowsing.enabled` to false in every profile
+(`TurnOffSafeBrowsing`): nothing leaves the Mac. With Chrome's download checks on
+(`safe-downloads.patch`) Safe Browsing sent each checked download, its address, the pages
+before it, its hash and size, to `sb-ssl.google.com`, with or without a key (a net log on
+22 Nov 2026). Shipped builds never had a key, so its lists never downloaded and it never
+warned about a page either.
 
-1. In the Google Cloud console, create a project, enable the **Safe Browsing API** and
-   create an API key. Restrict it to that API: it ships inside the app, so anyone can
-   read it.
-2. Locally: `NICHE_GOOGLE_API_KEY=<key>` next to `NICHE_SIGN_IDENTITY`. In CI: the
-   `NICHE_GOOGLE_API_KEY` secret. Never commit it.
+What protects instead, all on the Mac: Shields' "Dangerous sites" lists for pages
+([shields.md](shields.md)); Chromium's local download checks (kinds of file that can harm the
+Mac, insecure downloads), which need no Safe Browsing; macOS's quarantine flag on every
+download, which Gatekeeper and XProtect check when the file is opened.
 
-`build.sh` writes it to Info.plist as `NicheGoogleAPIKey`, and NicheCEF sets
-`GOOGLE_API_KEY` from it before Chromium starts.
-
-The key lives in the Google Cloud project `niche-browser`, restricted to the Safe Browsing
-API. Every install shares its quota: 10,000 list updates and 10,000 lookups a day. A
-running Niche fetches list updates 1–5 minutes after launch and then once a day
-(`scripts/cef-patches/safe-browsing-update-interval.patch`; Chrome uses Google's ~30
-minutes), plus a full-hash lookup when a URL matches a list: about 1–3 updates per
-install per day. An alert policy in the project emails at 7,000 a day; ask for more on
-the API's Quotas page in the Cloud console (the Cloud Quotas API can't). Once the quota
-allows it, shorten the interval in the patch. A client over quota backs off (up to 24
-hours) and its lists go stale until an update succeeds.
-
-The Safe Browsing API is for non-commercial use. Google's commercial service, Web Risk,
-is not a drop-in: it has its own endpoints and request format, so Chromium would need
-a patch to its update and full-hash protocol.
+Turning it back on is a product decision: it needs a key in the build
+(`NICHE_GOOGLE_API_KEY`, written to Info.plist as `NicheGoogleAPIKey`, which NicheCEF passes
+to Chromium as `GOOGLE_API_KEY`), `TurnOffSafeBrowsing` gone or made a setting, and
+[privacy.md](privacy.md) saying what goes to Google. The project `niche-browser` in Google
+Cloud holds a key restricted to the Safe Browsing API (10,000 list updates and 10,000 lookups a
+day across every install); `scripts/cef-patches/safe-browsing-update-interval.patch` keeps list
+updates to about once a day.
 
 ## Updates
 
@@ -208,14 +201,14 @@ are a compile-time switch and FFmpeg is linked into the framework, so there is n
 around building it.
 
     scripts/build-cef.sh      # ~80 GB free, several hours; resumes where it stopped
-    scripts/publish-cef.sh    # uploads the archive as pre-release cef-<version>-codecsN
+    scripts/publish-cef.sh    # uploads the archive as pre-release cef-<version>-nicheN
 
 `build-cef.sh` checks out the same CEF commit `fetch-cef.sh` pins, applies
 `scripts/cef-patches/*.patch` on top of CEF's own patches, and builds an official
 release with `proprietary_codecs=true ffmpeg_branding=Chrome`. `fetch-cef.sh` (and CI,
 keyed on its hash) downloads the published archive into `vendor/cef`, replacing a copy
 from a different source. To change the build without a CEF version bump, bump the
-`codecsN` suffix of `CEF_RELEASE` and publish again. Needs Xcode's Metal toolchain
+`nicheN` suffix of `CEF_RELEASE` and publish again. Needs Xcode's Metal toolchain
 (`xcodebuild -downloadComponent MetalToolchain`).
 
 **Patch rounds and Intel.** Once `build-cef.sh` has built a version, a new or changed

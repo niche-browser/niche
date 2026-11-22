@@ -1,0 +1,47 @@
+# Chromium checks a download as Chrome does (safe-downloads.patch, 22 Nov 2026): a .dmg a page
+# starts with no click is held, its row in the list over the Library button waits for Keep or
+# Delete. Keep finishes it under its own name; Delete leaves nothing in the list. Before, Niche
+# chose every path itself and Chromium's checks never ran.
+home
+# Over plain http from a host that isn't this Mac (127.0.0.1 counts as secure): held as insecure.
+arg --host-resolver-rules=MAP *.test 127.0.0.1
+seed settings.json {"hasSeenImportPrompt": true, "toolbarDefaultMigrated": true}
+budget rss=800 stalls50=12
+niche://debug?downloadKeepAnswer=keep
+niche://open?url=${PAGE}
+expect-log loaded 127.0.0.1
+niche://debug?cdp=Runtime.evaluate&params={"expression":"location.href=`http://files.test:${location.port}/held.dmg`"}
+expect-log Download held: (file|insecure)
+expect-log Held download shown in the downloads list
+niche://debug?downloadsList=held
+expect-log downloads\[held\] 1 rows: held clearable=false
+
+niche://debug?downloadAction=keep&row=0
+expect-log Download keep on a held row
+expect-log Download finished from a http: address
+niche://debug?downloadsList=kept
+expect-log downloads\[kept\] 1 rows: finished clearable=true
+
+# Again, with a click (a page gets one download without one), and Delete: the row goes and the
+# file it got with it.
+niche://debug?cdp=Runtime.evaluate&params={"expression":"document.body.insertAdjacentHTML(`afterbegin`,`<a id=again style=position:fixed;left:0;top:0;width:200px;height:60px;display:block;background:red href=http://files.test:${location.port}/held.dmg?again>again</a>`)"}
+niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mousePressed","x":40,"y":30,"button":"left","clickCount":1}
+niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mouseReleased","x":40,"y":30,"button":"left","clickCount":1}
+wait 3
+niche://debug?downloadsList=again
+expect-log downloads\[again\] 2 rows: finished held clearable=true
+niche://debug?downloadAction=discard&row=1
+expect-log Download discard on a held row
+wait 2
+niche://debug?downloadsList=deleted
+expect-log downloads\[deleted\] 1 rows: finished clearable=true
+
+# Tabs on top have no list over a Library button: a toast says the file is waiting.
+niche://debug?windowLayout=top
+wait 1
+niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mousePressed","x":40,"y":30,"button":"left","clickCount":1}
+niche://debug?cdp=Input.dispatchMouseEvent&params={"type":"mouseReleased","x":40,"y":30,"button":"left","clickCount":1}
+expect-log Held download shown in a toast
+niche://debug?downloadAction=discard&row=1
+niche://debug?windowLayout=sidebar
+niche://debug?checkStore=1

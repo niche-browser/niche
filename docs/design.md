@@ -223,6 +223,15 @@ left"). A right-click has every action (`DownloadAction.menu`) and Clear Downloa
 gets them as the row's actions. The file's thumbnail over the Library button steps aside while
 the tray is open. Library ▸ Downloads rows carry the same bar, buttons and menu.
 
+Chromium checks a download as Chrome does (`safe-downloads.patch`): Niche picks the folder, then
+Chromium decides whether the file is safe, writes it as a `.crdownload` while it runs and finds a
+free name. A file it holds (`DownloadDanger`: a kind of file that can harm the Mac, one Safe
+Browsing knows or rarely sees, an insecure download) waits for the person: the list opens by
+itself, as Chrome's bubble does, and closes after 8 s untouched or once the pointer has been and
+gone. The row says why in the danger colour ("Insecure download", "Not commonly downloaded") with
+Keep and Delete; a file Safe Browsing knows to be dangerous offers Delete alone, with Keep in its
+menu behind a "Keep “…”?" alert. A file Chromium blocks outright says "Blocked".
+
 ## Privacy panel
 
 A 360 pt card at the right of the panes (`PrivacyPanelCard`), rounded and shadowed like a page's

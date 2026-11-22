@@ -31,6 +31,16 @@ typedef NS_ENUM(NSInteger, NicheLinkWindow) {
 @property (nonatomic) NicheDownloadState state;
 /// In progress, but held by Pause until Resume.
 @property (nonatomic) BOOL paused;
+/// Where the file goes once it is done: `fullPath` is a .crdownload (or "Unconfirmed …"
+/// for a held one) while it runs. Empty until Chromium has decided (safe-downloads.patch).
+@property (nonatomic, copy) NSString *targetPath;
+/// What Chromium found unsafe about it, held until Keep (+keepDownload:) or Delete (+cancelDownload:):
+/// "" for nothing, else file, url, content, uncommon, unwanted, host, policy, other or insecure.
+@property (nonatomic, copy) NSString *danger;
+/// Chromium blocked the file outright: one it doesn't offer to keep, among them an insecure download on
+/// a secure page that Chrome drops without listing it (Niche lists it as Blocked, so a click that
+/// downloads nothing says why).
+@property (nonatomic) BOOL blocked;
 @end
 
 /// What a page did that the privacy panel shows (NicheCEFRuntime.setPrivacyEventHandler).
@@ -455,6 +465,10 @@ typedef NS_ENUM(NSInteger, NichePrivacyEventKind) {
 + (BOOL)pauseDownload:(uint32_t)identifier;
 + (BOOL)resumeDownload:(uint32_t)identifier;
 + (BOOL)cancelDownload:(uint32_t)identifier;
+/// Keep a download Chromium held for the user (NicheDownloadInfo.danger), as Keep in Chrome's
+/// download bubble: it finishes and lands where it was going. NO when there is none to keep or
+/// no page of its profile is open to ask (the Niche.keepDownload DevTools method).
++ (BOOL)keepDownload:(uint32_t)identifier;
 /// Downloads the same address again, as a new download, in the browser it came from (or another
 /// one still open). NO when this run never saw the download or no page is open.
 + (BOOL)restartDownload:(uint32_t)identifier;

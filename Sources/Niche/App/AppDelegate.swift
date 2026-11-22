@@ -1098,6 +1098,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             // Opens what normally needs a pointer or a held key, for screenshots.
             if let v = dict["downloads"] { main.sidebarUI.downloadsListOpen = v == "1"; return }
             if let row = dict["downloadsHover"].flatMap({ Int($0) }) { main.debugHoverDownload(row: row); return }
+            // downloadKeepAnswer=keep|delete: how the "Keep “…”?" alert for a file Safe Browsing knows
+            // to be dangerous is answered, without the alert.
+            if let v = dict["downloadKeepAnswer"] { DownloadHistory.shared.confirmKeep = { _ in v == "keep" }; return }
             // downloadAction=<pause|resume|cancel|retry|remove|moveToTrash|…>&row=<n>: that action on
             // the tray's nth row (0 is the top one), as its button or menu row would run it.
             if let action = dict["downloadAction"].flatMap(DownloadAction.init(rawValue:)), let row = dict["row"].flatMap({ Int($0) }) {

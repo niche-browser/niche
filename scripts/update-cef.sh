@@ -14,15 +14,15 @@ NEW="${1:?usage: scripts/update-cef.sh <cef_version>}"
 [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+g[0-9a-f]+\+chromium-[0-9.]+$ ]] || { echo "Not a CEF version: $NEW" >&2; exit 1; }
 
 export CEF_VERSION="$NEW"
-export CEF_RELEASE="cef-${NEW%%+*}-codecs1"
+export CEF_RELEASE="cef-${NEW%%+*}-niche1"
 scripts/build-cef.sh
 scripts/publish-cef.sh
 scripts/rebuild-cef.sh x64
 CEF_ARCH=macosx64 scripts/publish-cef.sh
 unset CEF_VERSION CEF_RELEASE
 
-# Pin it; a new CEF version starts again at codecs1.
-sed -i '' -E "s/^CEF_VERSION=.*/CEF_VERSION=\"\${CEF_VERSION:-$NEW}\"/; s/-codecs[0-9]+\}/-codecs1}/" scripts/fetch-cef.sh
+# Pin it; a new CEF version starts again at niche1 (fetch-cef.sh names the release the same way).
+sed -i '' -E "s/^CEF_VERSION=.*/CEF_VERSION=\"\${CEF_VERSION:-$NEW}\"/; s/-niche[0-9]+\}/-niche1}/" scripts/fetch-cef.sh
 scripts/fetch-cef.sh
 scripts/build.sh
 echo "Niche now builds with CEF $NEW. Test build/Niche.app, then commit scripts/fetch-cef.sh and tag a release."
