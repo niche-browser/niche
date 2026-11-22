@@ -12,8 +12,8 @@ public enum DownloadRow {
         case cancelled
         /// Chromium holds it until Keep or Delete (DownloadDanger).
         case held(DownloadDanger)
-        /// Chromium blocked the file outright.
-        case blocked
+        /// Chromium blocked the file outright, for this reason when it said one.
+        case blocked(DownloadDanger?)
         case finished(at: Date)
 
         /// Said in the danger colour: it failed, or Chromium held or blocked the file.
@@ -64,6 +64,7 @@ public enum DownloadRow {
         case .failed: return "Failed to Download"
         case .cancelled: return "Cancelled"
         case let .held(danger): return detail == .brief ? danger.brief : danger.subtitle
+        case .blocked(.insecure?): return "Insecure download blocked"
         case .blocked: return "Blocked"
         // At least a second: a row read just as it finished said "in 0 seconds".
         case let .finished(at): return age.localizedString(fromTimeInterval: -max(1, now.timeIntervalSince(at)))

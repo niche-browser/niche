@@ -15,7 +15,7 @@ CEF_VERSION="${CEF_VERSION:-158.0.3+g8c29be2+chromium-158.0.8127.18}"
 ARCH="${CEF_ARCH:-$([ "$(uname -m)" = arm64 ] && echo macosarm64 || echo macosx64)}"
 NAME="cef_binary_${CEF_VERSION}_${ARCH}_minimal"
 # Bump the suffix (niche2, …) when the build changes but CEF_VERSION does not.
-CEF_RELEASE="${CEF_RELEASE:-cef-${CEF_VERSION%%+*}-niche1}"
+CEF_RELEASE="${CEF_RELEASE:-cef-${CEF_VERSION%%+*}-niche2}"
 URL="${CEF_URL:-https://github.com/niche-browser/niche/releases/download/${CEF_RELEASE}/cef_binary_${ARCH}_minimal.tar.bz2}"
 
 mkdir -p vendor

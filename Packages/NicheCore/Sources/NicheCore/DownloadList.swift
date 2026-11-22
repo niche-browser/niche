@@ -100,7 +100,7 @@ public enum DownloadList {
         /// Held for the user: no bytes are coming until Keep.
         public var awaitingDecision: Bool { running && danger != nil }
         public var row: DownloadRow.State {
-            if blocked { return .blocked }
+            if blocked { return .blocked(danger) }
             if failed { return .failed }
             if cancelled { return .cancelled }
             if let danger { return .held(danger) }

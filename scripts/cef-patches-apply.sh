@@ -8,8 +8,10 @@
 # file (safe-downloads.patch goes over downloads-without-cef-browser.patch) and a changed patch no
 # longer reverses itself: the kept copies come off newest first, then the current ones go on. A
 # patch that doesn't apply puts the previous set back and stops, so the checkout is never half
-# patched. Unchanged patches touch no file, so ninja rebuilds nothing for them.
+# patched. Only the patches from the first one that changed come off and go back on, so ninja
+# rebuilds only what they touch.
 set -euo pipefail
+export LC_ALL=C
 cd "$(dirname "$0")/.."
 SRC="${1:?usage: scripts/cef-patches-apply.sh <chromium/src> [--off]}"
 PATCHES="$PWD/scripts/cef-patches"
@@ -47,9 +49,21 @@ if [ -d "$APPLIED" ] && diff -rq "$APPLIED" "$PATCHES" >/dev/null 2>&1; then
   exit 0
 fi
 PREVIOUS="$([ -d "$APPLIED" ] && echo "$APPLIED" || echo "$PATCHES")"
-off "$PREVIOUS"
-if ! on "$PATCHES"; then
-  [ "$PREVIOUS" = "$PATCHES" ] || on "$PREVIOUS" || true
+# The patches before the first difference (in name order, by name and content) stay on.
+KEEP=""
+if [ -d "$APPLIED" ]; then
+  for n in $( (ls "$APPLIED"; ls "$PATCHES") | grep '\.patch$' | LC_ALL=C sort -u); do
+    [ -f "$APPLIED/$n" ] && [ -f "$PATCHES/$n" ] && cmp -s "$APPLIED/$n" "$PATCHES/$n" || break
+    KEEP="$n"
+  done
+fi
+STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
+mkdir "$STAGE/old" "$STAGE/new"
+for p in "$PREVIOUS"/*.patch; do [[ "$(basename "$p")" > "$KEEP" ]] && cp "$p" "$STAGE/old/"; done
+for p in "$PATCHES"/*.patch; do [[ "$(basename "$p")" > "$KEEP" ]] && cp "$p" "$STAGE/new/"; done
+off "$STAGE/old"
+if ! on "$STAGE/new"; then
+  [ "$PREVIOUS" = "$PATCHES" ] || on "$STAGE/old" || true
   exit 1
 fi
 rm -rf "$APPLIED"

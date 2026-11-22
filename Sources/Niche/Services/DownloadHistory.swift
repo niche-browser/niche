@@ -67,12 +67,6 @@ final class DownloadHistory {
         if let i = live.firstIndex(where: { $0.id == id }) { live[i] = l } else { live.append(l) }
     }
 
-    /// A download Chromium dropped without a word: off the list, and its later reports ignored.
-    func forget(_ id: UInt32) {
-        dismissed.insert(id)
-        live.removeAll { $0.id == id }
-    }
-
     /// `remembered` false for a download in an incognito window: listed until Niche quits, never
     /// written to downloads.json.
     @discardableResult

@@ -96,7 +96,6 @@ struct NicheDownloadRecord {
     std::string target;
     std::string danger;
     bool blocked = false;
-    bool silent = false;
 };
 static std::map<uint32_t, NicheDownloadRecord> g_downloads;
 // Chromium numbers downloads per profile, so two profiles can both have a download 1. The app
@@ -503,6 +502,20 @@ static void HideDownloadBubble(CefRefPtr<CefRequestContext> context) {
     }
 }
 
+/// Chromium's Safe Browsing stays off: nothing leaves the Mac. With Chrome's download checks on
+/// (safe-downloads.patch) it sent each checked download (its address, the pages before it, its
+/// hash and size) to sb-ssl.google.com, key or no key (seen in a net log, 22 Nov 2026). Dangerous
+/// pages are Shields' (local lists); downloads keep Chromium's local checks (file types,
+/// insecure downloads), which need no Safe Browsing.
+static void TurnOffSafeBrowsing(CefRefPtr<CefRequestContext> context) {
+    CefRefPtr<CefValue> off = CefValue::Create();
+    off->SetBool(false);
+    CefString error;
+    if (!context->SetPreference("safebrowsing.enabled", off, error)) {
+        NSLog(@"NicheCEF: safebrowsing.enabled: %s", error.ToString().c_str());
+    }
+}
+
 static bool g_httpsOnly = false;
 /// Arc's View ▸ Appearance for websites: 0 follows the Mac, 1 light, 2 dark.
 static NSInteger g_websiteAppearance = 0;
@@ -547,6 +560,7 @@ static void ApplyProfilePreferences(CefRefPtr<CefRequestContext> context) {
     ApplyWebsiteAppearance(context);
     ApplyWebRTCPolicy(context);
     HideDownloadBubble(context);
+    TurnOffSafeBrowsing(context);
     ApplyHttpsOnly(context);
     ApplyThirdPartyCookies(context);
 }
@@ -2060,8 +2074,8 @@ public:
             NicheDownloadRecord& record = g_downloads[number];
             record.target = args->GetString(1).ToString();
             const std::string danger = args->GetString(2).ToString(), insecure = args->GetString(3).ToString();
-            record.silent = insecure == "silent";
-            record.danger = !danger.empty() ? danger : (!insecure.empty() && !record.silent ? "insecure" : "");
+            // "silent": Chrome dropped it; it arrives blocked ("Insecure download blocked"), nothing to keep.
+            record.danger = !danger.empty() ? danger : (!insecure.empty() ? "insecure" : "");
             record.blocked = args->GetBool(4);
             return true;
         }
@@ -2458,7 +2472,6 @@ public:
         info.targetPath = @(record.target.c_str()) ?: @"";
         info.danger = @(record.danger.c_str()) ?: @"";
         info.blocked = record.blocked;
-        info.silent = record.silent;
         record.url = item->GetURL().ToString();
         record.browser = browser ? browser->GetIdentifier() : 0;
         record.interrupted = info.state == NicheDownloadStateInterrupted;

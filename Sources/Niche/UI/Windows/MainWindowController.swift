@@ -816,15 +816,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
     }
 
     func browserManager(download: NicheDownloadInfo) {
-        // Chromium dropped it without a word, as Chrome does: nothing to list.
-        if download.silent {
-            DownloadHistory.shared.forget(download.identifier)
-            return
-        }
         // Where the file goes: `fullPath` is a .crdownload while it runs, or Chromium's
         // "Unconfirmed …" name while it holds the file (safe-downloads.patch).
         let path = download.targetPath.isEmpty ? download.fullPath : download.targetPath
-        let name = (path as NSString).lastPathComponent.isEmpty ? download.suggestedName : (path as NSString).lastPathComponent
+        // One Chromium blocked before naming it has only its address to go by.
+        let name = !(path as NSString).lastPathComponent.isEmpty ? (path as NSString).lastPathComponent
+            : !download.suggestedName.isEmpty ? download.suggestedName
+            : URL(string: download.url)?.lastPathComponent ?? ""
         if let tab = browsers.downloadSourceTab, let item = store.item(tab), let t = item.tab {
             TidyDownloadsService.shared.noteSource(download.identifier, title: item.displayTitle, url: t.url)
         }
@@ -850,7 +848,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, BrowserM
             DownloadHistory.shared.add(path: download.fullPath, profile: browsers.downloadSourceTab.map(store.profileDirectoryName(item:)) ?? profileDirectoryName,
                                        url: download.url, remembered: !isIncognito)
             // The address's scheme only, never the file: scenarios wait for this line.
-            NicheLog.note("Download finished from a \(URL(string: download.url)?.scheme ?? "unknown"): address")
+            // With how many this window has finished, so a check can wait for the nth.
+            NicheLog.note("Download finished from a \(URL(string: download.url)?.scheme ?? "unknown"): address (\(finishedDownloads.count) in this window)")
             let id = download.identifier
             TidyDownloadsService.shared.finished(id, path: download.fullPath, downloadURL: download.url, window: windowID, store: store) { [weak self] path in
                 guard let self, var recent = self.sidebarUI.recentDownload, recent.id == id else { return }

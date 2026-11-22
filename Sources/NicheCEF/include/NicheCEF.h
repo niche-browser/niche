@@ -37,9 +37,9 @@ typedef NS_ENUM(NSInteger, NicheLinkWindow) {
 /// What Chromium found unsafe about it, held until Keep (+keepDownload:) or Delete (+cancelDownload:):
 /// "" for nothing, else file, url, content, uncommon, unwanted, host, policy, other or insecure.
 @property (nonatomic, copy) NSString *danger;
-/// Chromium dropped it without a word (an insecure download Chrome blocks silently, and lists nothing).
-@property (nonatomic) BOOL silent;
-/// Chromium blocked the file outright (an insecure download it doesn't offer to keep).
+/// Chromium blocked the file outright: one it doesn't offer to keep, among them an insecure download on
+/// a secure page that Chrome drops without listing it (Niche lists it as Blocked, so a click that
+/// downloads nothing says why).
 @property (nonatomic) BOOL blocked;
 @end
 

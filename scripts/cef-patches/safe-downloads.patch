@@ -73,10 +73,12 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/common/pref_names.h"
  #include "components/prefs/pref_service.h"
-@@ -110,6 +112,139 @@
+@@ -108,8 +110,146 @@
+   target_info.target_path = path;
+   target_info.intermediate_path = path;
    std::move(callback).Run(std::move(target_info));
- }
- 
++}
++
 +// Niche: the client chose where the file goes; Chrome decides the rest, as for
 +// one of its own downloads (ChromeDownloadManagerDelegate::
 +// DetermineEmbedderChosenTarget): danger type, insecure download, .crdownload.
@@ -112,7 +114,7 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
 +// none, else "file", "url", "content", "uncommon", "unwanted", "host", "policy"
 +// (held with no Keep), "other"), [3] its insecure download status ("" when none,
 +// else "warn", "block", or "silent" for one Chrome drops without listing it),
-+// [4] whether Chrome blocked the file outright (interrupted with FILE_BLOCKED).
++// [4] whether Chrome blocked the file outright (ended with FILE_BLOCKED).
 +// Held downloads wait for Niche.keepDownload or a cancel.
 +std::string NicheDanger(const DownloadItem* item) {
 +  if (!item->IsDangerous()) {
@@ -159,8 +161,8 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
 +    default:
 +      return std::string();
 +  }
-+}
-+
+ }
+ 
 +// The last safety sent for an item, so a progress tick sends nothing.
 +struct NicheSentSafety : public base::SupportsUserData::Data {
 +  std::string state;
@@ -169,9 +171,14 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
 +
 +void NicheSendSafety(CefRefPtr<CefBrowserHostBase> browser,
 +                     DownloadItem* item) {
++  // Interrupted, or cancelled before it had a path (an insecure download on a
++  // secure page that Chrome drops without listing it, SILENT_BLOCK).
 +  const bool blocked =
-+      item->GetState() == DownloadItem::INTERRUPTED &&
-+      item->GetLastReason() == download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED;
++      ((item->GetState() == DownloadItem::INTERRUPTED ||
++        item->GetState() == DownloadItem::CANCELLED) &&
++       item->GetLastReason() ==
++           download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED) ||
++      ChromeDownloadManagerDelegate::WasBlockedOnTarget(item);
 +  const std::string danger = NicheDanger(item);
 +  const std::string insecure =
 +      item->IsInsecure() || item->GetInsecureDownloadStatus() ==
@@ -213,16 +220,15 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
  // CefBeforeDownloadCallback implementation.
  class CefBeforeDownloadCallbackImpl : public CefBeforeDownloadCallback {
   public:
-@@ -195,18 +330,24 @@
-         suggested_path = suggested_name;
+@@ -196,17 +336,23 @@
        }
      }
-+
+ 
 +    // Niche: a file already at the client's path was chosen to be replaced
 +    // (RunChosenDownloadTarget). Read here, off the UI thread.
 +    const bool replace =
 +        !download_path.empty() && base::PathExists(suggested_path);
- 
++
      CEF_POST_TASK(
          CEF_UIT,
          base::BindOnce(&CefBeforeDownloadCallbackImpl::ChooseDownloadPath,
@@ -239,7 +245,7 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
                                   download::DownloadTargetCallback callback) {
      if (!manager) {
        return;
-@@ -241,16 +382,19 @@
+@@ -241,16 +387,19 @@
              params,
              base::BindOnce(
                  &CefBeforeDownloadCallbackImpl::ChooseDownloadPathCallback,
@@ -261,7 +267,7 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
        download::DownloadTargetCallback callback,
        const std::vector<base::FilePath>& file_paths) {
      DCHECK_LE(file_paths.size(), (size_t)1);
-@@ -261,7 +405,9 @@
+@@ -261,7 +410,9 @@
      }
  
      // The download will be cancelled if |path| is empty.
@@ -272,7 +278,7 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
    }
  
    base::WeakPtr<DownloadManager> manager_;
-@@ -398,6 +544,7 @@
+@@ -398,6 +549,7 @@
      CefRefPtr<CefDownloadItemCallback> callback(new CefDownloadItemCallbackImpl(
          manager_ptr_factory_.GetWeakPtr(), download->GetId()));
  
@@ -283,16 +289,26 @@ diff --git a/cef/libcef/browser/download_manager_delegate_impl.cc b/cef/libcef/b
 diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
 --- a/chrome/browser/download/chrome_download_manager_delegate.cc
 +++ b/chrome/browser/download/chrome_download_manager_delegate.cc
-@@ -945,6 +945,37 @@
+@@ -943,8 +943,47 @@
+                                   download_prefs_.get(), this,
+                                   std::move(target_determined_callback));
    return true;
- }
- 
++}
++
 +namespace {
 +// Niche: marks a download whose path the embedder chose (see
 +// DetermineEmbedderChosenTarget).
 +const char kNicheEmbedderChosenPathKey[] = "NicheEmbedderChosenPath";
 +struct NicheEmbedderChosenPath : public base::SupportsUserData::Data {};
++const char kNicheBlockedOnTargetKey[] = "NicheBlockedOnTarget";
++struct NicheBlockedOnTarget : public base::SupportsUserData::Data {};
 +}  // namespace
++
++// static
++bool ChromeDownloadManagerDelegate::WasBlockedOnTarget(
++    const DownloadItem* download) {
++  return download->GetUserData(kNicheBlockedOnTargetKey) != nullptr;
++}
 +
 +void ChromeDownloadManagerDelegate::DetermineEmbedderChosenTarget(
 +    DownloadItem* download,
@@ -310,8 +326,8 @@ diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrom
 +      base::BindOnce(&ChromeDownloadManagerDelegate::OnDownloadTargetDetermined,
 +                     weak_ptr_factory_.GetWeakPtr(), download->GetId(),
 +                     std::move(callback)));
-+}
-+
+ }
+ 
 +// static
 +bool ChromeDownloadManagerDelegate::HasEmbedderChosenPath(
 +    const DownloadItem* download) {
@@ -321,10 +337,22 @@ diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrom
  bool ChromeDownloadManagerDelegate::ShouldAutomaticallyOpenFile(
      const GURL& url,
      const base::FilePath& path) {
+@@ -2363,6 +2402,11 @@
+     safe_browsing::DownloadFileType::DangerLevel danger_level) {
+   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M161);
+   DownloadItem* item = download_manager_->GetDownload(download_id);
++  if (item && target_info.interrupt_reason ==
++                  download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED) {
++    item->SetUserData(kNicheBlockedOnTargetKey,
++                      std::make_unique<NicheBlockedOnTarget>());
++  }
+   if (item) {
+     DownloadItemModel model(item);
+     model.DetermineAndSetShouldPreferOpeningInBrowser(
 diff --git a/chrome/browser/download/chrome_download_manager_delegate.h b/chrome/browser/download/chrome_download_manager_delegate.h
 --- a/chrome/browser/download/chrome_download_manager_delegate.h
 +++ b/chrome/browser/download/chrome_download_manager_delegate.h
-@@ -129,6 +129,20 @@
+@@ -129,6 +129,24 @@
    bool DetermineDownloadTarget(
        download::DownloadItem* item,
        download::DownloadTargetCallback* callback) override;
@@ -342,6 +370,10 @@ diff --git a/chrome/browser/download/chrome_download_manager_delegate.h b/chrome
 +  // Whether DetermineEmbedderChosenTarget gave `item` its path, for
 +  // DownloadTargetDeterminer.
 +  static bool HasEmbedderChosenPath(const download::DownloadItem* item);
++  // Niche: whether target determination blocked `item` (FILE_BLOCKED). One that
++  // got no path at all, as an insecure download Chrome drops (SILENT_BLOCK),
++  // ends as a plain cancel, so the embedder couldn't tell it from the person's.
++  static bool WasBlockedOnTarget(const download::DownloadItem* item);
    bool ShouldAutomaticallyOpenFile(const GURL& url,
                                     const base::FilePath& path) override;
    bool ShouldAutomaticallyOpenFileByPolicy(const GURL& url,
