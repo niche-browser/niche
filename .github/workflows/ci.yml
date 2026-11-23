@@ -134,9 +134,14 @@ jobs:
       - name: NicheCore tests (Intel slice)
         working-directory: Packages/NicheCore
         run: |
-          swift build --build-tests --arch x86_64
-          BUNDLE="$(swift build --arch x86_64 --show-bin-path)/NicheCoreTests.xctest"
-          lipo -archs "$BUNDLE/Contents/MacOS/NicheCoreTests"
+          swift build --build-tests --arch x86_64 --scratch-path .build/intel
+          # Where the bundle lands depends on SwiftPM's build system: the one built for x86_64.
+          BUNDLE=""
+          while IFS= read -r b; do
+            [ "$(lipo -archs "$b/Contents/MacOS/NicheCoreTests" 2>/dev/null)" = x86_64 ] && BUNDLE="$b"
+          done < <(find .build/intel -name NicheCoreTests.xctest -type d)
+          [ -n "$BUNDLE" ] || { echo "No x86_64 NicheCoreTests.xctest" >&2; exit 1; }
+          echo "$BUNDLE"
           arch -x86_64 "$(xcrun -f xctest)" "$BUNDLE"
 
       - name: Update from the latest release (Intel slice)
