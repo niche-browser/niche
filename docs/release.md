@@ -206,11 +206,13 @@ and one update feed for both CPUs, about twice the size of one CPU's app.
 - `build-shields.sh` builds the Rust filter engine for both targets and joins them.
 - `build.sh` builds Niche, its helper and the Dock tile for both CPUs in one `swift build`, and
   refuses a bundle with any executable that lacks a slice.
-- CI builds the universal app on Apple silicon and runs its Intel slice on GitHub's free Intel
-  runner (`macos-15-intel`): a scenario that must say "on x86_64" in niche.log, and the update
-  check. The release workflow runs the update check for both slices (the Intel one under
-  Rosetta) before it publishes. `NICHE_ARCH=x86_64 scripts/scenario.sh <name>` runs any
-  scenario as Intel on an Apple silicon Mac.
+- CI builds the universal app on Apple silicon and runs its Intel slice there under Rosetta: a
+  scenario that must say "on x86_64" in niche.log, and the update check. GitHub's free Intel
+  runner (`macos-15-intel`) runs NicheCore's tests natively; it can't run the app, being a VM
+  whose GPU Metal can't place (SwiftUI's renderer asserts "Target device architecture is nil"
+  and aborts; an Intel Mac has a GPU). The release workflow runs the update check for both
+  slices before it publishes. `NICHE_ARCH=x86_64 scripts/scenario.sh <name>` runs any scenario
+  as Intel on an Apple silicon Mac.
 
 ## The Chromium engine (CEF)
 
