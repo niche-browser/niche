@@ -121,9 +121,23 @@ jobs:
         env:
           NICHE_ARCH: x86_64
           NICHE_BUDGETS: report
-          # Rosetta translates Chromium at its first launch here: minutes on this runner.
+          # Rosetta translates Chromium at its first launch here: minutes on this runner; and
+          # translated code is slow, so waits last longer.
           NICHE_START_TIMEOUT: "300"
-        run: scripts/scenario.sh sleep-tabs
+          NICHE_PATIENCE: "4"
+        # Shields: the Rust engine, Chromium's request path, page scripts and hiding, on x86_64.
+        run: scripts/scenario.sh shields
+
+      # NicheCore's decisions compiled for x86_64 and run under Rosetta (the free Intel runner's
+      # newest Xcode is older than this one and doesn't compile the tests). SwiftPM's own test
+      # runner is arm64 only; Xcode's xctest has both slices and runs Swift Testing's tests.
+      - name: NicheCore tests (Intel slice)
+        working-directory: Packages/NicheCore
+        run: |
+          swift build --build-tests --arch x86_64
+          BUNDLE="$(swift build --arch x86_64 --show-bin-path)/NicheCoreTests.xctest"
+          lipo -archs "$BUNDLE/Contents/MacOS/NicheCoreTests"
+          arch -x86_64 "$(xcrun -f xctest)" "$BUNDLE"
 
       - name: Update from the latest release (Intel slice)
         timeout-minutes: 15
@@ -131,6 +145,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NICHE_ARCH: x86_64
           NICHE_START_TIMEOUT: "300"
+          NICHE_PATIENCE: "4"
         run: scripts/update-from-release.sh
 
       - name: Keep scenario logs
@@ -140,25 +155,3 @@ jobs:
           name: scenario-logs
           path: build/scenarios
           if-no-files-found: ignore
-
-  # NicheCore's decisions on an Intel Mac (GitHub's free x86_64 runner), natively: the models,
-  # file formats and rules the universal app's Intel slice runs. The app itself can't be driven
-  # there: the runner is a VM whose GPU Metal can't place, and SwiftUI's renderer aborts on it
-  # ("Target device architecture is nil", 23 Nov 2026); the build job runs the Intel slice under
-  # Rosetta instead.
-  intel:
-    name: Intel (NicheCore)
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v7
-
-      # The newest Xcode the image has, as the Apple silicon runner's build uses.
-      - name: Pick Xcode
-        run: |
-          XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
-          sudo xcode-select -s "$XCODE"
-          echo "$XCODE"; swift --version; uname -m
-
-      - name: NicheCore tests on x86_64
-        working-directory: Packages/NicheCore
-        run: swift test

@@ -219,6 +219,9 @@ ready "$PID" || problem "Niche did not start reading commands in ${NICHE_START_T
 sleep 2
 
 PACE=0.2
+# NICHE_PATIENCE=<n>: waits for a log line or helpers settling last n times longer (translated
+# code on a CI runner: the Intel slice under Rosetta).
+PATIENCE="${NICHE_PATIENCE:-1}"
 RSS_BUDGET=1500 MAXSTALL=1500 STALLS50=10 LAUNCHSTALL=1000 PERFCPU=0.1
 BASELINE=""
 
@@ -245,7 +248,7 @@ while IFS= read -r raw || [ -n "$raw" ]; do
       if [ "$2" = "baseline" ]; then BASELINE=$(helpers); echo "  helpers: baseline $BASELINE"
       else
         slack="${3:-1}"; now=$(helpers)
-        for _ in $(seq 1 25); do now=$(helpers); [ "$now" -le $((BASELINE + slack)) ] && break; sleep 0.2; done
+        for _ in $(seq 1 $((25 * PATIENCE))); do now=$(helpers); [ "$now" -le $((BASELINE + slack)) ] && break; sleep 0.2; done
         [ "$now" -le $((BASELINE + slack)) ] || problem "helper processes: $now, baseline $BASELINE (+$slack) after 5 s"
       fi ;;
     relaunch)
@@ -279,7 +282,7 @@ while IFS= read -r raw || [ -n "$raw" ]; do
       sleep 2 ;;
     expect-log)
       shift; re="$*"; found=""
-      for _ in $(seq 1 150); do grep -Eq "$re" "$DATA"/niche*.log "$OUT/stdout.log" 2>/dev/null && { found=1; break; }; sleep 0.2; done
+      for _ in $(seq 1 $((150 * PATIENCE))); do grep -Eq "$re" "$DATA"/niche*.log "$OUT/stdout.log" 2>/dev/null && { found=1; break; }; sleep 0.2; done
       [ -n "$found" ] || problem "no log line matching: $re" ;;
     reject-log)
       shift; re="$*"
