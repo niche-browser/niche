@@ -68,13 +68,20 @@ jobs:
         id: cef
         run: echo "version=$(sed -n 's/^CEF_VERSION="${CEF_VERSION:-\(.*\)}"$/\1/p' scripts/fetch-cef.sh)" >> "$GITHUB_OUTPUT"
 
+      # Both CEF builds and the universal framework joined from them (scripts/fetch-cef.sh).
       - name: Cache CEF
         uses: actions/cache@v6
         with:
-          path: vendor/cef
-          key: cef-${{ runner.arch }}-${{ steps.cef.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh') }}
+          path: |
+            vendor/cef
+            vendor/cef-other
+            vendor/cef-universal
+          key: cef-universal-${{ runner.arch }}-${{ steps.cef.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh') }}
 
-      - name: Build (debug, ad-hoc signed)
+      # Universal, as releases are: one app for Apple silicon and Intel.
+      - name: Build (debug, universal, ad-hoc signed)
+        env:
+          NICHE_UNIVERSAL: "1"
         run: scripts/build.sh debug
 
       - name: Verify bundle
@@ -103,6 +110,53 @@ jobs:
         timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
+        run: scripts/update-from-release.sh
+
+      # Blocking: the universal app's Intel slice, under Rosetta on this runner (the free Intel
+      # runner is a VM whose GPU Metal can't place, and SwiftUI's renderer aborts there; this one
+      # has a GPU). Every Niche the run starts must say "on x86_64" in niche.log. Budgets only
+      # report: Rosetta's timing is not an Intel Mac's.
+      - name: Scenario (Intel slice)
+        timeout-minutes: 15
+        env:
+          NICHE_ARCH: x86_64
+          NICHE_BUDGETS: report
+          # Rosetta translates Chromium at its first launch here: minutes on this runner; and
+          # translated code is slow, so waits last longer.
+          NICHE_START_TIMEOUT: "300"
+          NICHE_PATIENCE: "4"
+        # Shields: the Rust engine, Chromium's request path, page scripts and hiding, on x86_64.
+        run: scripts/scenario.sh shields
+
+      # NicheCore's decisions compiled for x86_64 and run under Rosetta (the free Intel runner's
+      # newest Xcode is older than this one and doesn't compile the tests). SwiftPM's own test
+      # runner is arm64 only; Xcode's xctest has both slices and runs Swift Testing's tests.
+      - name: NicheCore tests (Intel slice)
+        working-directory: Packages/NicheCore
+        run: |
+          swift build --build-tests --arch x86_64 --scratch-path .build/intel --build-system swiftbuild
+          # Where the bundle lands and what it is called depend on SwiftPM's build system
+          # (NicheCoreTests.xctest, or NicheCorePackageTests.xctest): the one built for x86_64.
+          BUNDLE=""
+          while IFS= read -r b; do
+            name="$(basename "$b" .xctest)"
+            [ "$(lipo -archs "$b/Contents/MacOS/$name" 2>/dev/null)" = x86_64 ] && BUNDLE="$b"
+          done < <(find .build/intel -name '*.xctest' -type d)
+          [ -n "$BUNDLE" ] || { echo "No x86_64 test bundle" >&2; exit 1; }
+          echo "$BUNDLE"
+          arch -x86_64 "$(xcrun -f xctest)" "$BUNDLE" 2>&1 | tee "$RUNNER_TEMP/intel-tests.log"
+          # A bundle xctest finds no Swift Testing tests in passes with none run: that proves nothing.
+          ran="$(sed -n 's/.*Test run with \([0-9][0-9]*\) tests.*passed.*/\1/p' "$RUNNER_TEMP/intel-tests.log" | tail -1)"
+          [ "${ran:-0}" -gt 0 ] || { echo "No NicheCore test ran as x86_64" >&2; exit 1; }
+          echo "$ran NicheCore tests passed as x86_64"
+
+      - name: Update from the latest release (Intel slice)
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NICHE_ARCH: x86_64
+          NICHE_START_TIMEOUT: "300"
+          NICHE_PATIENCE: "4"
         run: scripts/update-from-release.sh
 
       - name: Keep scenario logs

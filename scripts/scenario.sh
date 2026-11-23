@@ -8,7 +8,8 @@
 #   scripts/scenario.sh fifty-tabs        one scenario
 #   scripts/scenario.sh all               every scenario, one after another
 #
-# NICHE_APP (default build/Niche.app) picks the build; NICHE_FLAGS (FeatureFlags) is passed on, so
+# NICHE_APP (default build/Niche.app) picks the build; NICHE_ARCH=x86_64 runs a universal one's
+# Intel slice (under Rosetta on Apple silicon; its niche.log says "on x86_64"); NICHE_FLAGS (FeatureFlags) is passed on, so
 # NICHE_FLAGS=backdrop=material runs the NSVisualEffectView path. Scenarios marked
 # "requires screen" (they take over a Space) run only with NICHE_SCENARIO_SCREEN=1, as in CI.
 # NICHE_BUDGETS=report (the nightly on GitHub's runners) prints budgets and snapshot differences
@@ -173,11 +174,13 @@ while read -r _ a; do app_args+=("$(expand "$a")"); done < <(grep '^arg ' "$FILE
 while read -r _ f; do mkdir -p "$DATA/Extensions" && cp -R "$(expand "$f")" "$DATA/Extensions/"; done < <(grep '^extension ' "$FILE")
 
 # $1: the app; the rest goes on its command line. Its output goes on stdout.log.
+# NICHE_CHROMIUM_ARGS: switches for Chromium on every launch, the relaunched and updated ones too
+# (CI's Intel runner, a VM with no usable GPU, runs with --disable-gpu).
 launch() {
   local app="$1"; shift
   NICHE_DATA_DIR="$DATA" NICHE_COMMAND_FILE="$CMD" NICHE_HITCH_LOG="$HITCH" NICHE_TEST_BACKGROUND=1 NICHE_WEBKIT_HOSTS=localhost \
     NICHE_ARC_DIR="$FIXTURES/Arc" NICHE_FLAGS="${NICHE_FLAGS:-}" \
-    "${app_env[@]}" "$app/Contents/MacOS/Niche" "$@" >>"$OUT/stdout.log" 2>&1 &
+    "${app_env[@]}" ${NICHE_ARCH:+arch "-$NICHE_ARCH"} "$app/Contents/MacOS/Niche" "$@" ${NICHE_CHROMIUM_ARGS:-} >>"$OUT/stdout.log" 2>&1 &
   PID=$!
   PIDS+=("$PID")
 }
@@ -205,15 +208,20 @@ send() { printf '%s\n' "$1" >> "$CMD"; }
 helpers() { pgrep -P "$PID" 2>/dev/null | wc -l | tr -d ' '; }
 alive() { kill -0 "$PID" 2>/dev/null; }
 
-# Ready once Niche reads the command file (it empties the file when it starts reading).
+# Ready once Niche reads the command file (it empties the file when it starts reading), within
+# NICHE_START_TIMEOUT seconds (30; the first launch of the Intel slice under Rosetta on a CI runner
+# waits for Rosetta to translate Chromium, minutes).
 ready() {
-  for _ in $(seq 1 150); do grep -q "pid $1 reads commands" "$DATA"/niche*.log 2>/dev/null && return 0; sleep 0.2; done
+  for _ in $(seq 1 $(( ${NICHE_START_TIMEOUT:-30} * 5 ))); do grep -q "pid $1 reads commands" "$DATA"/niche*.log 2>/dev/null && return 0; sleep 0.2; done
   return 1
 }
-ready "$PID" || problem "Niche did not start reading commands in 30 s"
+ready "$PID" || problem "Niche did not start reading commands in ${NICHE_START_TIMEOUT:-30} s"
 sleep 2
 
 PACE=0.2
+# NICHE_PATIENCE=<n>: waits for a log line or helpers settling last n times longer (translated
+# code on a CI runner: the Intel slice under Rosetta).
+PATIENCE="${NICHE_PATIENCE:-1}"
 RSS_BUDGET=1500 MAXSTALL=1500 STALLS50=10 LAUNCHSTALL=1000 PERFCPU=0.1
 BASELINE=""
 
@@ -240,7 +248,7 @@ while IFS= read -r raw || [ -n "$raw" ]; do
       if [ "$2" = "baseline" ]; then BASELINE=$(helpers); echo "  helpers: baseline $BASELINE"
       else
         slack="${3:-1}"; now=$(helpers)
-        for _ in $(seq 1 25); do now=$(helpers); [ "$now" -le $((BASELINE + slack)) ] && break; sleep 0.2; done
+        for _ in $(seq 1 $((25 * PATIENCE))); do now=$(helpers); [ "$now" -le $((BASELINE + slack)) ] && break; sleep 0.2; done
         [ "$now" -le $((BASELINE + slack)) ] || problem "helper processes: $now, baseline $BASELINE (+$slack) after 5 s"
       fi ;;
     relaunch)
@@ -256,7 +264,7 @@ while IFS= read -r raw || [ -n "$raw" ]; do
       done
       [ -n "$PID" ] || { problem "no new Niche after relaunch"; PID="$old"; break; }
       PIDS+=("$PID"); echo "  relaunched: pid $PID"
-      ready "$PID" || problem "the relaunched Niche did not read commands in 30 s"
+      ready "$PID" || problem "the relaunched Niche did not read commands in ${NICHE_START_TIMEOUT:-30} s"
       sleep 2 ;;
     upgrade)
       count_faults
@@ -270,11 +278,11 @@ while IFS= read -r raw || [ -n "$raw" ]; do
       launch "$APP"
       v() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
       echo "  updated: $(v "$FIRST_APP") → $(v "$APP"), pid $PID"
-      ready "$PID" || problem "the updated Niche did not read commands in 30 s"
+      ready "$PID" || problem "the updated Niche did not read commands in ${NICHE_START_TIMEOUT:-30} s"
       sleep 2 ;;
     expect-log)
       shift; re="$*"; found=""
-      for _ in $(seq 1 150); do grep -Eq "$re" "$DATA"/niche*.log "$OUT/stdout.log" 2>/dev/null && { found=1; break; }; sleep 0.2; done
+      for _ in $(seq 1 $((150 * PATIENCE))); do grep -Eq "$re" "$DATA"/niche*.log "$OUT/stdout.log" 2>/dev/null && { found=1; break; }; sleep 0.2; done
       [ -n "$found" ] || problem "no log line matching: $re" ;;
     reject-log)
       shift; re="$*"
@@ -356,6 +364,11 @@ if [ "$PID" = "${PIDS[0]}" ] && ! alive; then
 fi
 count_faults
 [ "$FAULTS" -eq 0 ] || problem "$FAULTS fault line(s) in niche.log (faults.txt)"
+# The slice asked for is the one that ran, in every Niche the run started (a relaunch too).
+if [ -n "${NICHE_ARCH:-}" ]; then
+  other=$(grep -h 'starts, pid' "$DATA"/niche*.log 2>/dev/null | grep -vc " on $NICHE_ARCH")
+  [ "$other" -eq 0 ] || problem "$other Niche(s) started on another CPU than $NICHE_ARCH"
+fi
 
 # Chromium trusted every profile's protected settings. When it can't check them (a key it can no
 # longer read: Chromium 158, 0.1.11) it resets them, which forgets every extension; the same key

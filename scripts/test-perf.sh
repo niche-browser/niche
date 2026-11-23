@@ -8,7 +8,7 @@ trap 'rm -rf "$TEST_DIR"' EXIT
 xcrun swiftc -swift-version 5 -parse-as-library ${NICHE_TEST_SWIFTC_FLAGS:-} \
   Packages/NicheCore/Sources/NicheCore/Perf/*.swift Sources/Niche/Perf/Perf.swift Sources/Niche/Perf/MainLoopObserver.swift \
   Sources/Niche/Perf/PerfSamplers.swift Sources/Niche/Perf/PerfFiles.swift Sources/Niche/Perf/PerfRecorder.swift \
-  Sources/Niche/Services/NicheLog.swift Sources/Niche/Services/Persistence.swift \
+  Sources/Niche/Services/NicheLog.swift Packages/NicheCore/Sources/NicheCore/RunningCPU.swift Sources/Niche/Services/Persistence.swift \
   Tests/PerfTests.swift -o "$TEST_DIR/perf-tests"
 "$TEST_DIR/perf-tests"
 [ -z "${NICHE_TEST_KEEP:-}" ] || cp "$TEST_DIR/perf-tests" "$NICHE_TEST_KEEP/"

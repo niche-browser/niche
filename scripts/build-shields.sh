@@ -2,7 +2,7 @@
 # Builds Shields, Niche's filter engine (Sources/NicheShields, Rust), into
 # vendor/shields/libniche_shields.a, which NicheCEF and NicheHelper link. Needs a Rust toolchain
 # (https://rustup.rs). Cargo decides what is stale, so calling this before every build is cheap.
-#   scripts/build-shields.sh          build for this Mac's architecture
+#   scripts/build-shields.sh          build for arm64 and x86_64, joined into one library
 #   scripts/build-shields.sh --test   run the engine's own tests too
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,7 +20,18 @@ export CARGO_TARGET_DIR="$ROOT/.build/shields"
 export MACOSX_DEPLOYMENT_TARGET=14.0
 cd Sources/NicheShields
 if [ "${1:-}" = "--test" ]; then cargo test --release --locked --quiet; fi
-cargo build --release --locked --quiet
+# Both CPUs every time: one library links into either slice of a universal app (NICHE_UNIVERSAL),
+# and a build for this Mac alone links it too.
+TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
+if command -v rustup >/dev/null 2>&1; then
+  INSTALLED="$(rustup target list --installed)"
+  for t in "${TARGETS[@]}"; do grep -qx "$t" <<< "$INSTALLED" || rustup target add "$t" >/dev/null; done
+fi
+LIBS=()
+for t in "${TARGETS[@]}"; do
+  cargo build --release --locked --quiet --target "$t"
+  LIBS+=("$CARGO_TARGET_DIR/$t/release/libniche_shields.a")
+done
 mkdir -p "$OUT"
-LIB="$CARGO_TARGET_DIR/release/libniche_shields.a"
-if ! cmp -s "$LIB" "$OUT/libniche_shields.a"; then cp "$LIB" "$OUT/libniche_shields.a"; fi
+lipo -create "${LIBS[@]}" -output "$CARGO_TARGET_DIR/libniche_shields.a"
+if ! cmp -s "$CARGO_TARGET_DIR/libniche_shields.a" "$OUT/libniche_shields.a"; then cp "$CARGO_TARGET_DIR/libniche_shields.a" "$OUT/libniche_shields.a"; fi

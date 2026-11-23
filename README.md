@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="macOS 14+, Apple silicon" src="docs/badges/macos.svg">
+  <img alt="macOS 14+, Apple silicon and Intel" src="docs/badges/macos.svg">
   <img alt="Chromium 156" src="docs/badges/chromium.svg">
   <a href="https://github.com/niche-browser/niche/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/niche-browser/niche/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT licence" src="docs/badges/licence.svg"></a>
@@ -87,6 +87,8 @@ a vulnerability, see [SECURITY.md](SECURITY.md).
 ## Build from source
 
 You need macOS 14 or later on Apple silicon, Xcode 16 or later, and CMake (`brew install cmake`).
+`scripts/build.sh` builds for this Mac's CPU; `NICHE_UNIVERSAL=1 scripts/build.sh` builds the
+universal app releases ship (Apple silicon and Intel in one).
 
 ```sh
 scripts/dev.sh            # debug NicheDev.app, rebuilt and relaunched on every save

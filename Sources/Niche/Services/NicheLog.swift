@@ -34,7 +34,7 @@ enum NicheLog {
             if high >= 0 { handle = FileHandle(fileDescriptor: high, closeOnDealloc: true) }
         }
         let info = Bundle.main.infoDictionary
-        note("Niche \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) starts, pid \(getpid())\(owner ? "" : ", another Niche owns the data folder")")
+        note("Niche \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) starts, pid \(getpid()) on \(RunningCPU.current)\(owner ? "" : ", another Niche owns the data folder")")
     }
 
     /// Faults this session (the tests read it; persistence reports from its own queue).
