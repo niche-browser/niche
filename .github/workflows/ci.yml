@@ -117,17 +117,20 @@ jobs:
       # has a GPU). Every Niche the run starts must say "on x86_64" in niche.log. Budgets only
       # report: Rosetta's timing is not an Intel Mac's.
       - name: Scenario (Intel slice)
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           NICHE_ARCH: x86_64
           NICHE_BUDGETS: report
+          # Rosetta translates Chromium at its first launch here: minutes on this runner.
+          NICHE_START_TIMEOUT: "300"
         run: scripts/scenario.sh sleep-tabs
 
       - name: Update from the latest release (Intel slice)
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           GH_TOKEN: ${{ github.token }}
           NICHE_ARCH: x86_64
+          NICHE_START_TIMEOUT: "300"
         run: scripts/update-from-release.sh
 
       - name: Keep scenario logs

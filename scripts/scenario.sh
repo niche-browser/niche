@@ -208,12 +208,14 @@ send() { printf '%s\n' "$1" >> "$CMD"; }
 helpers() { pgrep -P "$PID" 2>/dev/null | wc -l | tr -d ' '; }
 alive() { kill -0 "$PID" 2>/dev/null; }
 
-# Ready once Niche reads the command file (it empties the file when it starts reading).
+# Ready once Niche reads the command file (it empties the file when it starts reading), within
+# NICHE_START_TIMEOUT seconds (30; the first launch of the Intel slice under Rosetta on a CI runner
+# waits for Rosetta to translate Chromium, minutes).
 ready() {
-  for _ in $(seq 1 150); do grep -q "pid $1 reads commands" "$DATA"/niche*.log 2>/dev/null && return 0; sleep 0.2; done
+  for _ in $(seq 1 $(( ${NICHE_START_TIMEOUT:-30} * 5 ))); do grep -q "pid $1 reads commands" "$DATA"/niche*.log 2>/dev/null && return 0; sleep 0.2; done
   return 1
 }
-ready "$PID" || problem "Niche did not start reading commands in 30 s"
+ready "$PID" || problem "Niche did not start reading commands in ${NICHE_START_TIMEOUT:-30} s"
 sleep 2
 
 PACE=0.2
@@ -259,7 +261,7 @@ while IFS= read -r raw || [ -n "$raw" ]; do
       done
       [ -n "$PID" ] || { problem "no new Niche after relaunch"; PID="$old"; break; }
       PIDS+=("$PID"); echo "  relaunched: pid $PID"
-      ready "$PID" || problem "the relaunched Niche did not read commands in 30 s"
+      ready "$PID" || problem "the relaunched Niche did not read commands in ${NICHE_START_TIMEOUT:-30} s"
       sleep 2 ;;
     upgrade)
       count_faults
@@ -273,7 +275,7 @@ while IFS= read -r raw || [ -n "$raw" ]; do
       launch "$APP"
       v() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
       echo "  updated: $(v "$FIRST_APP") → $(v "$APP"), pid $PID"
-      ready "$PID" || problem "the updated Niche did not read commands in 30 s"
+      ready "$PID" || problem "the updated Niche did not read commands in ${NICHE_START_TIMEOUT:-30} s"
       sleep 2 ;;
     expect-log)
       shift; re="$*"; found=""
