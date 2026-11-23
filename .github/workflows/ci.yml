@@ -134,7 +134,9 @@ jobs:
   # The universal app's Intel slice on an Intel Mac (GitHub's free x86_64 runner): it starts,
   # loads pages with its helpers, sleeps tabs and quits cleanly (every Niche the run starts must
   # say "on x86_64" in niche.log), and the latest release's profile survives the update. Budgets
-  # only report: they were set on Apple silicon.
+  # only report: they were set on Apple silicon. The runner is a VM whose GPU Metal can't place
+  # ("Target device architecture is nil" aborted Niche, 23 Nov 2026), so Chromium renders in
+  # software there (--disable-gpu); an Intel Mac has a GPU.
   intel:
     name: Intel
     needs: build
@@ -157,6 +159,7 @@ jobs:
         env:
           NICHE_ARCH: x86_64
           NICHE_BUDGETS: report
+          NICHE_CHROMIUM_ARGS: --disable-gpu
         run: scripts/scenario.sh sleep-tabs
 
       - name: Update from the latest release
@@ -164,7 +167,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NICHE_ARCH: x86_64
+          NICHE_CHROMIUM_ARGS: --disable-gpu
         run: scripts/update-from-release.sh
+
+      - name: Keep crash reports
+        if: failure()
+        run: mkdir -p build/scenarios/crashes && cp ~/Library/Logs/DiagnosticReports/*.ips build/scenarios/crashes/ 2>/dev/null || true
 
       - name: Keep scenario logs
         if: always()
