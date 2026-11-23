@@ -8,7 +8,8 @@
 #   scripts/scenario.sh fifty-tabs        one scenario
 #   scripts/scenario.sh all               every scenario, one after another
 #
-# NICHE_APP (default build/Niche.app) picks the build; NICHE_FLAGS (FeatureFlags) is passed on, so
+# NICHE_APP (default build/Niche.app) picks the build; NICHE_ARCH=x86_64 runs a universal one's
+# Intel slice (under Rosetta on Apple silicon; its niche.log says "on x86_64"); NICHE_FLAGS (FeatureFlags) is passed on, so
 # NICHE_FLAGS=backdrop=material runs the NSVisualEffectView path. Scenarios marked
 # "requires screen" (they take over a Space) run only with NICHE_SCENARIO_SCREEN=1, as in CI.
 # NICHE_BUDGETS=report (the nightly on GitHub's runners) prints budgets and snapshot differences
@@ -177,7 +178,7 @@ launch() {
   local app="$1"; shift
   NICHE_DATA_DIR="$DATA" NICHE_COMMAND_FILE="$CMD" NICHE_HITCH_LOG="$HITCH" NICHE_TEST_BACKGROUND=1 NICHE_WEBKIT_HOSTS=localhost \
     NICHE_ARC_DIR="$FIXTURES/Arc" NICHE_FLAGS="${NICHE_FLAGS:-}" \
-    "${app_env[@]}" "$app/Contents/MacOS/Niche" "$@" >>"$OUT/stdout.log" 2>&1 &
+    "${app_env[@]}" ${NICHE_ARCH:+arch "-$NICHE_ARCH"} "$app/Contents/MacOS/Niche" "$@" >>"$OUT/stdout.log" 2>&1 &
   PID=$!
   PIDS+=("$PID")
 }
@@ -356,6 +357,11 @@ if [ "$PID" = "${PIDS[0]}" ] && ! alive; then
 fi
 count_faults
 [ "$FAULTS" -eq 0 ] || problem "$FAULTS fault line(s) in niche.log (faults.txt)"
+# The slice asked for is the one that ran, in every Niche the run started (a relaunch too).
+if [ -n "${NICHE_ARCH:-}" ]; then
+  other=$(grep -h 'starts, pid' "$DATA"/niche*.log 2>/dev/null | grep -vc " on $NICHE_ARCH")
+  [ "$other" -eq 0 ] || problem "$other Niche(s) started on another CPU than $NICHE_ARCH"
+fi
 
 # Chromium trusted every profile's protected settings. When it can't check them (a key it can no
 # longer read: Chromium 158, 0.1.11) it resets them, which forgets every extension; the same key

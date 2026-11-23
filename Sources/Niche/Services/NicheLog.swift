@@ -34,7 +34,19 @@ enum NicheLog {
             if high >= 0 { handle = FileHandle(fileDescriptor: high, closeOnDealloc: true) }
         }
         let info = Bundle.main.infoDictionary
-        note("Niche \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) starts, pid \(getpid())\(owner ? "" : ", another Niche owns the data folder")")
+        note("Niche \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) starts, pid \(getpid()) on \(cpu)\(owner ? "" : ", another Niche owns the data folder")")
+    }
+
+    /// The slice of the universal app that runs: arm64, or x86_64 on an Intel Mac or under Rosetta.
+    private static var cpu: String {
+        #if arch(arm64)
+        return "arm64"
+        #else
+        var translated: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        let rosetta = sysctlbyname("sysctl.proc_translated", &translated, &size, nil, 0) == 0 && translated == 1
+        return rosetta ? "x86_64 (Rosetta)" : "x86_64"
+        #endif
     }
 
     /// Faults this session (the tests read it; persistence reports from its own queue).

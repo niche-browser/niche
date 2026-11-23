@@ -193,6 +193,25 @@ are the controls. Details and Arc's original are in `docs/arc-reverse-engineerin
   the automatic restart) against a local appcast made with `NICHE_UPDATE_URL=… scripts/appcast.sh`.
 - Copies from before the updater (0.1.0, 0.1.1) update once by hand: rerun the install line.
 
+## One app for Apple silicon and Intel
+
+Releases are universal (`NICHE_UNIVERSAL=1`, set by the release workflow and CI): one download
+and one update feed for both CPUs, about twice the size of one CPU's app.
+
+- `fetch-cef.sh` downloads both CEF builds of the pinned release (`vendor/cef`, `vendor/cef-other`)
+  and joins them into `vendor/cef-universal`: the two builds differ only in four Mach-O files,
+  which are lipo'd, and in the V8 snapshot and WebUI code cache, which Chromium names after the
+  CPU (`v8_context_snapshot.arm64.bin`, `….x86_64.bin`), so both stay. It stops if anything else
+  differs. The C++ wrapper is built once per CPU and joined.
+- `build-shields.sh` builds the Rust filter engine for both targets and joins them.
+- `build.sh` builds Niche, its helper and the Dock tile for both CPUs in one `swift build`, and
+  refuses a bundle with any executable that lacks a slice.
+- CI builds the universal app on Apple silicon and runs its Intel slice on GitHub's free Intel
+  runner (`macos-15-intel`): a scenario that must say "on x86_64" in niche.log, and the update
+  check. The release workflow runs the update check for both slices (the Intel one under
+  Rosetta) before it publishes. `NICHE_ARCH=x86_64 scripts/scenario.sh <name>` runs any
+  scenario as Intel on an Apple silicon Mac.
+
 ## The Chromium engine (CEF)
 
 Niche ships its own CEF build, not Spotify's prebuilt one: Spotify builds leave out
@@ -252,6 +271,4 @@ update also run the engine check in [release-checklist.md](release-checklist.md)
 
 - **Homebrew.** A cask (`brew install --cask niche`) pointing at the DMG and
   `SHA256SUMS.txt`.
-- **Intel.** CEF is published for `macosx64` too (above). Still missing: an x86_64
-  `swift build` in `scripts/build.sh`, a separate Intel DMG from the release workflow
-  and its own Sparkle feed.
+

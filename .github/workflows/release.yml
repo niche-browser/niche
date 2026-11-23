@@ -54,8 +54,11 @@ jobs:
       - name: Cache CEF
         uses: actions/cache@v6
         with:
-          path: vendor/cef
-          key: cef-${{ runner.arch }}-${{ steps.cef.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh') }}
+          path: |
+            vendor/cef
+            vendor/cef-other
+            vendor/cef-universal
+          key: cef-universal-${{ runner.arch }}-${{ steps.cef.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh') }}
 
       - name: Import signing certificate
         id: cert
@@ -89,6 +92,8 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
           NICHE_GOOGLE_API_KEY: ${{ secrets.NICHE_GOOGLE_API_KEY }}
+          # One app for Apple silicon and Intel.
+          NICHE_UNIVERSAL: "1"
         run: scripts/release.sh
 
       # Nothing is published unless the latest release's profile survives the update to this
@@ -97,6 +102,14 @@ jobs:
         timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
+        run: scripts/update-from-release.sh
+
+      # The same as Intel (Rosetta on this runner), once the latest release has an Intel slice.
+      - name: Update from the latest release (Intel)
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NICHE_ARCH: x86_64
         run: scripts/update-from-release.sh
 
       - name: Keep the update test's logs
@@ -120,7 +133,7 @@ jobs:
           SIGNED: ${{ steps.cert.outputs.signed == 'true' }}
         run: |
           NOTES="$RUNNER_TEMP/notes.md"
-          echo "Niche ${NICHE_VERSION} for macOS 14 and later (Apple silicon)." > "$NOTES"
+          echo "Niche ${NICHE_VERSION} for macOS 14 and later, Apple silicon and Intel." > "$NOTES"
           echo >> "$NOTES"
           # Unsigned builds stay regular releases: releases/latest (the website and
           # scripts/install.sh) skips pre-releases.

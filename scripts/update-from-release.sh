@@ -31,6 +31,14 @@ else
   PREVIOUS="$WORK/release/Niche.app"
 fi
 
+# NICHE_ARCH=x86_64 runs both as Intel (scenario.sh). A previous release with no slice for that
+# CPU (Apple silicon only, before 0.1.14) has nothing to update from there.
+CPU="${NICHE_ARCH:-$(uname -m)}"
+if ! lipo -archs "$PREVIOUS/Contents/MacOS/Niche" | tr ' ' '\n' | grep -qx "$CPU"; then
+  echo "upgrade: skipped (the previous release has no $CPU slice: $(lipo -archs "$PREVIOUS/Contents/MacOS/Niche"))"
+  exit 0
+fi
+
 for side in previous new; do
   src="$PREVIOUS"; [ "$side" = new ] && src="$NEW"
   ditto "$src" "$WORK/$side/Niche.app"

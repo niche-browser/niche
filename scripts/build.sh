@@ -8,6 +8,9 @@
 #                               adds the passkey entitlements the profile grants
 #   NICHE_INSTALL_DIR=<dir> scripts/build.sh
 #                               also copies the app to <dir>/Niche.app
+#   NICHE_UNIVERSAL=1 scripts/build.sh
+#                               one app for Apple silicon and Intel (releases and CI do this);
+#                               otherwise it is built for this Mac's CPU only
 # Dev builds are version 0.0.0-dev and stay unregistered with LaunchServices, so
 # opening Niche (or a niche:// link) always picks the installed release.
 set -euo pipefail
@@ -22,8 +25,11 @@ scripts/fetch-sparkle.sh
 # Shields, the filter engine (Rust): vendor/shields/libniche_shields.a, which the app links.
 scripts/build-shields.sh
 
-swift build -c "$CONFIG"
-BIN="$(swift build -c "$CONFIG" --show-bin-path)"
+# Universal: one build for both CPUs (SwiftPM joins each product with lipo), so Niche, its helper
+# and the Dock tile run on Apple silicon and Intel alike.
+if [ "${NICHE_UNIVERSAL:-0}" = 1 ]; then SWIFT_ARCHS=(--arch arm64 --arch x86_64); else SWIFT_ARCHS=(); fi
+swift build -c "$CONFIG" ${SWIFT_ARCHS[@]+"${SWIFT_ARCHS[@]}"}
+BIN="$(swift build -c "$CONFIG" ${SWIFT_ARCHS[@]+"${SWIFT_ARCHS[@]}"} --show-bin-path)"
 
 # Stage the bundle, then sync it into place so the existing Niche.app directory
 # keeps its identity (LaunchServices otherwise launches duplicate instances).
@@ -51,6 +57,7 @@ cp resources/Niche.sdef "$APP/Contents/Resources/Niche.sdef"
 [ -d resources/fonts ] && cp -R resources/fonts "$APP/Contents/Resources/fonts"
 
 FRAMEWORK_SRC="$ROOT/vendor/cef/Release/Chromium Embedded Framework.framework"
+[ "${NICHE_UNIVERSAL:-0}" = 1 ] && FRAMEWORK_SRC="$ROOT/vendor/cef-universal/Chromium Embedded Framework.framework"
 cp -R "$FRAMEWORK_SRC" "$APP/Contents/Frameworks/"
 # Sparkle's XPC services are only for sandboxed apps; Niche uses Autoupdate and Updater.app.
 ditto "$ROOT/vendor/sparkle/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
@@ -138,6 +145,15 @@ fi
 sign "$APP" "$APP_ENTITLEMENTS"
 if [ "$IDENTITY" != "-" ]; then
   codesign --verify --deep --strict --verbose=2 "$APP"
+fi
+
+# Every executable in the bundle runs on each CPU it was built for (a slice missing from one
+# library would only show on that CPU, as a crash at launch).
+if [ "${NICHE_UNIVERSAL:-0}" = 1 ]; then
+  while IFS= read -r -d '' f; do
+    archs="$(lipo -archs "$f" 2>/dev/null)" || continue
+    [ "$(tr ' ' '\n' <<< "$archs" | sort | xargs)" = "arm64 x86_64" ] || { echo "$f is $archs, not arm64 and x86_64" >&2; exit 1; }
+  done < <(find "$APP" -type f -perm +111 -print0)
 fi
 
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister

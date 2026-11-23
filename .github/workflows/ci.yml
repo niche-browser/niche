@@ -68,13 +68,20 @@ jobs:
         id: cef
         run: echo "version=$(sed -n 's/^CEF_VERSION="${CEF_VERSION:-\(.*\)}"$/\1/p' scripts/fetch-cef.sh)" >> "$GITHUB_OUTPUT"
 
+      # Both CEF builds and the universal framework joined from them (scripts/fetch-cef.sh).
       - name: Cache CEF
         uses: actions/cache@v6
         with:
-          path: vendor/cef
-          key: cef-${{ runner.arch }}-${{ steps.cef.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh') }}
+          path: |
+            vendor/cef
+            vendor/cef-other
+            vendor/cef-universal
+          key: cef-universal-${{ runner.arch }}-${{ steps.cef.outputs.version }}-${{ hashFiles('scripts/fetch-cef.sh') }}
 
-      - name: Build (debug, ad-hoc signed)
+      # Universal, as releases are: one app for Apple silicon and Intel.
+      - name: Build (debug, universal, ad-hoc signed)
+        env:
+          NICHE_UNIVERSAL: "1"
         run: scripts/build.sh debug
 
       - name: Verify bundle
@@ -110,5 +117,59 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: scenario-logs
+          path: build/scenarios
+          if-no-files-found: ignore
+
+      # The same app for the Intel job.
+      - name: Pack the app
+        run: ditto -c -k --keepParent build/Niche.app build/Niche-universal.zip
+
+      - name: Keep the app
+        uses: actions/upload-artifact@v7
+        with:
+          name: niche-universal
+          path: build/Niche-universal.zip
+          retention-days: 3
+
+  # The universal app's Intel slice on an Intel Mac (GitHub's free x86_64 runner): it starts,
+  # loads pages with its helpers, sleeps tabs and quits cleanly (every Niche the run starts must
+  # say "on x86_64" in niche.log), and the latest release's profile survives the update. Budgets
+  # only report: they were set on Apple silicon.
+  intel:
+    name: Intel
+    needs: build
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: niche-universal
+          path: build
+
+      - name: Unpack the app
+        run: |
+          ditto -x -k build/Niche-universal.zip build
+          lipo -archs build/Niche.app/Contents/MacOS/Niche
+
+      - name: Scenario
+        timeout-minutes: 10
+        env:
+          NICHE_ARCH: x86_64
+          NICHE_BUDGETS: report
+        run: scripts/scenario.sh sleep-tabs
+
+      - name: Update from the latest release
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NICHE_ARCH: x86_64
+        run: scripts/update-from-release.sh
+
+      - name: Keep scenario logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scenario-logs-intel
           path: build/scenarios
           if-no-files-found: ignore
