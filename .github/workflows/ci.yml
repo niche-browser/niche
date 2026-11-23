@@ -134,7 +134,7 @@ jobs:
       - name: NicheCore tests (Intel slice)
         working-directory: Packages/NicheCore
         run: |
-          swift build --build-tests --arch x86_64 --scratch-path .build/intel
+          swift build --build-tests --arch x86_64 --scratch-path .build/intel --build-system swiftbuild
           # Where the bundle lands and what it is called depend on SwiftPM's build system
           # (NicheCoreTests.xctest, or NicheCorePackageTests.xctest): the one built for x86_64.
           BUNDLE=""
@@ -144,7 +144,11 @@ jobs:
           done < <(find .build/intel -name '*.xctest' -type d)
           [ -n "$BUNDLE" ] || { echo "No x86_64 test bundle" >&2; exit 1; }
           echo "$BUNDLE"
-          arch -x86_64 "$(xcrun -f xctest)" "$BUNDLE"
+          arch -x86_64 "$(xcrun -f xctest)" "$BUNDLE" 2>&1 | tee "$RUNNER_TEMP/intel-tests.log"
+          # A bundle xctest finds no Swift Testing tests in passes with none run: that proves nothing.
+          ran="$(sed -n 's/.*Test run with \([0-9][0-9]*\) tests.*passed.*/\1/p' "$RUNNER_TEMP/intel-tests.log" | tail -1)"
+          [ "${ran:-0}" -gt 0 ] || { echo "No NicheCore test ran as x86_64" >&2; exit 1; }
+          echo "$ran NicheCore tests passed as x86_64"
 
       - name: Update from the latest release (Intel slice)
         timeout-minutes: 15
