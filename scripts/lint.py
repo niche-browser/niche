@@ -43,6 +43,11 @@ gains a finding fails, one that loses one is reported so the baseline can come d
       for its own and never closed, and buttons lit up after a layout with the pointer elsewhere
       (22 Nov 2026). Ask `NSView.pointerIsOnShownPart` (or `shownPart`), which keeps to the
       view's bounds.
+  comment-in-continuation
+      A comment line inside a shell command continued with a backslash (scripts/, Tests/,
+      .github/workflows/). It ends the command there: what came before it runs alone and the rest
+      runs as a new command. scenario.sh's launch lost NICHE_DATA_DIR that way and the test copy
+      of Niche opened the Mac's own data folder (23 Nov 2026).
   perf-boundary
       The performance recorder stays removable (#91, docs/performance.md): outside its two folders
       only the files in PERF_CALLERS reach it, and inside Sources/Niche/Perf only PerfCEF.swift sees
@@ -148,7 +153,24 @@ def findings():
                             hit("core-platform-import", os.path.relpath(full, ROOT), i)
                         if os.path.relpath(full, ROOT).startswith(PERF_CORE) and NETWORK.search(code(line)):
                             hit("perf-no-network", os.path.relpath(full, ROOT), i)
+    for rel, full in shell_files():
+        with open(full, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        for i in range(1, len(lines)):
+            if lines[i - 1].rstrip().endswith("\\") and lines[i].lstrip().startswith("#"):
+                hit("comment-in-continuation", rel, i + 1)
     return out, where
+
+
+def shell_files():
+    """Shell scripts and the workflows' run blocks, by path from the repository."""
+    for top in ("scripts", "Tests", os.path.join(".github", "workflows")):
+        for dirpath, dirs, names in os.walk(os.path.join(ROOT, top)):
+            dirs[:] = [d for d in dirs if d not in ("Fixtures", "Snapshots")]
+            for n in sorted(names):
+                if n.endswith((".sh", ".yml")):
+                    full = os.path.join(dirpath, n)
+                    yield os.path.relpath(full, ROOT), full
 
 
 def load_baseline():
@@ -179,7 +201,7 @@ def main():
             rule, rel = key
             lines = ", ".join(map(str, where[key]))
             path = rel.split(":")[0]
-            print(f"{path if path.startswith('Packages/') else 'Sources/Niche/' + path}: {rule}: {n} (baseline {base.get(key, 0)}), lines {lines}")
+            print(f"{path if path.startswith(('Packages/', 'scripts/', 'Tests/', '.github/')) else 'Sources/Niche/' + path}: {rule}: {n} (baseline {base.get(key, 0)}), lines {lines}")
     lower = [(k, base[k], found.get(k, 0)) for k in sorted(base) if found.get(k, 0) < base[k]]
     for (rule, rel), was, now in lower:
         print(f"note: {rel}: {rule} down from {was} to {now}; run scripts/lint.py --update-baseline")
