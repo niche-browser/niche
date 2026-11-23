@@ -174,12 +174,12 @@ while read -r _ a; do app_args+=("$(expand "$a")"); done < <(grep '^arg ' "$FILE
 while read -r _ f; do mkdir -p "$DATA/Extensions" && cp -R "$(expand "$f")" "$DATA/Extensions/"; done < <(grep '^extension ' "$FILE")
 
 # $1: the app; the rest goes on its command line. Its output goes on stdout.log.
+# NICHE_CHROMIUM_ARGS: switches for Chromium on every launch, the relaunched and updated ones too
+# (CI's Intel runner, a VM with no usable GPU, runs with --disable-gpu).
 launch() {
   local app="$1"; shift
   NICHE_DATA_DIR="$DATA" NICHE_COMMAND_FILE="$CMD" NICHE_HITCH_LOG="$HITCH" NICHE_TEST_BACKGROUND=1 NICHE_WEBKIT_HOSTS=localhost \
     NICHE_ARC_DIR="$FIXTURES/Arc" NICHE_FLAGS="${NICHE_FLAGS:-}" \
-    # NICHE_CHROMIUM_ARGS: switches for Chromium on every launch, the relaunched and updated ones too
-    # (CI's Intel runner, a VM with no usable GPU, runs with --disable-gpu).
     "${app_env[@]}" ${NICHE_ARCH:+arch "-$NICHE_ARCH"} "$app/Contents/MacOS/Niche" "$@" ${NICHE_CHROMIUM_ARGS:-} >>"$OUT/stdout.log" 2>&1 &
   PID=$!
   PIDS+=("$PID")
